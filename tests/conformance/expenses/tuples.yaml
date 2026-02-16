@@ -1,0 +1,15 @@
+# Management chain: A manages B, B manages C, C manages D
+- user: employee:A
+  relation: manager
+  object: employee:B
+- user: employee:B
+  relation: manager
+  object: employee:C
+- user: employee:C
+  relation: manager
+  object: employee:D
+
+# Report submitted by employee D
+- user: employee:D
+  relation: submitter
+  object: report:expense_1

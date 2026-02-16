@@ -1,0 +1,44 @@
+# Organizations
+- user: user:alice
+  relation: member
+  object: organization:acme
+- user: user:bob
+  relation: member
+  object: organization:globex
+- user: user:charlie
+  relation: member
+  object: organization:initech
+
+# Plan subscriptions
+- user: organization:acme
+  relation: subscriber
+  object: plan:free
+- user: organization:globex
+  relation: subscriber
+  object: plan:team
+- user: organization:initech
+  relation: subscriber
+  object: plan:enterprise
+
+# Feature -> plan associations
+# Free: issues only
+- user: plan:free
+  relation: associated_plan
+  object: feature:issues
+# Team: issues + draft_prs
+- user: plan:team
+  relation: associated_plan
+  object: feature:issues
+- user: plan:team
+  relation: associated_plan
+  object: feature:draft_prs
+# Enterprise: issues + draft_prs + codespaces
+- user: plan:enterprise
+  relation: associated_plan
+  object: feature:issues
+- user: plan:enterprise
+  relation: associated_plan
+  object: feature:draft_prs
+- user: plan:enterprise
+  relation: associated_plan
+  object: feature:codespaces

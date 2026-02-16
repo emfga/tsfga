@@ -1,0 +1,45 @@
+# Organization members
+- user: user:alice
+  relation: member
+  object: organization:acme
+- user: user:bob
+  relation: member
+  object: organization:acme
+- user: user:charlie
+  relation: member
+  object: organization:acme
+# Org-level repo_reader
+- user: user:diana
+  relation: repo_reader
+  object: organization:acme
+
+# Teams
+# backend team: alice is a member
+- user: user:alice
+  relation: member
+  object: team:backend
+# frontend team: bob is a member
+- user: user:bob
+  relation: member
+  object: team:frontend
+# platform team: nests backend team
+- user: team:backend#member
+  relation: member
+  object: team:platform
+
+# Repo: acme/api
+- user: organization:acme
+  relation: organization
+  object: repo:api
+# charlie is direct admin
+- user: user:charlie
+  relation: admin
+  object: repo:api
+# backend team members are writers
+- user: team:backend#member
+  relation: writer
+  object: repo:api
+# frontend team members are readers
+- user: team:frontend#member
+  relation: reader
+  object: repo:api
