@@ -31,8 +31,8 @@ export async function evaluateTupleCondition(
     throw new ConditionNotFoundError(tuple.conditionName);
   }
 
-  // Merge contexts: request context wins over tuple context
-  const context = { ...tuple.conditionContext, ...requestContext };
+  // Merge contexts: tuple context wins over request context
+  const context = { ...requestContext, ...tuple.conditionContext };
 
   let compiled = exprCache.get(condDef.name);
   if (!compiled) {

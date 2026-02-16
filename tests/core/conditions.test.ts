@@ -54,7 +54,7 @@ describe("evaluateTupleCondition", () => {
     );
   });
 
-  test("request context overrides tuple context", async () => {
+  test("tuple context takes precedence over request context", async () => {
     const store = new MockTupleStore();
     store.conditionDefinitions.push({
       name: "in_region",
@@ -65,9 +65,9 @@ describe("evaluateTupleCondition", () => {
       conditionName: "in_region",
       conditionContext: { region: "eu" },
     });
-    // Request context overrides tuple context
+    // Tuple context overrides request context
     expect(await evaluateTupleCondition(store, tuple, { region: "us" })).toBe(
-      true,
+      false,
     );
   });
 

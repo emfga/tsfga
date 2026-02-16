@@ -424,9 +424,9 @@ export async function evaluateTupleCondition(
 }
 ```
 
-**Context merge rule:** `requestContext` properties override
-`tuple.conditionContext` properties. This matches OpenFGA behavior where the
-check request context takes precedence.
+**Context merge rule:** `tuple.conditionContext` properties override
+`requestContext` properties. This matches OpenFGA behavior where context
+values written in the relationship tuple take precedence.
 
 ## Error Types (`src/core/errors.ts`)
 
