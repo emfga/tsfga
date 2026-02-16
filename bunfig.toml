@@ -1,0 +1,9 @@
+[install]
+exact = true
+
+[test]
+# Increase timeout for infrastructure setup (2 minutes)
+timeout = 120000
+
+# Preload global setup before running tests
+preload = ["./tests/helpers/preload.ts"]

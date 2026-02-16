@@ -1,0 +1,79 @@
+name: ${PREFIX:-fga-ts}
+networks:
+  default:
+    external: false
+    name: ${PREFIX:-fga-ts}
+services:
+  postgres:
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    container_name: ${PREFIX:-fga-ts}-postgres
+    environment:
+      PGDATA: "/var/lib/postgresql/18/docker"
+      PGHOST: "/var/run/postgresql"
+      PGUSER: "${POSTGRES_USER:-dev}"
+      POSTGRES_DB: "${POSTGRES_DB:-dev}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-password}"
+      POSTGRES_USER: "${POSTGRES_USER:-dev}"
+      TZ: "America/Sao_Paulo"
+    healthcheck:
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      timeout: 10s
+    image: postgres:18-alpine
+    ports:
+      - ${POSTGRES_PORT:-5432}:${POSTGRES_PORT:-5432}
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql/18/docker
+      - ./infra/postgresql/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./infra/postgresql/init-openfga-schema.sql:/docker-entrypoint-initdb.d/init-openfga-schema.sql:ro
+
+  openfga-migrate:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    image: openfga/openfga:latest
+    container_name: ${PREFIX:-fga-ts}-openfga-migrate
+    environment:
+      - OPENFGA_DATASTORE_ENGINE=postgres
+      - OPENFGA_DATASTORE_URI=postgres://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-password}@postgres:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-dev}?sslmode=disable&search_path=openfga
+    command: migrate
+    networks:
+      - default
+
+  openfga:
+    depends_on:
+      openfga-migrate:
+        condition: service_completed_successfully
+    image: openfga/openfga:latest
+    container_name: ${PREFIX:-fga-ts}-openfga
+    command: run
+    environment:
+      - OPENFGA_DATASTORE_ENGINE=postgres
+      - OPENFGA_DATASTORE_URI=postgres://${POSTGRES_USER:-dev}:${POSTGRES_PASSWORD:-password}@postgres:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-dev}?sslmode=disable&search_path=openfga
+      - OPENFGA_DATASTORE_MAX_OPEN_CONNS=100 #see postgres container
+      - OPENFGA_PLAYGROUND_ENABLED=true
+    networks:
+      - default
+    ports:
+      - "8080:8080" #http
+      - "8081:8081" #grpc
+      - "3000:3000" #playground
+      - "2112:2112" #prometheus metrics
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/usr/local/bin/grpc_health_probe",
+          "-addr=openfga:8081"
+        ]
+      interval: 5s
+      timeout: 30s
+      retries: 3
+
+volumes:
+  postgres-data:
+    driver: local
+    name: ${PREFIX:-fga-ts}-postgres-data
