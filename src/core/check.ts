@@ -3,7 +3,7 @@ import type { CheckOptions, CheckRequest } from "src/core/types.ts";
 import type { TupleStore } from "src/store/interface.ts";
 
 /**
- * 5-step recursive check algorithm, ported from pgfga's pgfga.check().
+ * 5-step recursive check algorithm.
  *
  * Steps:
  * 1. Direct tuple check

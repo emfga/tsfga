@@ -3,8 +3,6 @@
 TypeScript implementation of OpenFGA-compatible relationship-based access
 control (ReBAC).
 
-Ports the recursive check algorithm from [pgfga](https://github.com/lemuelroberto/poc-pgfga) (a PL/pgSQL PostgreSQL extension) to TypeScript, adding CEL condition support and a database-agnostic architecture with a Kysely adapter.
-
 ## Features
 
 - **5-step recursive check algorithm** — direct tuples, userset expansion,
@@ -20,7 +18,13 @@ Ports the recursive check algorithm from [pgfga](https://github.com/lemuelrobert
 ## Architecture
 
 ```
-createFga() → Core Algorithm (check, conditions) → TupleStore interface → Kysely adapter
+createTsfga (public API)
+  ↓
+check / conditions (core algorithm)
+  ↓
+TupleStore (interface)
+  ↓
+KyselyTupleStore (adapter)
 ```
 
 The `src/core/` module contains pure logic with no database dependencies. It
@@ -125,10 +129,3 @@ docker compose down -v        # Tear down with volumes
 ```
 
 PostgreSQL and OpenFGA share the same database instance but use separate schemas (`fga` and `openfga` respectively).
-
-## Lineage
-
-fga-ts is a direct port of [pgfga](https://github.com/lemuelroberto/poc-pgfga)'s
-recursive check algorithm. Conformance is validated by running both fga-ts and a
-real OpenFGA service against identical authorization models and tuples,
-then asserting identical results.

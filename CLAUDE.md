@@ -6,18 +6,9 @@ code in this repository.
 ## Project Overview
 
 **tsfga** is a TypeScript library that implements OpenFGA-compatible
-relationship-based access control (ReBAC). It ports the check algorithm from
-[pgfga](https://github.com/lemuelroberto/poc-pgfga) (a PL/pgSQL PostgreSQL
-extension) to TypeScript, adding CEL condition support and a database-agnostic
-architecture with a Kysely adapter.
-
-### Lineage
-
-tsfga is a direct port of pgfga's recursive check algorithm. The 5-step check
-logic in `src/core/check.ts` must faithfully reproduce the behavior of pgfga's
-`pgfga.check()` function. Conformance is validated by running both tsfga and a
-real OpenFGA service against identical authorization models and tuples, then
-asserting identical results.
+relationship-based access control (ReBAC). It provides a 5-step recursive
+check algorithm, CEL condition support, and a database-agnostic architecture
+with a Kysely adapter for PostgreSQL.
 
 ### Scope
 
@@ -37,7 +28,13 @@ asserting identical results.
 ## Architecture
 
 ```
-Public API (createTsfga) → Core Algorithm (check, conditions) → TupleStore interface → Kysely adapter
+createTsfga (public API)
+  ↓
+check / conditions (core algorithm)
+  ↓
+TupleStore (interface)
+  ↓
+KyselyTupleStore (adapter)
 ```
 
 **Key rule:** `src/core/` never imports from `src/store/kysely/`. The core
@@ -76,8 +73,8 @@ fga-ts/
 │       └── preload.ts           # Infrastructure setup (Docker)
 ├── examples/
 │   └── slack/
-│       ├── model.dsl            # OpenFGA DSL (reuse from pgfga)
-│       └── tuples.yaml          # Relationship tuples (reuse from pgfga)
+│       ├── model.dsl            # OpenFGA DSL
+│       └── tuples.yaml          # Relationship tuples
 ├── compose.yaml                 # PostgreSQL + OpenFGA services
 ├── .env                         # Environment variables
 ├── package.json
@@ -251,7 +248,8 @@ export interface TupleStore {
 
 ## Check Algorithm (`src/core/check.ts`)
 
-This is the most critical file. It must faithfully port the 5-step recursive algorithm from pgfga's `pgfga.check()` function (pgfga/02_check.sql lines 56-200).
+This is the most critical file. It implements the 5-step recursive
+check algorithm for relationship-based access control.
 
 ```typescript
 export async function check(
@@ -308,8 +306,7 @@ export async function check(
     }
   }
 
-  // Fetch relation config ONCE for steps 3-5
-  // (pgfga does 3 separate queries; we optimize to 1)
+  // Fetch once for steps 3-5
   const config = await store.findRelationConfig(
     request.objectType, request.relation,
   );
@@ -371,8 +368,7 @@ export async function check(
 ```
 
 **Critical implementation notes:**
-- Steps 3, 4, 5 all use the SAME `config` fetched once (pgfga does 3 separate
-  `SELECT` queries)
+- Steps 3, 4, 5 all use the SAME `config` fetched once
 - Do NOT merge `impliedBy` and `computedUserset` into one concept; they are
   distinct OpenFGA features
 - The `depth` parameter is internal; it is not exposed in the public API
@@ -487,9 +483,9 @@ export class ConditionEvaluationError extends TsfgaError {
 
 ### Migration (`src/store/kysely/migrations/001-initial.ts`)
 
-Creates the `tsfga` schema with 3 tables and 6 indexes matching pgfga's schema
-design. Uses Kysely's DDL schema builder API where possible; raw `sql` only for
-indexes the builder cannot express.
+Creates the `tsfga` schema with 3 tables and 6 indexes. Uses Kysely's DDL
+schema builder API where possible; raw `sql` only for indexes the builder
+cannot express.
 
 **Pattern:** Prefer `db.schema.createTable()` / `db.schema.createIndex()` over
 raw SQL. Use `sql` template literals only when the builder API cannot express
@@ -511,16 +507,6 @@ the DDL (expression indexes, GIN + WHERE combos).
 -- tsfga.condition_definitions: named CEL condition expressions
 -- 6 indexes on tsfga.tuples (unique, object, subject, check, userset, metadata, condition)
 ```
-
-**Key differences from pgfga:**
-- `bigint GENERATED ALWAYS AS IDENTITY` instead of `BIGSERIAL` for PKs
-- `object_id` and `subject_id` are `uuid` (pgfga uses `text`)
-- Added `condition_name`, `condition_context` columns to `tsfga.tuples`
-- Added `tsfga.condition_definitions` table
-- Schema is `tsfga` (not `pgfga`)
-- Userset index is on `(object_type, object_id, relation) WHERE subject_relation IS NOT NULL`
-  to match the `findUsersetTuples` query pattern (pgfga uses
-  `(subject_type, subject_id, subject_relation)` for reverse lookups instead)
 
 ### Schema Generation (`src/store/kysely/schema.ts`)
 
@@ -586,14 +572,9 @@ interface, and `KyselyTupleStore`.
 Conformance tests validate that tsfga produces identical results to a real
 OpenFGA service. This is the most important testing layer.
 
-### Pattern
-
-Replicated from pgfga's conformance infrastructure (`tests/helpers/conformance.ts`,
-`scripts/lib/openfga.ts`, `scripts/lib/infrastructure.ts`).
-
 ### Docker Compose (`compose.yaml`)
 
-Runs PostgreSQL + OpenFGA (with migration sidecar), same pattern as pgfga:
+Runs PostgreSQL + OpenFGA (with migration sidecar):
 
 ```yaml
 services:
@@ -679,8 +660,6 @@ await setupInfrastructure();
 
 ### OpenFGA Helpers (`tests/helpers/openfga.ts`)
 
-Same pattern as pgfga's `scripts/lib/openfga.ts`:
-
 ```typescript
 import { OpenFgaClient } from "@openfga/sdk";
 import { transformer } from "@openfga/syntax-transformer";
@@ -730,10 +709,6 @@ export async function expectConformance(
 }
 ```
 
-**Key difference from pgfga:** `expectConformance` receives a `TsfgaClient`
-instance (not a raw SQL connection). The tsfga check runs through the library's
-own API.
-
 ### Conformance Test File (`tests/conformance/slack.test.ts`)
 
 ```typescript
@@ -763,10 +738,6 @@ describe("Slack Model Conformance", () => {
   // ... 28 check assertions using expectConformance()
 });
 ```
-
-**Reuse from pgfga:** The `model.dsl` and `tuples.yaml` files are copied from
-pgfga's `examples/slack/` directory. The relation configs and tuples are loaded
-via tsfga's own API (`tsfgaClient.writeRelationConfig()`, `tsfgaClient.addTuple()`).
 
 ### Test Scope
 
@@ -966,15 +937,14 @@ preload = ["./tests/helpers/preload.ts"]
 
 ## Anti-Patterns (DO NOT)
 
-- **No session context coupling.** pgfga uses `set_config`/`current_setting`
-  for RLS. tsfga always receives `subjectType` and `subjectId` explicitly in
-  every check call. There is no global user context.
+- **No session context coupling.** Always receive `subjectType` and
+  `subjectId` explicitly in every check call. There is no global user
+  context.
 - **No SECURITY DEFINER.** This is a PostgreSQL-specific mechanism for RLS
   bypass. Not applicable to a TypeScript library.
-- **Single config fetch for steps 3-5.** pgfga does 3 separate `SELECT` queries
-  from `relation_configs` (one each for implied_by, computed_userset,
-  tuple_to_userset). tsfga fetches the config once and reads all three fields
-  from the result.
+- **Single config fetch for steps 3-5.** Fetch the relation config once
+  and read all three fields (implied_by, computed_userset,
+  tuple_to_userset) from the result.
 - **Don't merge implied_by and computed_userset.** They are distinct OpenFGA
   concepts. `implied_by` means "relation X on the same object type implies this
   relation" (e.g., `channels_admin` implies `member`). `computed_userset` means
@@ -996,7 +966,6 @@ preload = ["./tests/helpers/preload.ts"]
 
 ## References
 
-- pgfga source: `~/repositories/lemuelroberto/poc-pgfga/`
 - OpenFGA docs: https://openfga.dev/docs/modeling/getting-started
 - OpenFGA conditions: https://openfga.dev/docs/modeling/conditions
 - CEL spec: https://github.com/google/cel-spec
