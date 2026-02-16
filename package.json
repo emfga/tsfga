@@ -3,15 +3,15 @@
   "module": "src/index.ts",
   "type": "module",
   "scripts": {
-    "check": "biome check .",
-    "format": "biome format --write .",
-    "lint": "biome lint .",
-    "tsc": "tsc --noEmit",
-    "start": "bun run src/index.ts",
-    "test": "bun test",
+    "biome:check": "biome check .",
+    "biome:format": "biome format --write .",
+    "biome:lint": "biome lint .",
     "db:generate": "bunx kysely-codegen --out-file src/store/kysely/schema.ts",
     "db:latest": "kysely migrate:latest",
-    "db:rollback": "kysely migrate:rollback --all"
+    "db:rollback": "kysely migrate:rollback --all",
+    "start": "bun run src/index.ts",
+    "test": "bun test",
+    "tsc": "tsc --noEmit"
   },
   "dependencies": {
     "@marcbachmann/cel-js": "7.4.0"

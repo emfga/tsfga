@@ -771,9 +771,9 @@ bun test tests/core/                     # Unit tests only (no Docker)
 bun test tests/conformance/              # Conformance tests (needs Docker)
 bun test tests/store/                    # Integration tests (needs Docker)
 bun run tsc                              # Type check
-bun run check                            # Lint + format check
-bun run lint                             # Lint only
-bun run format                           # Format fix
+bun run biome:check                      # Lint + format check
+bun run biome:lint                       # Lint only
+bun run biome:format                     # Format fix
 bun run db:generate                      # Regenerate Kysely types from DB
 bun run db:latest                        # Apply pending migrations
 bun run db:rollback                      # Rollback all migrations

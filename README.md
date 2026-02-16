@@ -117,8 +117,9 @@ bun test tests/core/          # Unit tests only (no Docker)
 bun test tests/conformance/   # Conformance tests (needs Docker)
 bun test tests/store/         # Integration tests (needs Docker)
 bun run tsc                   # Type check
-bun run check                 # Lint + format check (Biome)
-bun run format                # Auto-format (Biome)
+bun run biome:check           # Lint + format check (Biome)
+bun run biome:lint            # Lint only (Biome)
+bun run biome:format          # Auto-format (Biome)
 ```
 
 ### Infrastructure
