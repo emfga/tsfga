@@ -1,0 +1,24 @@
+# bob has unconditional viewer access to document:1
+- user: user:bob
+  relation: viewer
+  object: document:1
+
+# anne has time-bounded viewer access to document:1 (1 hour window)
+- user: user:anne
+  relation: viewer
+  object: document:1
+  condition:
+    name: temporal_access
+    context:
+      grant_time: "2023-01-01T00:00:00Z"
+      grant_duration: 1h
+
+# anne has time-bounded viewer access to document:2 (5 second window)
+- user: user:anne
+  relation: viewer
+  object: document:2
+  condition:
+    name: temporal_access
+    context:
+      grant_time: "2023-01-01T00:00:00Z"
+      grant_duration: 5s

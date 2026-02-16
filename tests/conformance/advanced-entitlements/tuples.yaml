@@ -1,0 +1,70 @@
+# Organization membership
+- user: user:anne
+  relation: member
+  object: organization:acme
+- user: user:beth
+  relation: member
+  object: organization:okta
+
+# Plan subscriptions (userset: org members subscribe to plans)
+- user: organization:acme#member
+  relation: subscriber
+  object: plan:free
+- user: organization:okta#member
+  relation: subscriber
+  object: plan:pro
+
+# Free plan features
+- user: plan:free#subscriber
+  relation: has_feature
+  object: feature:can-view-page-history
+  condition:
+    name: is_below_page_history_days_limit
+    context:
+      page_history_days_limit: 7
+- user: plan:free#subscriber
+  relation: has_feature
+  object: feature:can-invite-collaborator
+  condition:
+    name: is_below_collaborator_limit
+    context:
+      collaborator_limit: 10
+- user: plan:free#subscriber
+  relation: has_feature
+  object: feature:can-sync-rows
+  condition:
+    name: is_below_row_sync_limit
+    context:
+      row_sync_limit: 100
+- user: plan:free#subscriber
+  relation: has_feature
+  object: feature:basic-page-analytics
+
+# Pro plan features
+- user: plan:pro#subscriber
+  relation: has_feature
+  object: feature:can-view-page-history
+  condition:
+    name: is_below_page_history_days_limit
+    context:
+      page_history_days_limit: 30
+- user: plan:pro#subscriber
+  relation: has_feature
+  object: feature:can-invite-collaborator
+  condition:
+    name: is_below_collaborator_limit
+    context:
+      collaborator_limit: 100
+- user: plan:pro#subscriber
+  relation: has_feature
+  object: feature:can-sync-rows
+  condition:
+    name: is_below_row_sync_limit
+    context:
+      row_sync_limit: 20000
+- user: plan:pro#subscriber
+  relation: has_feature
+  object: feature:advanced-page-analytics
+- user: plan:pro#subscriber
+  relation: has_feature
+  object: feature:enterprise-support

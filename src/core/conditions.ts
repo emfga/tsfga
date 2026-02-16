@@ -3,11 +3,34 @@ import {
   ConditionEvaluationError,
   ConditionNotFoundError,
 } from "src/core/errors.ts";
-import type { Tuple } from "src/core/types.ts";
+import type { ConditionParameterType, Tuple } from "src/core/types.ts";
 import type { TupleStore } from "src/store/interface.ts";
 
 /** Cache compiled CEL expressions by condition name */
 const exprCache = new Map<string, ParseResult>();
+
+/** Pre-compiled coercion helpers for timestamp/duration strings */
+const coerceTimestamp = parse("timestamp(val)");
+const coerceDuration = parse("duration(val)");
+
+/**
+ * Coerce a context value to its declared CEL type.
+ * Timestamps and durations arrive as strings from JSON storage
+ * and must be converted to proper cel-js objects.
+ */
+function coerceValue(
+  value: unknown,
+  paramType: ConditionParameterType,
+): unknown {
+  if (value == null) return value;
+  if (paramType === "timestamp" && typeof value === "string") {
+    return coerceTimestamp({ val: value });
+  }
+  if (paramType === "duration" && typeof value === "string") {
+    return coerceDuration({ val: value });
+  }
+  return value;
+}
 
 /**
  * Evaluate a tuple's condition. Returns true if:
@@ -33,6 +56,15 @@ export async function evaluateTupleCondition(
 
   // Merge contexts: tuple context wins over request context
   const context = { ...requestContext, ...tuple.conditionContext };
+
+  // Coerce values based on declared parameter types
+  if (condDef.parameters) {
+    for (const [key, paramType] of Object.entries(condDef.parameters)) {
+      if (key in context) {
+        context[key] = coerceValue(context[key], paramType);
+      }
+    }
+  }
 
   let compiled = exprCache.get(condDef.name);
   if (!compiled) {
