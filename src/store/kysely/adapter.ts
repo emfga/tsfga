@@ -122,27 +122,34 @@ export class KyselyTupleStore implements TupleStore {
     const condCtx = tuple.conditionContext
       ? JSON.stringify(tuple.conditionContext)
       : null;
+    const now = new Date();
 
-    await sql`
-			INSERT INTO tsfga.tuples (object_type, object_id, relation, subject_type, subject_id, subject_relation, condition_name, condition_context, created_at, updated_at)
-			VALUES (
-				${tuple.objectType},
-				${tuple.objectId}::uuid,
-				${tuple.relation},
-				${tuple.subjectType},
-				${tuple.subjectId}::uuid,
-				${tuple.subjectRelation ?? null},
-				${tuple.conditionName ?? null},
-				${condCtx}::jsonb,
-				now(),
-				now()
-			)
-			ON CONFLICT (object_type, object_id, relation, subject_type, subject_id, COALESCE(subject_relation, ''))
-			DO UPDATE SET
-				condition_name = EXCLUDED.condition_name,
-				condition_context = EXCLUDED.condition_context,
-				updated_at = now()
-		`.execute(this.db);
+    await this.db
+      .insertInto("tsfga.tuples")
+      .values({
+        object_type: tuple.objectType,
+        object_id: tuple.objectId,
+        relation: tuple.relation,
+        subject_type: tuple.subjectType,
+        subject_id: tuple.subjectId,
+        subject_relation: tuple.subjectRelation ?? null,
+        condition_name: tuple.conditionName ?? null,
+        condition_context: condCtx,
+        created_at: now,
+        updated_at: now,
+      })
+      .onConflict((oc) =>
+        oc
+          .expression(
+            sql`object_type, object_id, relation, subject_type, subject_id, COALESCE(subject_relation, '')`,
+          )
+          .doUpdateSet({
+            condition_name: tuple.conditionName ?? null,
+            condition_context: condCtx,
+            updated_at: now,
+          }),
+      )
+      .execute();
   }
 
   async deleteTuple(tuple: RemoveTupleRequest): Promise<boolean> {

@@ -555,6 +555,11 @@ export class KyselyTupleStore implements TupleStore {
 directions. Callers pass UUID-formatted strings
 (e.g., `"550e8400-e29b-41d4-a716-446655440000"`).
 
+**DML pattern:** Always use Kysely's type-safe query builder for adapter
+methods. Use `onConflict().expression(sql`...`)` (without outer parens) for
+upserts against expression indexes. Do not use raw `sql` template literals for
+INSERT, SELECT, UPDATE, or DELETE queries.
+
 ## Public API (`src/index.ts`)
 
 ```typescript
@@ -975,6 +980,11 @@ preload = ["./tests/helpers/preload.ts"]
   accepting or recursing.
 - **Don't use Kysely types in core/.** The core module must remain
   database-agnostic.
+- **No raw SQL for DML in the adapter.** All adapter queries must use
+  Kysely's type-safe query builder. The only exception is `sql` expressions
+  *within* builder calls (e.g., `onConflict().expression(sql`...`)`).
+  Full raw `sql` INSERT/SELECT queries bypass type checking and
+  schema validation.
 
 ## References
 
