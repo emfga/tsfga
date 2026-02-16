@@ -1,4 +1,4 @@
-# fga-ts
+# tsfga
 
 TypeScript implementation of OpenFGA-compatible relationship-based access
 control (ReBAC).
@@ -34,7 +34,7 @@ adapter implements for PostgreSQL.
 ## Installation
 
 ```bash
-bun add lemuelroberto/fga-ts
+bun add lemuelroberto/tsfga
 ```
 
 ### Peer dependencies
@@ -48,14 +48,14 @@ bun add kysely pg
 ```typescript
 import { Kysely, PostgresDialect } from "kysely";
 import Pool from "pg-pool";
-import { createFga, KyselyTupleStore } from "lemuelroberto/fga-ts";
+import { createTsfga, KyselyTupleStore } from "lemuelroberto/tsfga";
 
 const db = new Kysely({
   dialect: new PostgresDialect({ pool: new Pool({ connectionString: "..." }) }),
 });
 
 const store = new KyselyTupleStore(db);
-const fga = createFga(store);
+const fga = createTsfga(store);
 
 // Write relation configs (typically derived from your authorization model)
 await fga.writeRelationConfig({
@@ -87,7 +87,7 @@ const allowed = await fga.check({
 
 ## API
 
-`createFga(store, options?)` returns an `FgaClient` with the following methods:
+`createTsfga(store, options?)` returns an `TsfgaClient` with the following methods:
 
 | Method | Description |
 |---|---|
@@ -128,4 +128,5 @@ docker compose up -d          # Start PostgreSQL + OpenFGA
 docker compose down -v        # Tear down with volumes
 ```
 
-PostgreSQL and OpenFGA share the same database instance but use separate schemas (`fga` and `openfga` respectively).
+PostgreSQL and OpenFGA share the same database instance but use separate schemas
+(`tsfga` and `openfga` respectively).

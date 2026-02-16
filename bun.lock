@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "lemuelroberto/fga-ts",
+      "name": "lemuelroberto/tsfga",
       "dependencies": {
         "@marcbachmann/cel-js": "7.4.0",
       },

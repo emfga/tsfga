@@ -43,7 +43,7 @@ algorithm depends only on the `TupleStore` interface.
 ## Directory Structure
 
 ```
-fga-ts/
+tsfga/
 ├── src/
 │   ├── core/                    # Pure logic, no DB dependencies
 │   │   ├── check.ts             # 5-step recursive check algorithm
