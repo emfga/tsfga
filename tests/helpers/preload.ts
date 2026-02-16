@@ -1,3 +1,3 @@
-import { setupInfrastructure } from "tests/helpers/infrastructure.ts";
+import { checkInfrastructure } from "tests/helpers/infrastructure.ts";
 
-await setupInfrastructure();
+await checkInfrastructure();

@@ -112,10 +112,11 @@ const allowed = await fga.check({
 
 ```bash
 bun install                   # Install dependencies
-bun test                      # Run all tests (needs Docker)
-bun test tests/core/          # Unit tests only (no Docker)
-bun test tests/conformance/   # Conformance tests (needs Docker)
-bun test tests/store/         # Integration tests (needs Docker)
+bun run infra:setup           # Start services + run migrations
+bun test                      # Run all tests (infra must be running)
+bun test tests/core/          # Unit tests only (no infra needed)
+bun test tests/conformance/   # Conformance tests (infra must be running)
+bun test tests/store/         # Integration tests (infra must be running)
 bun run tsc                   # Type check
 bun run biome:check           # Lint + format check (Biome)
 bun run biome:lint            # Lint only (Biome)
@@ -125,8 +126,9 @@ bun run biome:format          # Auto-format (Biome)
 ### Infrastructure
 
 ```bash
-docker compose up -d          # Start PostgreSQL + OpenFGA
-docker compose down -v        # Tear down with volumes
+bun run infra:setup           # Start services + run migrations (first time)
+bun run infra:up              # Start PostgreSQL + OpenFGA
+bun run infra:down            # Tear down with volumes (clean slate)
 ```
 
 PostgreSQL and OpenFGA share the same database instance but use separate schemas

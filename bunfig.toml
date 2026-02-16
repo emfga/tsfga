@@ -2,7 +2,7 @@
 exact = true
 
 [test]
-# Increase timeout for infrastructure setup (2 minutes)
+# Allow time for conformance tests
 timeout = 120000
 
 # Preload global setup before running tests

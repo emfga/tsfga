@@ -519,7 +519,7 @@ bun run db:generate
 
 The generation workflow:
 1. Write/modify migrations in `src/store/kysely/migrations/`
-2. Start Docker: `docker compose up -d postgres`
+2. Start Docker: `bun run infra:up`
 3. Run migrations against dev DB
 4. Run `kysely-codegen` to regenerate `schema.ts`
 5. Commit the generated file (so consumers don't need kysely-codegen)
@@ -647,16 +647,20 @@ belong in `.env` only, so there is a single source of truth.
 ### Test Preload (`tests/helpers/preload.ts`)
 
 ```typescript
-import { setupInfrastructure } from "tests/helpers/infrastructure.ts";
-await setupInfrastructure();
+import { checkInfrastructure } from "tests/helpers/infrastructure.ts";
+await checkInfrastructure();
 ```
 
-`setupInfrastructure()` does:
-1. `docker compose down` + volume cleanup
-2. `docker compose up -d --wait`
-3. Wait for PostgreSQL (poll with `SELECT 1`)
-4. Wait for OpenFGA (poll `GET /stores`)
-5. Run Kysely migrations to create `tsfga` schema
+`checkInfrastructure()` does:
+1. Poll PostgreSQL with `SELECT 1` (up to 5 retries)
+2. Poll OpenFGA with `GET /stores` (up to 5 retries)
+3. Fail with actionable error if services are not reachable
+
+Infrastructure must be started before running tests:
+```bash
+bun run infra:setup    # First time: starts services + runs migrations
+bun run infra:up       # Subsequent runs: starts services only
+```
 
 ### OpenFGA Helpers (`tests/helpers/openfga.ts`)
 
@@ -766,10 +770,13 @@ describe("Slack Model Conformance", () => {
 
 ```bash
 bun install                              # Install dependencies
-bun run test                             # All tests (needs Docker)
-bun test tests/core/                     # Unit tests only (no Docker)
-bun test tests/conformance/              # Conformance tests (needs Docker)
-bun test tests/store/                    # Integration tests (needs Docker)
+bun run infra:up                         # Start Docker services
+bun run infra:down                       # Tear down Docker services + volumes
+bun run infra:setup                      # Start services + run migrations
+bun run test                             # All tests (infra must be running)
+bun test tests/core/                     # Unit tests only (no infra needed)
+bun test tests/conformance/              # Conformance tests (infra must be running)
+bun test tests/store/                    # Integration tests (infra must be running)
 bun run tsc                              # Type check
 bun run biome:check                      # Lint + format check
 bun run biome:lint                       # Lint only
@@ -786,7 +793,7 @@ bun run db:rollback                      # Rollback all migrations
 #    Edit src/store/kysely/migrations/001-initial.ts
 
 # 2. Start PostgreSQL
-docker compose up -d postgres
+bun run infra:up
 
 # 3. Run migrations
 bun run db:latest

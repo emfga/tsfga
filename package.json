@@ -9,6 +9,9 @@
     "db:generate": "bunx kysely-codegen --out-file src/store/kysely/schema.ts",
     "db:latest": "kysely migrate:latest",
     "db:rollback": "kysely migrate:rollback --all",
+    "infra:down": "docker compose down -v",
+    "infra:setup": "docker compose up -d --wait && bun run db:latest",
+    "infra:up": "docker compose up -d --wait",
     "start": "bun run src/index.ts",
     "test": "bun test",
     "tsc": "tsc --noEmit"
