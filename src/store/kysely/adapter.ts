@@ -10,6 +10,8 @@ import type {
 import type { TupleStore } from "src/store/interface.ts";
 import type { DB } from "src/store/kysely/schema.ts";
 
+const WILDCARD_SENTINEL = "00000000-0000-0000-0000-000000000000";
+
 export class KyselyTupleStore implements TupleStore {
   constructor(private db: Kysely<DB>) {}
 
@@ -20,6 +22,7 @@ export class KyselyTupleStore implements TupleStore {
     subjectType: string,
     subjectId: string,
   ): Promise<Tuple | null> {
+    const dbSubjectId = subjectId === "*" ? WILDCARD_SENTINEL : subjectId;
     const row = await this.db
       .selectFrom("tsfga.tuples")
       .selectAll()
@@ -27,7 +30,7 @@ export class KyselyTupleStore implements TupleStore {
       .where("object_id", "=", objectId)
       .where("relation", "=", relation)
       .where("subject_type", "=", subjectType)
-      .where("subject_id", "=", subjectId)
+      .where("subject_id", "=", dbSubjectId)
       .where("subject_relation", "is", null)
       .executeTakeFirst();
 
@@ -123,6 +126,8 @@ export class KyselyTupleStore implements TupleStore {
       ? JSON.stringify(tuple.conditionContext)
       : null;
     const now = new Date();
+    const dbSubjectId =
+      tuple.subjectId === "*" ? WILDCARD_SENTINEL : tuple.subjectId;
 
     await this.db
       .insertInto("tsfga.tuples")
@@ -131,7 +136,7 @@ export class KyselyTupleStore implements TupleStore {
         object_id: tuple.objectId,
         relation: tuple.relation,
         subject_type: tuple.subjectType,
-        subject_id: tuple.subjectId,
+        subject_id: dbSubjectId,
         subject_relation: tuple.subjectRelation ?? null,
         condition_name: tuple.conditionName ?? null,
         condition_context: condCtx,
@@ -153,13 +158,15 @@ export class KyselyTupleStore implements TupleStore {
   }
 
   async deleteTuple(tuple: RemoveTupleRequest): Promise<boolean> {
+    const dbSubjectId =
+      tuple.subjectId === "*" ? WILDCARD_SENTINEL : tuple.subjectId;
     const result = await this.db
       .deleteFrom("tsfga.tuples")
       .where("object_type", "=", tuple.objectType)
       .where("object_id", "=", tuple.objectId)
       .where("relation", "=", tuple.relation)
       .where("subject_type", "=", tuple.subjectType)
-      .where("subject_id", "=", tuple.subjectId)
+      .where("subject_id", "=", dbSubjectId)
       .$call((qb) => {
         if (tuple.subjectRelation) {
           return qb.where("subject_relation", "=", tuple.subjectRelation);
@@ -296,7 +303,7 @@ export class KyselyTupleStore implements TupleStore {
       objectId: row.object_id,
       relation: row.relation,
       subjectType: row.subject_type,
-      subjectId: row.subject_id,
+      subjectId: row.subject_id === WILDCARD_SENTINEL ? "*" : row.subject_id,
       subjectRelation: row.subject_relation,
       conditionName: row.condition_name,
       conditionContext: row.condition_context as Record<string, unknown> | null,

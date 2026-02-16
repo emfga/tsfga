@@ -39,6 +39,20 @@ export async function check(
     }
   }
 
+  // Step 1b: Wildcard check (e.g., user:*)
+  const wildcardTuple = await store.findDirectTuple(
+    request.objectType,
+    request.objectId,
+    request.relation,
+    request.subjectType,
+    "*",
+  );
+  if (wildcardTuple) {
+    if (await evaluateTupleCondition(store, wildcardTuple, request.context)) {
+      return true;
+    }
+  }
+
   // Step 2: Userset expansion
   const usersetTuples = await store.findUsersetTuples(
     request.objectType,

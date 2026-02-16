@@ -62,16 +62,19 @@ export function createTsfga(
         );
       }
 
-      if (
-        config.directlyAssignableTypes &&
-        !config.directlyAssignableTypes.includes(request.subjectType)
-      ) {
-        throw new InvalidSubjectTypeError(
-          request.subjectType,
-          request.objectType,
-          request.relation,
-          config.directlyAssignableTypes,
-        );
+      if (config.directlyAssignableTypes) {
+        const subjectRef =
+          request.subjectId === "*"
+            ? `${request.subjectType}:*`
+            : request.subjectType;
+        if (!config.directlyAssignableTypes.includes(subjectRef)) {
+          throw new InvalidSubjectTypeError(
+            subjectRef,
+            request.objectType,
+            request.relation,
+            config.directlyAssignableTypes,
+          );
+        }
       }
 
       if (request.subjectRelation && !config.allowsUsersetSubjects) {

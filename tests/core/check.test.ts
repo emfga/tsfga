@@ -112,6 +112,127 @@ describe("check algorithm", () => {
     });
   });
 
+  describe("Step 1b: Wildcard check", () => {
+    test("returns true when wildcard tuple exists", async () => {
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "*",
+        }),
+      );
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toBe(true);
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "bob",
+        }),
+      ).toBe(true);
+    });
+
+    test("returns false when no wildcard tuple for the relation", async () => {
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "*",
+        }),
+      );
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "editor",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toBe(false);
+    });
+
+    test("prefers direct tuple over wildcard", async () => {
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "*",
+        }),
+      );
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toBe(true);
+    });
+
+    test("evaluates condition on wildcard tuple", async () => {
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "*",
+          conditionName: "in_region",
+        }),
+      );
+      store.conditionDefinitions.push({
+        name: "in_region",
+        expression: 'region == "us"',
+        parameters: { region: "string" },
+      });
+
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+          context: { region: "us" },
+        }),
+      ).toBe(true);
+
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+          context: { region: "eu" },
+        }),
+      ).toBe(false);
+    });
+  });
+
   describe("Step 2: Userset expansion", () => {
     test("resolves userset tuple", async () => {
       // channel:proj#writer -> workspace:sandcastle#member
