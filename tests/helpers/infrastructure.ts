@@ -19,7 +19,7 @@ async function waitForPostgres(maxRetries = 30): Promise<void> {
     database: process.env.POSTGRES_DB,
   });
 
-  let lastError: Error | null = null;
+  let lastError: unknown | null = null;
 
   for (let i = 0; i < maxRetries; i++) {
     try {
@@ -27,7 +27,7 @@ async function waitForPostgres(maxRetries = 30): Promise<void> {
       await pool.end();
       return;
     } catch (error) {
-      lastError = error as Error;
+      lastError = error;
       await new Promise((r) => setTimeout(r, 1000));
     }
   }
@@ -37,16 +37,18 @@ async function waitForPostgres(maxRetries = 30): Promise<void> {
 
 async function waitForOpenFGA(maxRetries = 30): Promise<void> {
   const url = process.env.FGA_API_URL;
+
+  let lastError: unknown | null = null;
   for (let i = 0; i < maxRetries; i++) {
     try {
       const resp = await fetch(`${url}/stores`);
       if (resp.ok) return;
-    } catch {
-      // Not ready yet
+    } catch (error) {
+      lastError = error;
     }
     await new Promise((r) => setTimeout(r, 1000));
   }
-  throw new Error("OpenFGA not ready after retries");
+  throw new Error("OpenFGA not ready after retries", { cause: lastError });
 }
 
 async function runMigrations(): Promise<void> {
