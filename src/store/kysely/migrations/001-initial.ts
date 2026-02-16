@@ -18,8 +18,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("condition_name", "text")
     .addColumn("condition_context", "jsonb")
     .addColumn("metadata", "jsonb")
-    .addColumn("created_at", "timestamptz", (col) => col.defaultTo(sql`now()`))
-    .addColumn("updated_at", "timestamptz", (col) => col.defaultTo(sql`now()`))
+    .addColumn("created_at", "timestamptz", (col) => col.notNull())
+    .addColumn("updated_at", "timestamptz", (col) => col.notNull())
     .execute();
 
   // Unique index with COALESCE — raw SQL required (expression index)
@@ -40,9 +40,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("implied_by", sql`text[]`)
     .addColumn("computed_userset", "text")
     .addColumn("tuple_to_userset", "jsonb")
-    .addColumn("allows_userset_subjects", "boolean", (col) =>
-      col.defaultTo(true),
-    )
+    .addColumn("allows_userset_subjects", "boolean", (col) => col.notNull())
     .addColumn("metadata", "jsonb")
     .addUniqueConstraint("relation_configs_object_type_relation_unique", [
       "object_type",
@@ -58,9 +56,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     )
     .addColumn("name", "text", (col) => col.notNull().unique())
     .addColumn("expression", "text", (col) => col.notNull())
-    .addColumn("parameters", "jsonb", (col) =>
-      col.notNull().defaultTo(sql`'{}'`),
-    )
+    .addColumn("parameters", "jsonb")
     .execute();
 
   // Index 1: Fast lookups by object

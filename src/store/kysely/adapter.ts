@@ -93,7 +93,7 @@ export class KyselyTupleStore implements TupleStore {
       impliedBy: row.implied_by ?? undefined,
       computedUserset: row.computed_userset ?? undefined,
       tupleToUserset: ttu ?? undefined,
-      allowsUsersetSubjects: row.allows_userset_subjects ?? true,
+      allowsUsersetSubjects: row.allows_userset_subjects,
     };
   }
 
@@ -111,7 +111,8 @@ export class KyselyTupleStore implements TupleStore {
     return {
       name: row.name,
       expression: row.expression,
-      parameters: row.parameters as Record<string, ConditionParameterType>,
+      parameters:
+        (row.parameters as Record<string, ConditionParameterType>) ?? undefined,
     };
   }
 
@@ -121,7 +122,7 @@ export class KyselyTupleStore implements TupleStore {
       : null;
 
     await sql`
-			INSERT INTO tsfga.tuples (object_type, object_id, relation, subject_type, subject_id, subject_relation, condition_name, condition_context)
+			INSERT INTO tsfga.tuples (object_type, object_id, relation, subject_type, subject_id, subject_relation, condition_name, condition_context, created_at, updated_at)
 			VALUES (
 				${tuple.objectType},
 				${tuple.objectId}::uuid,
@@ -130,7 +131,9 @@ export class KyselyTupleStore implements TupleStore {
 				${tuple.subjectId}::uuid,
 				${tuple.subjectRelation ?? null},
 				${tuple.conditionName ?? null},
-				${condCtx}::jsonb
+				${condCtx}::jsonb,
+				now(),
+				now()
 			)
 			ON CONFLICT (object_type, object_id, relation, subject_type, subject_id, COALESCE(subject_relation, ''))
 			DO UPDATE SET
@@ -240,17 +243,21 @@ export class KyselyTupleStore implements TupleStore {
   async upsertConditionDefinition(
     condition: ConditionDefinition,
   ): Promise<void> {
+    const parameters = condition.parameters
+      ? JSON.stringify(condition.parameters)
+      : null;
+
     await this.db
       .insertInto("tsfga.condition_definitions")
       .values({
         name: condition.name,
         expression: condition.expression,
-        parameters: JSON.stringify(condition.parameters),
+        parameters,
       })
       .onConflict((oc) =>
         oc.column("name").doUpdateSet({
           expression: condition.expression,
-          parameters: JSON.stringify(condition.parameters),
+          parameters,
         }),
       )
       .execute();

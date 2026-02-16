@@ -85,11 +85,11 @@ export interface TsfgaConditionDefinitions {
   expression: string;
   id: Generated<Int8>;
   name: string;
-  parameters: Generated<Json>;
+  parameters: Json | null;
 }
 
 export interface TsfgaRelationConfigs {
-  allows_userset_subjects: Generated<boolean | null>;
+  allows_userset_subjects: boolean;
   computed_userset: string | null;
   directly_assignable_types: string[] | null;
   id: Generated<Int8>;
@@ -103,7 +103,7 @@ export interface TsfgaRelationConfigs {
 export interface TsfgaTuples {
   condition_context: Json | null;
   condition_name: string | null;
-  created_at: Generated<Timestamp | null>;
+  created_at: Timestamp;
   id: Generated<Int8>;
   metadata: Json | null;
   object_id: string;
@@ -112,7 +112,7 @@ export interface TsfgaTuples {
   subject_id: string;
   subject_relation: string | null;
   subject_type: string;
-  updated_at: Generated<Timestamp | null>;
+  updated_at: Timestamp;
 }
 
 export interface DB {

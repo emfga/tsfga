@@ -25,7 +25,7 @@ export interface RelationConfig {
 export interface ConditionDefinition {
   name: string;
   expression: string;
-  parameters: Record<string, ConditionParameterType>;
+  parameters?: Record<string, ConditionParameterType>;
 }
 
 /** Supported CEL parameter types */
