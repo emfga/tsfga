@@ -15,6 +15,8 @@
     "db:latest": "kysely migrate:latest",
     "db:rollback": "kysely migrate:rollback --all",
     "test": "bun test",
+    "test:node": "node --import tsx --import ../../tests/node/register.mjs --test tests/kysely-adapter.test.ts",
+    "test:deno": "deno test --no-check --allow-all --config ../../tests/deno/deno.json tests/",
     "tsc": "tsc --noEmit"
   },
   "peerDependencies": {

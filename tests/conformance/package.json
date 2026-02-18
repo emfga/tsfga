@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "test:node": "node --import tsx --import ../node/register.mjs --test *.test.ts",
+    "test:deno": "deno test --no-check --allow-all --config ../deno/deno.json ."
   },
   "devDependencies": {
     "@tsfga/core": "workspace:*",

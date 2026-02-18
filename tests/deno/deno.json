@@ -1,7 +1,14 @@
 {
 	"imports": {
 		"bun:test": "./bun-test-shim.ts",
-		"@marcbachmann/cel-js": "npm:@marcbachmann/cel-js"
+		"@marcbachmann/cel-js": "npm:@marcbachmann/cel-js",
+		"@tsfga/core": "../../packages/core/dist/index.js",
+		"@tsfga/kysely": "../../packages/kysely/dist/index.js",
+		"kysely": "npm:kysely",
+		"pg": "npm:pg",
+		"@openfga/sdk": "npm:@openfga/sdk",
+		"@openfga/syntax-transformer": "npm:@openfga/syntax-transformer",
+		"yaml": "npm:yaml"
 	},
 	"nodeModulesDir": "auto"
 }
