@@ -27,7 +27,7 @@
     "version": "changeset version"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.2",
+    "@biomejs/biome": "2.5.6",
     "@changesets/cli": "2.29.8",
     "@commitlint/cli": "20.4.1",
     "@commitlint/types": "20.4.0",
