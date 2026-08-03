@@ -34,7 +34,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    image: openfga/openfga:latest@sha256:abddf9ce5e0770e6fcbcfdc44e6539bb629a1ab1d77761324db12dbea5539d27
+    image: openfga/openfga:latest@sha256:4a5e32241c6900a46c32ddb9fce461e543b40f2dcbdcabbb59e28b72e7a18647
     container_name: ${PREFIX:-tsfga}-openfga-migrate
     environment:
       - OPENFGA_DATASTORE_ENGINE=postgres
@@ -47,7 +47,7 @@ services:
     depends_on:
       openfga-migrate:
         condition: service_completed_successfully
-    image: openfga/openfga:latest@sha256:abddf9ce5e0770e6fcbcfdc44e6539bb629a1ab1d77761324db12dbea5539d27
+    image: openfga/openfga:latest@sha256:4a5e32241c6900a46c32ddb9fce461e543b40f2dcbdcabbb59e28b72e7a18647
     container_name: ${PREFIX:-tsfga}-openfga
     command: run
     environment:
