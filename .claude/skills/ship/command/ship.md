@@ -45,7 +45,8 @@ Do NOT proceed to Phase 2 until all 4 steps pass cleanly.
      prefix
    - Body explains WHY, wrapped at ~74 columns
    - Use HEREDOC format for the message
-   - End with `Co-Authored-By: Claude <model> <noreply@anthropic.com>`
+   - No tool attribution of any kind: no `Co-Authored-By` lines, no
+     `Generated with` footers, no session links (see CLAUDE.md)
    - If `$ARGUMENTS` contains commit message hints, incorporate them
 
 ---
@@ -108,8 +109,6 @@ Do NOT proceed to Phase 2 until all 4 steps pass cleanly.
 
    ## Test plan
    - [ ] ...
-
-   Generated with [Claude Code](https://claude.com/claude-code)
    EOF
    )"`
 2. Use `$ARGUMENTS` for hints on title/description if provided.
