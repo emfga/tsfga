@@ -1,6 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
+    ":dependencyDashboardApproval",
     ":disableRateLimiting",
     ":docker",
     ":enableVulnerabilityAlerts",
@@ -15,5 +16,8 @@
   "commitMessageAction": "Bump",
   "commitMessageExtra": "",
   "commitMessageLowerCase": "never",
-  "commitMessageTopic": "{{depName}}"
+  "commitMessageTopic": "{{depName}}",
+  "vulnerabilityAlerts": {
+    "dependencyDashboardApproval": true
+  }
 }
