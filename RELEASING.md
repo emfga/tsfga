@@ -150,5 +150,16 @@ Actions workflow identity via Sigstore — no long-lived
 npm token needed. The `--provenance` flag adds attestation
 linking each package to its source repo and build.
 
+The `id-token: write` permission is declared on the job as
+well as the workflow: the runner injects
+`ACTIONS_ID_TOKEN_REQUEST_URL` and
+`ACTIONS_ID_TOKEN_REQUEST_TOKEN` based on the job's own
+permissions, and npm needs both. When they are absent npm
+skips the token exchange without logging anything at the
+default level and `npm publish` fails with `ENEEDAUTH`,
+which reads like a missing token rather than a missing
+permission. The "Verify Trusted Publishing preconditions"
+step exists to catch that case with a useful message.
+
 **Tag convention:** `@tsfga/core@0.3.0`,
 `@tsfga/kysely@0.3.0`.

@@ -28,6 +28,13 @@ jobs:
     if: github.repository == 'emfga/tsfga'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Repeated at job level: the runner only injects
+    # ACTIONS_ID_TOKEN_REQUEST_URL/_TOKEN when the job
+    # itself carries id-token: write, and npm needs both
+    # to exchange an OIDC token for a publish token.
+    permissions:
+      contents: write
+      id-token: write
     env:
       POSTGRES_DB: dev
       POSTGRES_HOST: localhost
@@ -148,12 +155,38 @@ jobs:
             "${dir}/package.json" > "${dir}/package.tmp"
           mv "${dir}/package.tmp" "${dir}/package.json"
 
+      # npm skips the OIDC exchange silently (log.silly)
+      # when the id-token request variables are missing,
+      # then fails with a bare ENEEDAUTH that names the
+      # wrong cause. Check the preconditions up front.
+      - name: Verify Trusted Publishing preconditions
+        if: >-
+          inputs.publish
+          && steps.published.outputs.published == 'false'
+        run: |
+          echo "npm $(npm --version)"
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] \
+            || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+            echo "::error::OIDC id-token request variables are" \
+              "missing. npm cannot use Trusted Publishing and" \
+              "will fail with ENEEDAUTH. Check that the job has" \
+              "id-token: write."
+            exit 1
+          fi
+          echo "OIDC id-token endpoint is available."
+
+      # --loglevel verbose: every OIDC failure inside npm is
+      # logged below the default level, so a misconfigured
+      # trusted publisher would otherwise surface as ENEEDAUTH
+      # with no explanation.
       - name: Publish to npm
         if: >-
           inputs.publish
           && steps.published.outputs.published == 'false'
         working-directory: ${{ steps.pkg.outputs.dir }}
-        run: npm publish --provenance --access public
+        run: |
+          npm publish --provenance --access public \
+            --loglevel verbose
 
       - name: Revert workspace resolution
         if: >-
