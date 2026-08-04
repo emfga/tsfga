@@ -15,7 +15,6 @@
     "infra:down": "docker compose down -v",
     "infra:setup": "docker compose up -d --wait && turbo run db:latest",
     "infra:up": "docker compose up -d --wait",
-    "release": "turbo run build && changeset publish",
     "build": "turbo run build",
     "tsc": "turbo run tsc",
     "turbo:test": "turbo run test",
@@ -23,8 +22,7 @@
     "turbo:test:core": "turbo run test --filter=@tsfga/core",
     "turbo:test:kysely": "turbo run test --filter=@tsfga/kysely",
     "turbo:test:deno": "turbo run test:deno",
-    "turbo:test:node": "turbo run test:node",
-    "version": "changeset version"
+    "turbo:test:node": "turbo run test:node"
   },
   "devDependencies": {
     "@types/bun": "1.3.14",
