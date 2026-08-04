@@ -17,8 +17,7 @@ on:
         default: false
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: release-${{ inputs.package }}
@@ -28,13 +27,13 @@ jobs:
     if: github.repository == 'emfga/tsfga'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Repeated at job level: the runner only injects
-    # ACTIONS_ID_TOKEN_REQUEST_URL/_TOKEN when the job
-    # itself carries id-token: write, and npm needs both
-    # to exchange an OIDC token for a publish token.
+    # Elevated only here, so a job added later inherits the
+    # workflow's contents: read instead of these. A job-level
+    # block replaces the workflow-level one rather than
+    # merging, so contents: write is restated.
     permissions:
-      contents: write
-      id-token: write
+      contents: write # push the tag, create the release
+      id-token: write # npm Trusted Publishing OIDC exchange
     env:
       POSTGRES_DB: dev
       POSTGRES_HOST: localhost
@@ -54,30 +53,52 @@ jobs:
           fetch-depth: 0
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
 
+      # Trusted Publishing (OIDC) needs npm >= 11.5.1, and the
+      # publish toolchain comes from the Node pin: setup-node
+      # ships no npm of its own, it uses the distribution's
+      # bundled one. Node 24.19.0 bundles npm 11.17.0. The 22.x
+      # line never moved past npm 10 (22.23.2 is still on
+      # 10.9.8), which has no OIDC support at all -- that is
+      # why this is not on 22. Pinning Node exactly also pins
+      # npm, so the toolchain cannot change between a validate
+      # run and a publish run.
+      #
+      # registry-url is deliberately not set: npm already
+      # defaults to registry.npmjs.org, and the
+      # ${NODE_AUTH_TOKEN} placeholder it would write into
+      # .npmrc turns a failed OIDC exchange into an opaque E401
+      # instead of the ENEEDAUTH the checks below explain.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "22.22.0"
+          node-version: "24.19.0"
+
+      # Ungated on purpose, and placed here rather than beside
+      # the OIDC check: this is the earliest proof the publish
+      # toolchain is sane, it costs two seconds, and it runs on
+      # validate-only dispatches too -- which is exactly the
+      # rehearsal that would otherwise give no signal about it.
+      - name: Verify npm supports Trusted Publishing
+        run: |
+          version=$(npm --version)
+          echo "npm ${version} at $(command -v npm)"
+          required=11.5.1
+          oldest=$(
+            printf '%s\n%s\n' "$required" "$version" \
+              | sort -V | head -n 1
+          )
+          if [ "$oldest" != "$required" ]; then
+            echo "::error::npm ${version} predates Trusted" \
+              "Publishing support (needs >= ${required}), so" \
+              "publish would fail with ENEEDAUTH."
+            exit 1
+          fi
 
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
-          deno-version: "2.6.x"
-
-      # Trusted Publishing (OIDC) needs npm >= 11.5.1. Pin an
-      # exact version so the publish toolchain cannot change
-      # between a validate run and the publish run.
-      #
-      # Install into an explicit prefix and put that first on
-      # PATH rather than self-updating the global npm: where a
-      # bare "npm install -g npm" lands depends on the ambient
-      # prefix, and when it landed off-PATH the publish step
-      # silently kept using Node's bundled npm 10, which has no
-      # OIDC support at all.
-      - name: Install npm with Trusted Publishing support
-        run: |
-          npm install -g --prefix "${RUNNER_TEMP}/npm-cli" \
-            npm@11.19.0
-          echo "${RUNNER_TEMP}/npm-cli/bin" >> "$GITHUB_PATH"
+          deno-version: "2.9.4"
 
       - run: bun install --frozen-lockfile
 
@@ -97,22 +118,34 @@ jobs:
           version=$(jq -r .version package.json)
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      # Non-fatal so a re-run after a partial failure (publish
-      # succeeded, tag/release did not) can skip the publish and
-      # still finish the remaining steps.
+      # Lets a re-run after a partial failure (publish
+      # succeeded, tag/release did not) skip the publish and
+      # finish the remaining steps.
+      #
+      # Only a definitive E404 counts as "not published". npm
+      # view also exits non-zero on registry 5xx, timeouts and
+      # rate limiting, and treating those as "absent" would
+      # make exactly that re-run try to republish, fail with
+      # EPUBLISHCONFLICT before reaching the tag steps, and
+      # leave the tag missing on every attempt.
       - name: Check if already published
         id: published
         run: |
           pkg="${{ inputs.package }}"
           ver="${{ steps.version.outputs.version }}"
-          if npm view "${pkg}@${ver}" version \
-            > /dev/null 2>&1; then
+          if out=$(npm view "${pkg}@${ver}" version 2>&1); then
             echo "published=true" >> "$GITHUB_OUTPUT"
             echo "::notice::${pkg}@${ver} is already on" \
               "npm; publish will be skipped."
-          else
+          elif printf '%s' "$out" | grep -q 'E404'; then
             echo "published=false" >> "$GITHUB_OUTPUT"
             echo "${pkg}@${ver} is not yet published."
+          else
+            echo "::error::npm view failed for a reason other" \
+              "than E404, so whether ${pkg}@${ver} is already" \
+              "published is unknown. Refusing to guess."
+            printf '%s\n' "$out"
+            exit 1
           fi
 
       - name: Start infrastructure
@@ -136,25 +169,14 @@ jobs:
       - name: Run tests (Deno)
         run: bun run turbo:test:deno
 
-      # attw ignores node10/node16-cjs resolutions: the packages
-      # are deliberately ESM-only (see Q3 in the release plan).
-      - name: Packaging checks
-        working-directory: ${{ steps.pkg.outputs.dir }}
-        run: |
-          bunx publint@0.3.23
-          bunx @arethetypeswrong/cli@0.18.5 \
-            --pack . --profile esm-only
-          npm pack --dry-run
-
-      - name: Validation summary
-        if: "!inputs.publish"
-        run: echo "Validation complete. Skipping publish."
-
+      # Runs before the packaging checks, and regardless of
+      # whether this dispatch publishes, so publint / attw /
+      # npm pack inspect the manifest that actually ships. When
+      # this ran afterwards, peerDependencies still read
+      # "workspace:*" at validation time and the substituted
+      # string was never linted at all.
       - name: Resolve workspace protocol
-        if: >-
-          inputs.publish
-          && steps.published.outputs.published == 'false'
-          && inputs.package == '@tsfga/kysely'
+        if: inputs.package == '@tsfga/kysely'
         run: |
           dir="${{ steps.pkg.outputs.dir }}"
           core_ver=$(
@@ -166,28 +188,29 @@ jobs:
             "${dir}/package.json" > "${dir}/package.tmp"
           mv "${dir}/package.tmp" "${dir}/package.json"
 
+      # attw ignores node10/node16-cjs resolutions: the packages
+      # are deliberately ESM-only (see Q3 in the release plan).
+      - name: Packaging checks
+        working-directory: ${{ steps.pkg.outputs.dir }}
+        run: |
+          bunx publint
+          bunx attw --pack . --profile esm-only
+          npm pack --dry-run
+
+      - name: Validation summary
+        if: "!inputs.publish"
+        run: echo "Validation complete. Skipping publish."
+
       # npm skips the OIDC exchange silently (log.silly) when
-      # it is too old or the id-token request variables are
-      # missing, then fails with a bare ENEEDAUTH that names
-      # the wrong cause. Check both preconditions up front.
+      # the id-token request variables are missing, then fails
+      # with a bare ENEEDAUTH that names the wrong cause. The
+      # npm version half of this is asserted right after
+      # setup-node; this half only matters when publishing.
       - name: Verify Trusted Publishing preconditions
         if: >-
           inputs.publish
           && steps.published.outputs.published == 'false'
         run: |
-          version=$(npm --version)
-          echo "npm ${version} at $(command -v npm)"
-          required=11.5.1
-          older=$(
-            printf '%s\n%s\n' "$required" "$version" \
-              | sort -V | head -n 1
-          )
-          if [ "$older" != "$required" ]; then
-            echo "::error::npm ${version} predates Trusted" \
-              "Publishing support (needs >= ${required}), so" \
-              "publish would fail with ENEEDAUTH."
-            exit 1
-          fi
           if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] \
             || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
             echo "::error::OIDC id-token request variables are" \
@@ -211,11 +234,11 @@ jobs:
           npm publish --provenance --access public \
             --loglevel verbose
 
+      # always(): the resolve above is no longer gated on
+      # publishing, so the tree must be restored even when the
+      # publish step failed or was skipped.
       - name: Revert workspace resolution
-        if: >-
-          inputs.publish
-          && steps.published.outputs.published == 'false'
-          && inputs.package == '@tsfga/kysely'
+        if: always() && inputs.package == '@tsfga/kysely'
         run: |
           dir="${{ steps.pkg.outputs.dir }}"
           git checkout "${dir}/package.json"

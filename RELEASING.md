@@ -28,9 +28,12 @@ scripts/bump.sh packages/core minor   # or patch / major
 scripts/bump.sh packages/kysely minor
 ```
 
-The script updates `package.json` (including the
-`@tsfga/core` peer/dev range in `packages/kysely`) and
-`bun.lock`. Commit the version bump, update the package's
+The script updates the `version` field in `package.json` and
+`bun.lock`. It does not touch the `@tsfga/core` peer/dev
+range in `packages/kysely` — that stays `workspace:*` in the
+repo and is substituted at release time by the workflow's
+"Resolve workspace protocol" step. Commit the version bump,
+update the package's
 `CHANGELOG.md`, open a PR, and merge. Optionally add a
 changeset (`bun run changeset`) to document the change for
 release notes.
@@ -142,33 +145,41 @@ creates a git tag, and pushes the tag (not main).
 
 **Workspace protocol resolution:** For `@tsfga/kysely`,
 the workflow temporarily replaces `workspace:*` references
-to `@tsfga/core` with the actual version before publishing,
-then reverts the change.
+to `@tsfga/core` with the actual version, then reverts the
+change. This happens before the packaging checks and on
+every dispatch, including validate-only ones, so publint,
+attw and `npm pack` inspect the manifest that actually
+ships rather than one still carrying `workspace:*`.
 
 **OIDC Trusted Publishing:** npm verifies the GitHub
 Actions workflow identity via Sigstore — no long-lived
 npm token needed. The `--provenance` flag adds attestation
 linking each package to its source repo and build.
 
-The `id-token: write` permission is declared on the job as
-well as the workflow: the runner injects
-`ACTIONS_ID_TOKEN_REQUEST_URL` and
-`ACTIONS_ID_TOKEN_REQUEST_TOKEN` based on the job's own
-permissions, and npm needs both. When they are absent npm
-skips the token exchange without logging anything at the
-default level and `npm publish` fails with `ENEEDAUTH`,
-which reads like a missing token rather than a missing
-permission. The "Verify Trusted Publishing preconditions"
-step exists to catch that case with a useful message.
+`id-token: write` is declared on the release job. The
+workflow level keeps a `contents: read` default so a job
+added later does not inherit the elevated scopes; because a
+job-level `permissions` block replaces the workflow-level
+one rather than merging with it, the job restates
+`contents: write` too. npm needs the id-token permission to
+exchange an OIDC token for a publish token. Without it npm
+skips the exchange without logging anything at the default
+level and `npm publish` fails with `ENEEDAUTH`, which reads
+like a missing token rather than a missing permission. The
+"Verify Trusted Publishing preconditions" step exists to
+catch that case with a useful message.
 
-npm itself only learned Trusted Publishing in 11.5.1, and
-Node 22 still bundles npm 10, so the workflow installs a
-pinned npm into `$RUNNER_TEMP/npm-cli` and prepends it to
-`PATH`. Self-updating the global npm is not reliable here:
-it reports success while landing somewhere that is not the
-`npm` later steps resolve, and npm 10 skips the OIDC
-exchange with the same silent ENEEDAUTH. The preconditions
-step also asserts the version for that reason.
+Trusted Publishing needs npm >= 11.5.1. No Node 22 release
+ships one — 22.23.2 still bundles npm 10.9.8, which has no
+OIDC support at all — so the job pins Node 24.19.0 and uses
+its bundled npm 11.17.0 directly. There is no separate npm
+install: `actions/setup-node` ships no npm of its own, so
+pinning Node exactly also pins npm, and the toolchain cannot
+change between a validate run and a publish run. The
+"Verify npm supports Trusted Publishing" step asserts the
+version immediately after `setup-node`, so a Node downgrade
+fails in seconds and by name rather than as an `ENEEDAUTH`
+after the full test suite.
 
 **Tag convention:** `@tsfga/core@0.3.0`,
 `@tsfga/kysely@0.3.0`.

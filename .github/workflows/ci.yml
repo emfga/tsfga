@@ -206,18 +206,47 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      # Same Node as release.yml pins. Without it this job runs
+      # npm pack under the runner image's ambient npm, so it
+      # would not actually gate what the release job checks.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.19.0"
 
       - run: bun install --frozen-lockfile
 
       - run: bun run build
 
+      # Mirrors release.yml: resolve workspace:* before the
+      # checks, so they inspect the manifest that ships.
+      - name: Resolve workspace protocol
+        run: |
+          core_ver=$(jq -r .version packages/core/package.json)
+          dir=packages/kysely
+          jq --arg v "^$core_ver" \
+            '.peerDependencies["@tsfga/core"] = $v
+             | .devDependencies["@tsfga/core"] = $v' \
+            "${dir}/package.json" > "${dir}/package.tmp"
+          mv "${dir}/package.tmp" "${dir}/package.json"
+
       # attw ignores node10/node16-cjs resolutions: the
       # packages are deliberately ESM-only.
+      #
+      # Both tools resolve from node_modules/.bin, so they run
+      # at the version bun.lock pinned. Note attw's bin is named
+      # "attw" -- invoking it as @arethetypeswrong/cli would
+      # match no local bin and silently fetch from the registry.
       - name: Packaging checks
         run: |
           for dir in packages/core packages/kysely; do
-            (cd "$dir" && bunx publint@0.3.23)
-            bunx @arethetypeswrong/cli@0.18.5 \
-              --pack "$dir" --profile esm-only
+            (cd "$dir" && bunx publint)
+            bunx attw --pack "$dir" --profile esm-only
             (cd "$dir" && npm pack --dry-run)
           done
+
+      - name: Revert workspace resolution
+        if: always()
+        run: git checkout packages/kysely/package.json
