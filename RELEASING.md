@@ -5,10 +5,9 @@ Step-by-step guide for publishing `@tsfga/core` or
 
 The release workflow is the **only** publish path. There is
 no local publish: the former root `release` and `version`
-npm scripts (which called `changeset publish` /
-`changeset version` outside the guarded workflow) have been
-removed. Versions are bumped with `scripts/bump.sh`;
-changesets exist only to document changes for release notes.
+npm scripts have been removed. Versions are bumped with
+`scripts/bump.sh`, and user-facing changes are recorded by
+hand in each package's `CHANGELOG.md`.
 
 > Note: the release-workflow safeguards described below
 > (test gate, packaging checks, idempotent re-run) ship as
@@ -33,10 +32,7 @@ The script updates the `version` field in `package.json` and
 range in `packages/kysely` — that stays `workspace:*` in the
 repo and is substituted at release time by the workflow's
 "Resolve workspace protocol" step. Commit the version bump,
-update the package's
-`CHANGELOG.md`, open a PR, and merge. Optionally add a
-changeset (`bun run changeset`) to document the change for
-release notes.
+update the package's `CHANGELOG.md`, open a PR, and merge.
 
 ## 2. Trigger the release workflow
 
@@ -83,26 +79,22 @@ The workflow generates release notes from git history and
 PR labels. Edit the GitHub release if custom notes are
 needed.
 
-### Using changesets for release notes
+### Where release notes come from
 
-Changesets play **no role in versioning** — versions are
-bumped by `scripts/bump.sh`, and nothing on the release
-path runs `changeset version` or `changeset publish`.
-Their only role is documentation: when preparing a
-release, maintainers can create a changeset to describe
-user-facing changes:
+`scripts/release-notes.sh` builds the notes from git
+history alone: it walks the commits since the previous
+tag, looks up each one's PR via the GitHub API, and
+groups them under headings by PR label (`breaking`,
+`feature`, `bug`, `documentation`, `tooling`; anything
+unlabeled lands under "Other"). Labeling the PR is
+therefore the only thing that steers the generated
+notes.
 
-```bash
-bun run changeset
-```
-
-The changeset body becomes part of release notes — write
-it for end users. Changesets are not required — they are
-a convenience for structuring release notes.
-
-Bot PRs (Renovate, Dependabot) and external contributor
-PRs do not need changesets. Maintainers add them when
-the change warrants a release note entry.
+The narrative account of a release lives in each
+package's `CHANGELOG.md`, written by hand as part of the
+version-bump PR. That file is the source consumers read;
+the generated notes are a commit-level index pointing
+back at the PRs.
 
 ## Recovering from a partial failure
 

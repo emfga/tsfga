@@ -122,7 +122,6 @@ tsfga/
 ├── biome.json                       shared lint/format
 ├── compose.yaml                     PostgreSQL + OpenFGA services
 ├── .env                             environment variables
-├── .changeset/                      versioning config
 └── CLAUDE.md
 ```
 
@@ -815,7 +814,7 @@ describe("Model Conformance", () => {
   `@openfga/syntax-transformer`, `kysely`, `pg`, `yaml`
 
 ### Root
-- **Dev:** `@biomejs/biome`, `@changesets/cli`, `turbo`
+- **Dev:** `@biomejs/biome`, `turbo`
 
 ## Dev Commands
 
@@ -854,10 +853,11 @@ bun run biome:lint                       # Lint only
 bun run biome:format                     # Format fix
 
 # Versioning
-bun run changeset                        # Create a changeset
-bun run version                          # Apply changesets to versions
-bun run release                          # Build + publish
+scripts/bump.sh <package-dir> [patch|minor|major]  # Bump a version
 ```
+
+Publishing is not a local command — the Release workflow on
+`emfga/tsfga` is the only publish path. See `RELEASING.md`.
 
 ### CI Workflow (`.github/workflows/ci.yml`)
 
@@ -893,10 +893,10 @@ See `RELEASING.md` for the full step-by-step process.
 **Version bumps** happen in PRs before release:
 - `scripts/bump.sh <package-dir> [patch|minor|major]`
 
-**Changesets** are optional. Maintainers add one with
-`bun run changeset` when making user-facing changes to
-document them for release notes. Bot PRs, tooling changes,
-and docs-only changes do not need changesets.
+**Changelogs** are hand-written. A version-bump PR updates
+the affected package's `CHANGELOG.md` in the same commit as
+the bump. Bot PRs, tooling changes, and docs-only changes do
+not need a changelog entry of their own.
 
 **Release notes** (`scripts/release-notes.sh`):
 - Categorizes commits by PR labels: `breaking`, `feature`,
@@ -1115,4 +1115,3 @@ history when interactive rebase is not available.
 - Kysely docs: https://kysely.dev/
 - kysely-codegen: https://github.com/RobinBlomberg/kysely-codegen
 - Turborepo docs: https://turbo.build/repo/docs
-- Changesets docs: https://github.com/changesets/changesets
