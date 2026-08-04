@@ -21,7 +21,7 @@ services:
       start_period: 30s
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       timeout: 10s
-    image: postgres:18-alpine@sha256:9f059ad9d0a772eafe6313b2dad617234a455f82578a5ce12c23e17c8e5e64eb
+    image: postgres:18-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
     ports:
       - ${POSTGRES_PORT:-5432}:${POSTGRES_PORT:-5432}
     restart: unless-stopped
@@ -34,7 +34,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    image: openfga/openfga:v1.18.1@sha256:efde89d24487da1a8bc37d85b61341f1fb7024943a1ded65f4b7d51a75666688
+    image: openfga/openfga:v1.18.2@sha256:4a5e32241c6900a46c32ddb9fce461e543b40f2dcbdcabbb59e28b72e7a18647
     container_name: ${PREFIX:-tsfga}-openfga-migrate
     environment:
       - OPENFGA_DATASTORE_ENGINE=postgres
@@ -47,7 +47,7 @@ services:
     depends_on:
       openfga-migrate:
         condition: service_completed_successfully
-    image: openfga/openfga:v1.18.1@sha256:efde89d24487da1a8bc37d85b61341f1fb7024943a1ded65f4b7d51a75666688
+    image: openfga/openfga:v1.18.2@sha256:4a5e32241c6900a46c32ddb9fce461e543b40f2dcbdcabbb59e28b72e7a18647
     container_name: ${PREFIX:-tsfga}-openfga
     command: run
     environment:
