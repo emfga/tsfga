@@ -1,6 +1,6 @@
 {
   "name": "@tsfga/kysely",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "author": "Lemuel Roberto Bonifacio <code@lemuelroberto.online>",
   "description": "Kysely/PostgreSQL adapter for @tsfga/core",
@@ -39,7 +39,11 @@
       "import": "./dist/migrations/index.js"
     }
   },
-  "files": ["dist", "src", "LICENSE"],
+  "files": [
+    "dist",
+    "src",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsup",
     "db:generate": "bunx kysely-codegen --out-file src/schema.ts",
