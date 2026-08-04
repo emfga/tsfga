@@ -49,6 +49,13 @@ export class ConditionEvaluationError extends TsfgaError {
   }
 }
 
+export class DepthExceededError extends TsfgaError {
+  constructor(detail: string) {
+    super(`Check resolution too complex: ${detail}`);
+    this.name = "DepthExceededError";
+  }
+}
+
 export class InvalidStoredDataError extends TsfgaError {
   constructor(table: string, column: string, detail: string) {
     super(`Invalid data in ${table}.${column}: ${detail}`);

@@ -1,5 +1,6 @@
 import { evaluateTupleCondition } from "./conditions.ts";
 import { ContextualTupleStore } from "./contextual-store.ts";
+import { DepthExceededError } from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
 import { validateTupleWrite } from "./tuple-validation.ts";
 import type { CheckOptions, CheckRequest, RelationConfig } from "./types.ts";
@@ -13,28 +14,64 @@ import type { CheckOptions, CheckRequest, RelationConfig } from "./types.ts";
  * - Tuple-to-userset
  * - Exclusion (but not)
  * - Intersection (and)
+ *
+ * Error semantics:
+ * - Throws DepthExceededError when the recursion budget
+ *   (`options.maxDepth`, default 10) is exhausted or a cycle is
+ *   detected in the resolution path. Exhaustion is never converted
+ *   to `false`: inside an exclusion or intersection branch that
+ *   would fail open.
+ * - Within union-style resolution (steps 1-5), a branch that
+ *   resolves `true` wins even if a sibling branch threw
+ *   DepthExceededError. If no branch resolves `true` and at least
+ *   one errored, the error propagates.
+ * - Contextual tuples are validated against relation configs
+ *   exactly like `addTuple` (RelationConfigNotFoundError,
+ *   InvalidSubjectTypeError, UsersetNotAllowedError).
  */
 export async function check(
   store: TupleStore,
   request: CheckRequest,
   options: CheckOptions = {},
-  depth: number = 0,
 ): Promise<boolean> {
   const maxDepth = options.maxDepth ?? 10;
 
-  // Prevent infinite recursion
-  if (depth > maxDepth) {
-    return false;
-  }
-
-  // Wrap store with contextual tuples at depth 0 only.
+  // Wrap store with contextual tuples for the whole request.
   // Contextual tuples must pass the same validation as addTuple.
-  if (depth === 0 && request.contextualTuples?.length) {
+  let effectiveStore = store;
+  if (request.contextualTuples?.length) {
     for (const tuple of request.contextualTuples) {
       await validateTupleWrite(store, tuple);
     }
-    store = new ContextualTupleStore(store, request.contextualTuples);
+    effectiveStore = new ContextualTupleStore(store, request.contextualTuples);
   }
+
+  return checkNode(effectiveStore, request, maxDepth, 0, new Set());
+}
+
+/**
+ * Resolve one node of the check graph. Tracks the current
+ * resolution path in `path` (keys of `objectType:objectId#relation`
+ * — the subject is constant per request) so cycles throw
+ * DepthExceededError instead of silently resolving.
+ */
+async function checkNode(
+  store: TupleStore,
+  request: CheckRequest,
+  maxDepth: number,
+  depth: number,
+  path: ReadonlySet<string>,
+): Promise<boolean> {
+  if (depth > maxDepth) {
+    throw new DepthExceededError(`max depth of ${maxDepth} exceeded`);
+  }
+
+  const key = `${request.objectType}:${request.objectId}#${request.relation}`;
+  if (path.has(key)) {
+    throw new DepthExceededError(`cycle detected at ${key}`);
+  }
+  const visited = new Set(path);
+  visited.add(key);
 
   // Fetch relation config once for use across all steps
   const config = await store.findRelationConfig(
@@ -42,26 +79,42 @@ export async function check(
     request.relation,
   );
 
-  // If the relation has an intersection, ALL operands must be true
-  if (config?.intersection) {
-    return checkIntersection(store, request, config, options, depth);
-  }
+  // Base resolution: intersection replaces steps 1-5 when present
+  const resolveBase = (): Promise<boolean> =>
+    config?.intersection
+      ? checkIntersection(store, request, config, maxDepth, depth, visited)
+      : checkBase(store, request, config, maxDepth, depth, visited);
 
-  // Run the base check and exclusion in parallel when excludedBy is set
+  // Exclusion applies on top of the base result — including on top
+  // of intersection results. Errors in either branch fail closed:
+  // a definite base `false` denies regardless of the exclusion
+  // branch, but a base grant with an errored exclusion branch must
+  // propagate the error rather than grant.
   if (config?.excludedBy) {
-    const [baseResult, isExcluded] = await Promise.all([
-      checkBase(store, request, config, options, depth),
-      check(
+    const excludedBy = config.excludedBy;
+    const [baseResult, exclusionResult] = await Promise.allSettled([
+      resolveBase(),
+      checkNode(
         store,
-        { ...request, relation: config.excludedBy },
-        options,
+        { ...request, relation: excludedBy },
+        maxDepth,
         depth + 1,
+        visited,
       ),
     ]);
-    return baseResult && !isExcluded;
+    if (baseResult.status === "rejected") {
+      throw baseResult.reason;
+    }
+    if (!baseResult.value) {
+      return false;
+    }
+    if (exclusionResult.status === "rejected") {
+      throw exclusionResult.reason;
+    }
+    return !exclusionResult.value;
   }
 
-  return checkBase(store, request, config, options, depth);
+  return resolveBase();
 }
 
 /**
@@ -71,8 +124,9 @@ async function checkBase(
   store: TupleStore,
   request: CheckRequest,
   config: RelationConfig | null,
-  options: CheckOptions,
+  maxDepth: number,
   depth: number,
+  path: ReadonlySet<string>,
 ): Promise<boolean> {
   // Batch initial reads: direct, wildcard, and userset tuples
   const [directTuple, wildcardTuple, usersetTuples] = await Promise.all([
@@ -122,7 +176,7 @@ async function checkBase(
       if (!(await evaluateTupleCondition(store, userset, request.context))) {
         return false;
       }
-      return check(
+      return checkNode(
         store,
         {
           objectType: userset.subjectType,
@@ -132,8 +186,9 @@ async function checkBase(
           subjectId: request.subjectId,
           context: request.context,
         },
-        options,
+        maxDepth,
         depth + 1,
+        path,
       );
     });
   }
@@ -142,11 +197,12 @@ async function checkBase(
   if (config?.impliedBy) {
     for (const impliedRelation of config.impliedBy) {
       handlers.push(() =>
-        check(
+        checkNode(
           store,
           { ...request, relation: impliedRelation },
-          options,
+          maxDepth,
           depth + 1,
+          path,
         ),
       );
     }
@@ -156,11 +212,12 @@ async function checkBase(
   if (config?.computedUserset) {
     const computedUserset = config.computedUserset;
     handlers.push(() =>
-      check(
+      checkNode(
         store,
         { ...request, relation: computedUserset },
-        options,
+        maxDepth,
         depth + 1,
+        path,
       ),
     );
   }
@@ -186,7 +243,7 @@ async function checkBase(
         const linkedTuples = linkedResults[i] ?? [];
         for (const linked of linkedTuples) {
           ttuHandlers.push(() =>
-            check(
+            checkNode(
               store,
               {
                 objectType: linked.subjectType,
@@ -196,8 +253,9 @@ async function checkBase(
                 subjectId: request.subjectId,
                 context: request.context,
               },
-              options,
+              maxDepth,
               depth + 1,
+              path,
             ),
           );
         }
@@ -217,8 +275,9 @@ async function checkIntersection(
   store: TupleStore,
   request: CheckRequest,
   config: RelationConfig,
-  options: CheckOptions,
+  maxDepth: number,
   depth: number,
+  path: ReadonlySet<string>,
 ): Promise<boolean> {
   const operands = config.intersection;
   if (!operands) return true;
@@ -227,14 +286,17 @@ async function checkIntersection(
 
   for (const operand of operands) {
     if (operand.type === "direct") {
-      handlers.push(() => checkBase(store, request, config, options, depth));
+      handlers.push(() =>
+        checkBase(store, request, config, maxDepth, depth, path),
+      );
     } else if (operand.type === "computedUserset") {
       handlers.push(() =>
-        check(
+        checkNode(
           store,
           { ...request, relation: operand.relation },
-          options,
+          maxDepth,
           depth + 1,
+          path,
         ),
       );
     } else {
@@ -248,7 +310,7 @@ async function checkIntersection(
         const ttuHandlers: Array<() => Promise<boolean>> = [];
         for (const linked of linkedTuples) {
           ttuHandlers.push(() =>
-            check(
+            checkNode(
               store,
               {
                 objectType: linked.subjectType,
@@ -258,8 +320,9 @@ async function checkIntersection(
                 subjectId: request.subjectId,
                 context: request.context,
               },
-              options,
+              maxDepth,
               depth + 1,
+              path,
             ),
           );
         }
@@ -272,8 +335,11 @@ async function checkIntersection(
 }
 
 /**
- * Run handlers concurrently. Resolves true on first true (short-circuit).
- * Resolves false when all return false. Rejects on first error.
+ * Run handlers concurrently. Resolves true on first true
+ * (short-circuit). A `true` result wins even when sibling branches
+ * rejected (e.g. with DepthExceededError). When no handler resolves
+ * true, rejects with the first error if any handler rejected;
+ * resolves false otherwise.
  */
 async function resolveUnion(
   handlers: Array<() => Promise<boolean>>,
@@ -284,27 +350,46 @@ async function resolveUnion(
 
   return new Promise((resolve, reject) => {
     let remaining = handlers.length;
+    let firstError: unknown;
+    let hasError = false;
+
+    const settleIfDone = () => {
+      remaining--;
+      if (remaining === 0) {
+        if (hasError) {
+          reject(firstError);
+        } else {
+          resolve(false);
+        }
+      }
+    };
+
     for (const handler of handlers) {
       handler().then(
         (result) => {
           if (result) {
             resolve(true);
           } else {
-            remaining--;
-            if (remaining === 0) {
-              resolve(false);
-            }
+            settleIfDone();
           }
         },
-        (error) => reject(error),
+        (error) => {
+          if (!hasError) {
+            hasError = true;
+            firstError = error;
+          }
+          settleIfDone();
+        },
       );
     }
   });
 }
 
 /**
- * Run handlers concurrently. Resolves false on first false (short-circuit).
- * Resolves true when all return true. Rejects on first error.
+ * Run handlers concurrently. Resolves false on first false
+ * (short-circuit). Resolves true when all return true. Rejects on
+ * first error (fail closed: an errored operand never counts as
+ * satisfied).
  */
 async function resolveIntersection(
   handlers: Array<() => Promise<boolean>>,

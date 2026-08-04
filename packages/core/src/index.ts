@@ -14,6 +14,10 @@ export interface TsfgaClient {
   /**
    * Check whether a subject has a relation on an object.
    *
+   * @throws DepthExceededError when the recursion budget
+   *   (`maxDepth`, default 10) is exhausted or a cycle is detected
+   *   in the resolution path. Exhaustion never resolves to `false`
+   *   — a truncated exclusion branch must not grant access.
    * @throws RelationConfigNotFoundError, InvalidSubjectTypeError,
    *   or UsersetNotAllowedError when a contextual tuple fails the
    *   same validation `addTuple` applies.
@@ -134,6 +138,7 @@ export { ContextualTupleStore } from "./contextual-store.ts";
 export {
   ConditionEvaluationError,
   ConditionNotFoundError,
+  DepthExceededError,
   InvalidStoredDataError,
   InvalidSubjectTypeError,
   RelationConfigNotFoundError,

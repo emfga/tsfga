@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { check } from "../src/check.ts";
 import {
+  DepthExceededError,
   InvalidSubjectTypeError,
   RelationConfigNotFoundError,
   UsersetNotAllowedError,
@@ -856,6 +857,545 @@ describe("check algorithm", () => {
     });
   });
 
+  describe("Max depth protection", () => {
+    /**
+     * Build a computedUserset chain lvl0 -> lvl1 -> ... -> lvlN
+     * with a direct tuple at lvlN. Resolving lvl0 requires N
+     * recursion steps.
+     */
+    function buildChain(length: number) {
+      for (let i = 0; i < length; i++) {
+        store.relationConfigs.push(
+          makeConfig({
+            objectType: "doc",
+            relation: `lvl${i}`,
+            computedUserset: `lvl${i + 1}`,
+          }),
+        );
+      }
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: `lvl${length}`,
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+    }
+
+    test("resolves when chain depth is exactly at the limit", async () => {
+      buildChain(3);
+      expect(
+        await check(
+          store,
+          {
+            objectType: "doc",
+            objectId: "1",
+            relation: "lvl0",
+            subjectType: "user",
+            subjectId: "alice",
+          },
+          { maxDepth: 3 },
+        ),
+      ).toBe(true);
+    });
+
+    test("throws DepthExceededError beyond the limit", async () => {
+      buildChain(3);
+      await expect(
+        check(
+          store,
+          {
+            objectType: "doc",
+            objectId: "1",
+            relation: "lvl0",
+            subjectType: "user",
+            subjectId: "alice",
+          },
+          { maxDepth: 2 },
+        ),
+      ).rejects.toBeInstanceOf(DepthExceededError);
+    });
+  });
+
+  describe("Cycle detection", () => {
+    test("throws DepthExceededError on cyclic implied_by", async () => {
+      store.relationConfigs.push(
+        makeConfig({ objectType: "doc", relation: "a", impliedBy: ["b"] }),
+        makeConfig({ objectType: "doc", relation: "b", impliedBy: ["a"] }),
+      );
+
+      await expect(
+        check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "a",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).rejects.toBeInstanceOf(DepthExceededError);
+    });
+
+    test("true branch wins over a cyclic sibling branch", async () => {
+      // member is implied by both a cyclic relation and admin;
+      // the cyclic branch throws but the admin branch grants.
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "member",
+          impliedBy: ["looper", "admin"],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "looper",
+          impliedBy: ["member"],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "admin",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "admin",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "member",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toBe(true);
+    });
+
+    test("propagates error when no sibling branch grants", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "member",
+          impliedBy: ["looper", "admin"],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "looper",
+          impliedBy: ["member"],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "admin",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      // alice has no admin tuple: the cyclic branch's error must
+      // surface instead of resolving false.
+      await expect(
+        check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "member",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).rejects.toBeInstanceOf(DepthExceededError);
+    });
+  });
+
+  describe("Exclusion fails closed on depth exhaustion", () => {
+    test("cyclic exclusion branch throws instead of granting", async () => {
+      // carl has a direct editor tuple, but the excludedBy relation
+      // cannot be resolved (cyclic). Pre-0.3.0 this failed open:
+      // the truncated exclusion read as "not excluded" and granted.
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "editor",
+          directlyAssignableTypes: ["user"],
+          excludedBy: "banned",
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "banned",
+          impliedBy: ["banned_loop"],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "banned_loop",
+          impliedBy: ["banned"],
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "editor",
+          subjectType: "user",
+          subjectId: "carl",
+        }),
+      );
+
+      await expect(
+        check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "editor",
+          subjectType: "user",
+          subjectId: "carl",
+        }),
+      ).rejects.toBeInstanceOf(DepthExceededError);
+    });
+
+    test("deep exclusion branch throws instead of granting", async () => {
+      // The exclusion chain needs more depth than maxDepth allows.
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "editor",
+          directlyAssignableTypes: ["user"],
+          excludedBy: "b0",
+        }),
+      );
+      for (let i = 0; i < 5; i++) {
+        store.relationConfigs.push(
+          makeConfig({
+            objectType: "doc",
+            relation: `b${i}`,
+            computedUserset: `b${i + 1}`,
+          }),
+        );
+      }
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "editor",
+          subjectType: "user",
+          subjectId: "carl",
+        }),
+      );
+
+      await expect(
+        check(
+          store,
+          {
+            objectType: "doc",
+            objectId: "1",
+            relation: "editor",
+            subjectType: "user",
+            subjectId: "carl",
+          },
+          { maxDepth: 3 },
+        ),
+      ).rejects.toBeInstanceOf(DepthExceededError);
+    });
+
+    test("base false denies even when exclusion branch errors", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "editor",
+          directlyAssignableTypes: ["user"],
+          excludedBy: "banned",
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "banned",
+          impliedBy: ["banned"],
+        }),
+      );
+      // No editor tuple: definite deny regardless of exclusion.
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "editor",
+          subjectType: "user",
+          subjectId: "carl",
+        }),
+      ).toBe(false);
+    });
+  });
+
+  describe("Multi-entry tuple-to-userset", () => {
+    beforeEach(() => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "project",
+          relation: "editor",
+          tupleToUserset: [
+            { tupleset: "owner", computedUserset: "project_editor" },
+            { tupleset: "partner", computedUserset: "project_editor" },
+          ],
+        }),
+      );
+    });
+
+    test("grants via the first TTU entry", async () => {
+      store.tuples.push(
+        makeTuple({
+          objectType: "project",
+          objectId: "p1",
+          relation: "owner",
+          subjectType: "org",
+          subjectId: "acme",
+        }),
+        makeTuple({
+          objectType: "org",
+          objectId: "acme",
+          relation: "project_editor",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+      expect(
+        await check(store, {
+          objectType: "project",
+          objectId: "p1",
+          relation: "editor",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toBe(true);
+    });
+
+    test("grants via the second TTU entry", async () => {
+      store.tuples.push(
+        makeTuple({
+          objectType: "project",
+          objectId: "p1",
+          relation: "partner",
+          subjectType: "org",
+          subjectId: "globex",
+        }),
+        makeTuple({
+          objectType: "org",
+          objectId: "globex",
+          relation: "project_editor",
+          subjectType: "user",
+          subjectId: "bob",
+        }),
+      );
+      expect(
+        await check(store, {
+          objectType: "project",
+          objectId: "p1",
+          relation: "editor",
+          subjectType: "user",
+          subjectId: "bob",
+        }),
+      ).toBe(true);
+    });
+
+    test("denies when neither entry grants", async () => {
+      store.tuples.push(
+        makeTuple({
+          objectType: "project",
+          objectId: "p1",
+          relation: "owner",
+          subjectType: "org",
+          subjectId: "acme",
+        }),
+      );
+      expect(
+        await check(store, {
+          objectType: "project",
+          objectId: "p1",
+          relation: "editor",
+          subjectType: "user",
+          subjectId: "mallory",
+        }),
+      ).toBe(false);
+    });
+  });
+
+  describe("Intersection with direct operand", () => {
+    beforeEach(() => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "publish",
+          directlyAssignableTypes: ["user"],
+          intersection: [
+            { type: "direct" },
+            { type: "computedUserset", relation: "approved" },
+          ],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "approved",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+    });
+
+    test("grants when direct tuple and other operand hold", async () => {
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "publish",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "approved",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "publish",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toBe(true);
+    });
+
+    test("denies when direct operand is missing", async () => {
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "approved",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "publish",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toBe(false);
+    });
+
+    test("denies when the other operand is missing", async () => {
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "publish",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "publish",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toBe(false);
+    });
+  });
+
+  describe("Intersection combined with exclusion", () => {
+    test("excludedBy applies on top of intersection result", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "publish",
+          directlyAssignableTypes: ["user"],
+          intersection: [
+            { type: "direct" },
+            { type: "computedUserset", relation: "approved" },
+          ],
+          excludedBy: "banned",
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "approved",
+          directlyAssignableTypes: ["user"],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "banned",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "publish",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "approved",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "banned",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+
+      // Intersection is satisfied, but alice is banned.
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "publish",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toBe(false);
+
+      // bob satisfies the intersection and is not banned.
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "publish",
+          subjectType: "user",
+          subjectId: "bob",
+        }),
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "approved",
+          subjectType: "user",
+          subjectId: "bob",
+        }),
+      );
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "publish",
+          subjectType: "user",
+          subjectId: "bob",
+        }),
+      ).toBe(true);
+    });
+  });
+
   describe("Contextual tuple validation", () => {
     test("throws when relation config is missing", async () => {
       await expect(
@@ -990,40 +1530,6 @@ describe("check algorithm", () => {
           ],
         }),
       ).rejects.toBeInstanceOf(UsersetNotAllowedError);
-    });
-  });
-
-  describe("Max depth protection", () => {
-    test("returns false when max depth exceeded", async () => {
-      // Create circular implied_by
-      store.relationConfigs.push(
-        makeConfig({
-          objectType: "doc",
-          relation: "a",
-          impliedBy: ["b"],
-        }),
-      );
-      store.relationConfigs.push(
-        makeConfig({
-          objectType: "doc",
-          relation: "b",
-          impliedBy: ["a"],
-        }),
-      );
-
-      expect(
-        await check(
-          store,
-          {
-            objectType: "doc",
-            objectId: "1",
-            relation: "a",
-            subjectType: "user",
-            subjectId: "alice",
-          },
-          { maxDepth: 5 },
-        ),
-      ).toBe(false);
     });
   });
 
@@ -1517,6 +2023,54 @@ describe("createTsfga client", () => {
           subjectRelation: "member",
         },
       ]);
+    });
+  });
+
+  describe("maxDepth option", () => {
+    test("client-level maxDepth applies to checks", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "a",
+          computedUserset: "b",
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "b",
+          computedUserset: "c",
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "c",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+
+      const shallow = createTsfga(store, { maxDepth: 1 });
+      await expect(
+        shallow.check({
+          objectType: "doc",
+          objectId: "1",
+          relation: "a",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).rejects.toBeInstanceOf(DepthExceededError);
+
+      const deep = createTsfga(store, { maxDepth: 2 });
+      expect(
+        await deep.check({
+          objectType: "doc",
+          objectId: "1",
+          relation: "a",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toBe(true);
     });
   });
 });
