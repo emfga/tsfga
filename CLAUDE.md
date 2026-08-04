@@ -953,9 +953,15 @@ and the `register.mjs` file registers the bun:test loader.
 **Deno shim** (`tests/deno/`): A `deno.json` import map remaps
 `"bun:test"` to a local shim that re-exports `@std/testing/bdd` and
 `@std/expect`. The import map also maps `@marcbachmann/cel-js` to its
-`npm:` equivalent, and `nodeModulesDir: "auto"` enables resolution from
-the existing `node_modules/`. No transpiler needed (Deno has native
-TypeScript support). Tests run via:
+`npm:` equivalent, and `nodeModulesDir: "auto"` lets Deno *manage*
+`node_modules/` itself, resolving `npm:` specifiers through the nearest
+`package.json` rather than reusing whatever Bun installed. That is why
+the bare `npm:kysely`-style specifiers in the import map are already
+pinned — the versions come from the workspace manifests, which are
+exact. Adding an explicit version that disagrees with the consuming
+`package.json` makes Deno install a second copy under
+`node_modules/.deno`, so leave them bare. No transpiler needed (Deno
+has native TypeScript support). Tests run via:
 `deno test --allow-all --config ../../tests/deno/deno.json tests/`.
 
 The shims cover: `describe`, `test`, `beforeEach`, `afterEach`,

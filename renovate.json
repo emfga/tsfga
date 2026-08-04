@@ -3,7 +3,6 @@
   "extends": [
     ":dependencyDashboardApproval",
     ":disableRateLimiting",
-    ":docker",
     ":enableVulnerabilityAlerts",
     ":pinAllExceptPeerDependencies",
     ":rebaseStalePrs",
@@ -17,7 +16,67 @@
   "commitMessageExtra": "",
   "commitMessageLowerCase": "never",
   "commitMessageTopic": "{{depName}}",
+  "semanticCommits": "disabled",
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "**/__fixtures__/**"
+  ],
+  "lockFileMaintenance": {
+    "commitMessageAction": "Refresh lockfile"
+  },
   "vulnerabilityAlerts": {
-    "dependencyDashboardApproval": true
-  }
+    "dependencyDashboardApproval": false,
+    "addLabels": ["security"]
+  },
+  "customManagers": [
+    {
+      "description": "Track the packageManager field (bun is not detected natively)",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)package\\.json$/"],
+      "matchStrings": [
+        "\"packageManager\":\\s*\"(?<depName>[^\"@]+)@(?<currentValue>[^\"+]+)"
+      ],
+      "datasourceTemplate": "npm",
+      "versioningTemplate": "npm"
+    },
+    {
+      "description": "Track npm CLIs pinned inline in workflow run blocks",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": [
+        "(?:bunx|npx|npm install -g[^\\n]*)\\s+(?<depName>@?[\\w.-]+(?:/[\\w.-]+)?)@(?<currentValue>\\d[^\\s\\\\)]*)"
+      ],
+      "datasourceTemplate": "npm",
+      "versioningTemplate": "npm"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "One PR for all GitHub Actions bumps, not one per action per digest",
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["action"],
+      "groupName": "github-actions",
+      "commitMessageTopic": "GitHub Actions"
+    },
+    {
+      "description": "One PR for image digest refreshes",
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["digest"],
+      "groupName": "docker digests"
+    },
+    {
+      "description": "One PR for all example projects. They are not workspace members, so their versions do not follow the packages automatically; the examples CI job installs, type-checks and runs each one.",
+      "matchFileNames": ["examples/**"],
+      "groupName": "examples"
+    },
+    {
+      "description": "Hold TypeScript 7: tsup's d.ts build is broken on it (rollup-plugin-dts crash in tsup#1405, TS5101 baseUrl in tsup#1388/#1390), and both packages set dts: true. Revisit when TS 7.1 is stable and those are released.",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7.0.0"
+    }
+  ]
 }
