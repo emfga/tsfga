@@ -1,4 +1,4 @@
-import { type ParseResult, parse } from "@marcbachmann/cel-js";
+import { EvaluationError, type ParseResult, parse } from "@marcbachmann/cel-js";
 import { ConditionEvaluationError, ConditionNotFoundError } from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
 import type { ConditionParameterType, Tuple } from "./types.ts";
@@ -76,7 +76,7 @@ export async function evaluateTupleCondition(
     // When a condition parameter is missing, treat the condition as
     // not satisfied (matching OpenFGA behavior where missing parameters
     // result in {allowed: false}).
-    if (error instanceof Error && error.message.includes("Unknown variable")) {
+    if (error instanceof EvaluationError && error.code === "unknown_variable") {
       return false;
     }
     throw new ConditionEvaluationError(condDef.name, error);

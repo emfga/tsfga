@@ -85,6 +85,33 @@ describe("evaluateTupleCondition", () => {
     expect(await evaluateTupleCondition(store, tuple)).toBe(true);
   });
 
+  test("returns false when a condition parameter is missing", async () => {
+    const store = new MockTupleStore();
+    store.conditionDefinitions.push({
+      name: "in_region",
+      expression: 'region == "us"',
+      parameters: { region: "string" },
+    });
+    const tuple = makeTuple({ conditionName: "in_region" });
+    // No context at all: the referenced variable is absent, which
+    // must deny (OpenFGA returns {allowed: false}), not throw.
+    expect(await evaluateTupleCondition(store, tuple)).toBe(false);
+    expect(await evaluateTupleCondition(store, tuple, {})).toBe(false);
+  });
+
+  test("returns false when one of several parameters is missing", async () => {
+    const store = new MockTupleStore();
+    store.conditionDefinitions.push({
+      name: "region_and_tier",
+      expression: 'region == "us" && tier == "gold"',
+      parameters: { region: "string", tier: "string" },
+    });
+    const tuple = makeTuple({ conditionName: "region_and_tier" });
+    expect(await evaluateTupleCondition(store, tuple, { region: "us" })).toBe(
+      false,
+    );
+  });
+
   test("throws ConditionNotFoundError for missing condition", async () => {
     const store = new MockTupleStore();
     const tuple = makeTuple({ conditionName: "nonexistent" });

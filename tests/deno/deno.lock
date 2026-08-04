@@ -7,7 +7,7 @@
     "jsr:@std/internal@^1.0.10": "1.0.12",
     "jsr:@std/internal@^1.0.12": "1.0.12",
     "jsr:@std/testing@1": "1.0.17",
-    "npm:@marcbachmann/cel-js@*": "7.5.1",
+    "npm:@marcbachmann/cel-js@8.0.0": "8.0.0",
     "npm:@openfga/sdk@*": "0.9.6",
     "npm:@openfga/syntax-transformer@*": "0.2.2",
     "npm:kysely@*": "0.29.4",
@@ -40,8 +40,8 @@
     }
   },
   "npm": {
-    "@marcbachmann/cel-js@7.5.1": {
-      "integrity": "sha512-3X+TKpt/xyPsVSU3R2bVeZQCOW5L29y+EVDOmOp2xnyD7bifNM/UypBaqs2Z6oC075p+tKtjPUT1kUwnyY7cQg==",
+    "@marcbachmann/cel-js@8.0.0": {
+      "integrity": "sha512-oaTrAziGr3zDLFiMt/yLU3nZuRMawyWQB5X1a0I7s9eGy3JYzX9l8ZXXHyMd64nzbeVFZTewuUShwsZQdK6UCA==",
       "bin": true
     },
     "@openfga/sdk@0.9.6": {
@@ -299,7 +299,7 @@
   },
   "workspace": {
     "dependencies": [
-      "npm:@marcbachmann/cel-js@*",
+      "npm:@marcbachmann/cel-js@8.0.0",
       "npm:@openfga/sdk@*",
       "npm:@openfga/syntax-transformer@*",
       "npm:kysely@*",
