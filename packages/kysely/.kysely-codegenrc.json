@@ -6,7 +6,7 @@
 	"domains": true,
 	"envFile": "../../.env",
 	"excludePattern": null,
-	"includePattern": null,
+	"includePattern": "tsfga.*",
 	"logLevel": "warn",
 	"numericParser": "number",
 	"outFile": "./src/schema.ts",
