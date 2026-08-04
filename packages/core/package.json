@@ -21,6 +21,10 @@
     "access-control",
     "zanzibar"
   ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -30,11 +34,11 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src"],
+  "files": ["dist", "src", "LICENSE"],
   "scripts": {
     "build": "tsup",
     "test": "bun test",
-    "test:node": "node --import tsx --import ../../tests/node/register.mjs --test tests/check.test.ts tests/conditions.test.ts",
+    "test:node": "node --import tsx --import ../../tests/node/register.mjs --test 'tests/*.test.ts'",
     "test:deno": "deno test --allow-all --config ../../tests/deno/deno.json tests/",
     "tsc": "tsc --noEmit"
   },

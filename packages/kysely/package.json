@@ -22,6 +22,10 @@
     "postgresql",
     "zanzibar"
   ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "publishConfig": {
     "access": "public"
   },
@@ -29,16 +33,20 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./migrations": {
+      "types": "./dist/migrations/index.d.ts",
+      "import": "./dist/migrations/index.js"
     }
   },
-  "files": ["dist", "src"],
+  "files": ["dist", "src", "LICENSE"],
   "scripts": {
     "build": "tsup",
     "db:generate": "bunx kysely-codegen --out-file src/schema.ts",
     "db:latest": "kysely migrate:latest",
     "db:rollback": "kysely migrate:rollback --all",
     "test": "bun test",
-    "test:node": "node --import tsx --import ../../tests/node/register.mjs --test tests/kysely-adapter.test.ts",
+    "test:node": "node --import tsx --import ../../tests/node/register.mjs --test 'tests/*.test.ts'",
     "test:deno": "deno test --no-check --allow-all --config ../../tests/deno/deno.json tests/",
     "tsc": "tsc --noEmit"
   },

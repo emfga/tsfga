@@ -32,6 +32,8 @@
     "@changesets/cli": "2.31.1",
     "@commitlint/cli": "21.2.1",
     "@commitlint/types": "21.2.0",
+    "publint": "0.3.23",
+    "@arethetypeswrong/cli": "0.18.5",
     "tsx": "4.23.5",
     "turbo": "2.10.8"
   }
