@@ -1012,7 +1012,7 @@ Shared lint/format config at root. Ignores `**/schema.ts` (generated) and
   the change (shown by `gitk`, `git shortlog`)
 - Body explains the *why* -- motivation, background, reasoning for the
   chosen approach -- not just *what* changed (the diff shows that)
-- Wrap body paragraphs at ~74 columns
+- Wrap body paragraphs at ~72 columns
 - Use imperative verbs: "Fix ...", "Add ...", "Make ...",
   "Refactor ...", "Remove ..."
 - When the change is based on or derived from an important external
