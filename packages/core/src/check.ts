@@ -1,6 +1,7 @@
 import { evaluateTupleCondition } from "./conditions.ts";
 import { ContextualTupleStore } from "./contextual-store.ts";
 import type { TupleStore } from "./store-interface.ts";
+import { validateTupleWrite } from "./tuple-validation.ts";
 import type { CheckOptions, CheckRequest, RelationConfig } from "./types.ts";
 
 /**
@@ -26,8 +27,12 @@ export async function check(
     return false;
   }
 
-  // Wrap store with contextual tuples at depth 0 only
+  // Wrap store with contextual tuples at depth 0 only.
+  // Contextual tuples must pass the same validation as addTuple.
   if (depth === 0 && request.contextualTuples?.length) {
+    for (const tuple of request.contextualTuples) {
+      await validateTupleWrite(store, tuple);
+    }
     store = new ContextualTupleStore(store, request.contextualTuples);
   }
 

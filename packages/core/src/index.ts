@@ -1,10 +1,6 @@
 import { check } from "./check.ts";
-import {
-  InvalidSubjectTypeError,
-  RelationConfigNotFoundError,
-  UsersetNotAllowedError,
-} from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
+import { validateTupleWrite } from "./tuple-validation.ts";
 import type {
   AddTupleRequest,
   CheckOptions,
@@ -15,15 +11,30 @@ import type {
 } from "./types.ts";
 
 export interface TsfgaClient {
+  /**
+   * Check whether a subject has a relation on an object.
+   *
+   * @throws RelationConfigNotFoundError, InvalidSubjectTypeError,
+   *   or UsersetNotAllowedError when a contextual tuple fails the
+   *   same validation `addTuple` applies.
+   */
   check(request: CheckRequest): Promise<boolean>;
   addTuple(request: AddTupleRequest): Promise<void>;
   removeTuple(request: RemoveTupleRequest): Promise<boolean>;
+  /**
+   * List object IDs of a type for which the subject passes a full
+   * check. Candidates come from `listCandidateObjectIds`
+   * (pre-filter); the optional `context` is forwarded to each
+   * per-object check for CEL condition evaluation.
+   */
   listObjects(
     objectType: string,
     relation: string,
     subjectType: string,
     subjectId: string,
+    context?: Record<string, unknown>,
   ): Promise<string[]>;
+  /** List direct subjects only — no userset/relation expansion. */
   listSubjects(
     objectType: string,
     objectId: string,
@@ -51,36 +62,7 @@ export function createTsfga(
     },
 
     async addTuple(request: AddTupleRequest): Promise<void> {
-      const config = await store.findRelationConfig(
-        request.objectType,
-        request.relation,
-      );
-      if (!config) {
-        throw new RelationConfigNotFoundError(
-          request.objectType,
-          request.relation,
-        );
-      }
-
-      if (config.directlyAssignableTypes) {
-        const subjectRef =
-          request.subjectId === "*"
-            ? `${request.subjectType}:*`
-            : request.subjectType;
-        if (!config.directlyAssignableTypes.includes(subjectRef)) {
-          throw new InvalidSubjectTypeError(
-            subjectRef,
-            request.objectType,
-            request.relation,
-            config.directlyAssignableTypes,
-          );
-        }
-      }
-
-      if (request.subjectRelation && !config.allowsUsersetSubjects) {
-        throw new UsersetNotAllowedError(request.objectType, request.relation);
-      }
-
+      await validateTupleWrite(store, request);
       return store.insertTuple(request);
     },
 
@@ -93,13 +75,14 @@ export function createTsfga(
       relation: string,
       subjectType: string,
       subjectId: string,
+      context?: Record<string, unknown>,
     ): Promise<string[]> {
       const candidateIds = await store.listCandidateObjectIds(objectType);
       const results: string[] = [];
       for (const objectId of candidateIds) {
         const allowed = await check(
           store,
-          { objectType, objectId, relation, subjectType, subjectId },
+          { objectType, objectId, relation, subjectType, subjectId, context },
           options,
         );
         if (allowed) {
@@ -158,6 +141,7 @@ export {
   UsersetNotAllowedError,
 } from "./errors.ts";
 export type { TupleStore } from "./store-interface.ts";
+export { validateTupleWrite } from "./tuple-validation.ts";
 export type {
   AddTupleRequest,
   CheckOptions,

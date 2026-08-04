@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { check } from "../src/check.ts";
+import {
+  InvalidSubjectTypeError,
+  RelationConfigNotFoundError,
+  UsersetNotAllowedError,
+} from "../src/errors.ts";
+import { createTsfga } from "../src/index.ts";
 import type { RelationConfig, Tuple } from "../src/types.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
 
@@ -752,6 +758,22 @@ describe("check algorithm", () => {
   });
 
   describe("Contextual tuples", () => {
+    beforeEach(() => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignableTypes: ["user", "team"],
+          allowsUsersetSubjects: true,
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "editor",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+    });
+
     test("finds direct match from contextual tuple", async () => {
       expect(
         await check(store, {
@@ -831,6 +853,143 @@ describe("check algorithm", () => {
           ],
         }),
       ).toBe(false);
+    });
+  });
+
+  describe("Contextual tuple validation", () => {
+    test("throws when relation config is missing", async () => {
+      await expect(
+        check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+          contextualTuples: [
+            {
+              objectType: "doc",
+              objectId: "1",
+              relation: "viewer",
+              subjectType: "user",
+              subjectId: "alice",
+            },
+          ],
+        }),
+      ).rejects.toBeInstanceOf(RelationConfigNotFoundError);
+    });
+
+    test("throws for a disallowed subject type", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      await expect(
+        check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+          contextualTuples: [
+            {
+              objectType: "doc",
+              objectId: "1",
+              relation: "viewer",
+              subjectType: "robot",
+              subjectId: "r2d2",
+            },
+          ],
+        }),
+      ).rejects.toBeInstanceOf(InvalidSubjectTypeError);
+    });
+
+    test("throws for a wildcard subject when type:* not allowed", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      await expect(
+        check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "bob",
+          contextualTuples: [
+            {
+              objectType: "doc",
+              objectId: "1",
+              relation: "viewer",
+              subjectType: "user",
+              subjectId: "*",
+            },
+          ],
+        }),
+      ).rejects.toBeInstanceOf(InvalidSubjectTypeError);
+    });
+
+    test("accepts a wildcard subject when type:* is allowed", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignableTypes: ["user", "user:*"],
+        }),
+      );
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "bob",
+          contextualTuples: [
+            {
+              objectType: "doc",
+              objectId: "1",
+              relation: "viewer",
+              subjectType: "user",
+              subjectId: "*",
+            },
+          ],
+        }),
+      ).toBe(true);
+    });
+
+    test("throws for a userset subject when not allowed", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignableTypes: ["user", "team"],
+          allowsUsersetSubjects: false,
+        }),
+      );
+      await expect(
+        check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+          contextualTuples: [
+            {
+              objectType: "doc",
+              objectId: "1",
+              relation: "viewer",
+              subjectType: "team",
+              subjectId: "writers",
+              subjectRelation: "member",
+            },
+          ],
+        }),
+      ).rejects.toBeInstanceOf(UsersetNotAllowedError);
     });
   });
 
@@ -1151,6 +1310,213 @@ describe("check algorithm", () => {
           subjectId: "emily",
         }),
       ).toBe(true);
+    });
+  });
+});
+
+describe("createTsfga client", () => {
+  let store: MockTupleStore;
+
+  beforeEach(() => {
+    store = new MockTupleStore();
+  });
+
+  describe("addTuple validation", () => {
+    test("throws RelationConfigNotFoundError without config", async () => {
+      const fga = createTsfga(store);
+      await expect(
+        fga.addTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).rejects.toBeInstanceOf(RelationConfigNotFoundError);
+    });
+
+    test("throws InvalidSubjectTypeError for wrong type", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      const fga = createTsfga(store);
+      await expect(
+        fga.addTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "robot",
+          subjectId: "r2d2",
+        }),
+      ).rejects.toBeInstanceOf(InvalidSubjectTypeError);
+    });
+
+    test("throws for wildcard subject when type:* not allowed", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      const fga = createTsfga(store);
+      await expect(
+        fga.addTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "*",
+        }),
+      ).rejects.toBeInstanceOf(InvalidSubjectTypeError);
+    });
+
+    test("accepts wildcard subject when type:* is allowed", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignableTypes: ["user", "user:*"],
+        }),
+      );
+      const fga = createTsfga(store);
+      await fga.addTuple({
+        objectType: "doc",
+        objectId: "1",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "*",
+      });
+      expect(store.tuples).toHaveLength(1);
+    });
+
+    test("throws UsersetNotAllowedError when forbidden", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignableTypes: ["user", "team"],
+          allowsUsersetSubjects: false,
+        }),
+      );
+      const fga = createTsfga(store);
+      await expect(
+        fga.addTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "team",
+          subjectId: "writers",
+          subjectRelation: "member",
+        }),
+      ).rejects.toBeInstanceOf(UsersetNotAllowedError);
+    });
+  });
+
+  describe("listObjects", () => {
+    beforeEach(() => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+        makeTuple({
+          objectType: "doc",
+          objectId: "2",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "bob",
+        }),
+      );
+    });
+
+    test("returns only objects the subject can access", async () => {
+      const fga = createTsfga(store);
+      expect(await fga.listObjects("doc", "viewer", "user", "alice")).toEqual([
+        "1",
+      ]);
+    });
+
+    test("propagates context to per-object checks", async () => {
+      store.conditionDefinitions.push({
+        name: "in_region",
+        expression: 'region == "us"',
+        parameters: { region: "string" },
+      });
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "3",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+          conditionName: "in_region",
+        }),
+      );
+      const fga = createTsfga(store);
+      expect(
+        await fga.listObjects("doc", "viewer", "user", "alice", {
+          region: "us",
+        }),
+      ).toEqual(["1", "3"]);
+      expect(
+        await fga.listObjects("doc", "viewer", "user", "alice", {
+          region: "eu",
+        }),
+      ).toEqual(["1"]);
+    });
+  });
+
+  describe("listSubjects", () => {
+    test("returns direct subjects for object + relation", async () => {
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "team",
+          subjectId: "writers",
+          subjectRelation: "member",
+        }),
+        makeTuple({
+          objectType: "doc",
+          objectId: "2",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "bob",
+        }),
+      );
+      const fga = createTsfga(store);
+      const subjects = await fga.listSubjects("doc", "1", "viewer");
+      expect(subjects).toEqual([
+        { subjectType: "user", subjectId: "alice", subjectRelation: null },
+        {
+          subjectType: "team",
+          subjectId: "writers",
+          subjectRelation: "member",
+        },
+      ]);
     });
   });
 });
