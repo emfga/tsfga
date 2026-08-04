@@ -20,10 +20,23 @@ permissions:
   contents: write
   id-token: write
 
+concurrency:
+  group: release-${{ inputs.package }}
+
 jobs:
   release:
     if: github.repository == 'emfga/tsfga'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      POSTGRES_DB: dev
+      POSTGRES_HOST: localhost
+      POSTGRES_PASSWORD: password
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: dev
+      FGA_API_URL: http://localhost:8080
+      PREFIX: tsfga
+      DATABASE_URL: postgres://dev:password@localhost:5432/dev
     steps:
       - uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
         with:
@@ -39,7 +52,14 @@ jobs:
         with:
           node-version: "22.22.0"
 
-      - run: npm install -g npm@latest
+      - uses: denoland/setup-deno@e95548e56dfa95d4e1a28d6f422fafe75c4c26fb # v2.0.3
+        with:
+          deno-version: "2.6.x"
+
+      # Trusted Publishing (OIDC) needs npm >= 11.5.1. Pin an
+      # exact version so the publish toolchain cannot change
+      # between a validate run and the publish run.
+      - run: npm install -g npm@11.19.0
 
       - run: bun install --frozen-lockfile
 
@@ -59,17 +79,26 @@ jobs:
           version=$(jq -r .version package.json)
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      # Non-fatal so a re-run after a partial failure (publish
+      # succeeded, tag/release did not) can skip the publish and
+      # still finish the remaining steps.
       - name: Check if already published
+        id: published
         run: |
           pkg="${{ inputs.package }}"
           ver="${{ steps.version.outputs.version }}"
           if npm view "${pkg}@${ver}" version \
-            2>/dev/null; then
-            echo "::error::${pkg}@${ver} is already" \
-              " published on npm."
-            exit 1
+            > /dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${pkg}@${ver} is already on" \
+              "npm; publish will be skipped."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "${pkg}@${ver} is not yet published."
           fi
-          echo "${pkg}@${ver} is not yet published."
+
+      - name: Start infrastructure
+        run: docker compose up -d --wait
 
       - name: Build all packages
         run: bun run build
@@ -77,16 +106,36 @@ jobs:
       - name: Type check
         run: bun run tsc
 
-      - name: Validate (dry run)
-        if: "!inputs.publish"
+      - name: Run migrations
+        run: bun run db:latest
+
+      - name: Run tests (Bun)
+        run: bun run turbo:test
+
+      - name: Run tests (Node.js)
+        run: bun run turbo:test:node
+
+      - name: Run tests (Deno)
+        run: bun run turbo:test:deno
+
+      # attw ignores node10/node16-cjs resolutions: the packages
+      # are deliberately ESM-only (see Q3 in the release plan).
+      - name: Packaging checks
         working-directory: ${{ steps.pkg.outputs.dir }}
         run: |
+          bunx publint@0.3.23
+          bunx @arethetypeswrong/cli@0.18.5 \
+            --pack . --profile esm-only
           npm pack --dry-run
-          echo "Validation complete. Skipping publish."
+
+      - name: Validation summary
+        if: "!inputs.publish"
+        run: echo "Validation complete. Skipping publish."
 
       - name: Resolve workspace protocol
         if: >-
           inputs.publish
+          && steps.published.outputs.published == 'false'
           && inputs.package == '@tsfga/kysely'
         run: |
           dir="${{ steps.pkg.outputs.dir }}"
@@ -100,13 +149,16 @@ jobs:
           mv "${dir}/package.tmp" "${dir}/package.json"
 
       - name: Publish to npm
-        if: inputs.publish
+        if: >-
+          inputs.publish
+          && steps.published.outputs.published == 'false'
         working-directory: ${{ steps.pkg.outputs.dir }}
         run: npm publish --provenance --access public
 
       - name: Revert workspace resolution
         if: >-
           inputs.publish
+          && steps.published.outputs.published == 'false'
           && inputs.package == '@tsfga/kysely'
         run: |
           dir="${{ steps.pkg.outputs.dir }}"
@@ -116,7 +168,12 @@ jobs:
         if: inputs.publish
         run: |
           tag="${{ inputs.package }}@${{ steps.version.outputs.version }}"
-          git tag "$tag"
+          if git rev-parse -q --verify \
+            "refs/tags/$tag" > /dev/null; then
+            echo "Tag $tag already exists; skipping."
+          else
+            git tag "$tag"
+          fi
 
       - name: Push tag
         if: inputs.publish
@@ -140,6 +197,8 @@ jobs:
       - name: Generate release notes
         if: inputs.publish
         id: notes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           notes=$(
             bash scripts/release-notes.sh \
@@ -155,8 +214,13 @@ jobs:
         if: inputs.publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES: ${{ steps.notes.outputs.body }}
         run: |
           tag="${{ inputs.package }}@${{ steps.version.outputs.version }}"
-          gh release create "$tag" \
-            --title "$tag" \
-            --notes "${{ steps.notes.outputs.body }}"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "Release $tag already exists; skipping."
+          else
+            gh release create "$tag" \
+              --title "$tag" \
+              --notes "$NOTES"
+          fi
