@@ -5,6 +5,20 @@ Notable changes to `@tsfga/core`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
+## 0.3.1 — 2026-08
+
+Maintenance release. No changes to the published code — the
+package contents are identical to 0.3.0.
+
+### Changed
+
+- Release tooling: the publish job pins Node 24.19.0 and uses its
+  bundled npm 11.17.0 for Trusted Publishing, and CI actions moved
+  off the deprecated Node 20 runtime.
+- CI now builds and runs the `examples/node-kysely` example
+  against the workspace packages, so the documented consumer
+  setup is verified on every run.
+
 ## 0.3.0 — 2026-08
 
 ### Breaking changes
