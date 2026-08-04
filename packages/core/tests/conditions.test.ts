@@ -160,6 +160,28 @@ describe("evaluateTupleCondition", () => {
     );
   });
 
+  test("redefined condition evaluates the new expression", async () => {
+    const store = new MockTupleStore();
+    store.conditionDefinitions.push({
+      name: "threshold",
+      expression: "x > 5",
+      parameters: { x: "int" },
+    });
+    const tuple = makeTuple({ conditionName: "threshold" });
+    expect(await evaluateTupleCondition(store, tuple, { x: 10 })).toBe(true);
+
+    // Redefine the condition with a stricter expression. The
+    // compiled-expression cache is keyed by expression source, so
+    // the new expression must take effect immediately.
+    await store.upsertConditionDefinition({
+      name: "threshold",
+      expression: "x > 100",
+      parameters: { x: "int" },
+    });
+    expect(await evaluateTupleCondition(store, tuple, { x: 10 })).toBe(false);
+    expect(await evaluateTupleCondition(store, tuple, { x: 200 })).toBe(true);
+  });
+
   test("handles numeric comparisons", async () => {
     const store = new MockTupleStore();
     store.conditionDefinitions.push({

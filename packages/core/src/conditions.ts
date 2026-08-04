@@ -3,7 +3,13 @@ import { ConditionEvaluationError, ConditionNotFoundError } from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
 import type { ConditionParameterType, Tuple } from "./types.ts";
 
-/** Cache compiled CEL expressions by condition name */
+/**
+ * Cache compiled CEL expressions keyed by the expression source
+ * text. Content keying makes staleness impossible: redefining a
+ * condition with a new expression parses (and caches) the new
+ * source, while identical expressions share one compiled entry —
+ * even across condition names and stores.
+ */
 const exprCache = new Map<string, ParseResult>();
 
 /** Pre-compiled coercion helpers for timestamp/duration strings */
@@ -63,10 +69,10 @@ export async function evaluateTupleCondition(
     }
   }
 
-  let compiled = exprCache.get(condDef.name);
+  let compiled = exprCache.get(condDef.expression);
   if (!compiled) {
     compiled = parse(condDef.expression);
-    exprCache.set(condDef.name, compiled);
+    exprCache.set(condDef.expression, compiled);
   }
 
   try {
