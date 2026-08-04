@@ -66,7 +66,18 @@ jobs:
       # Trusted Publishing (OIDC) needs npm >= 11.5.1. Pin an
       # exact version so the publish toolchain cannot change
       # between a validate run and the publish run.
-      - run: npm install -g npm@11.19.0
+      #
+      # Install into an explicit prefix and put that first on
+      # PATH rather than self-updating the global npm: where a
+      # bare "npm install -g npm" lands depends on the ambient
+      # prefix, and when it landed off-PATH the publish step
+      # silently kept using Node's bundled npm 10, which has no
+      # OIDC support at all.
+      - name: Install npm with Trusted Publishing support
+        run: |
+          npm install -g --prefix "${RUNNER_TEMP}/npm-cli" \
+            npm@11.19.0
+          echo "${RUNNER_TEMP}/npm-cli/bin" >> "$GITHUB_PATH"
 
       - run: bun install --frozen-lockfile
 
@@ -155,16 +166,28 @@ jobs:
             "${dir}/package.json" > "${dir}/package.tmp"
           mv "${dir}/package.tmp" "${dir}/package.json"
 
-      # npm skips the OIDC exchange silently (log.silly)
-      # when the id-token request variables are missing,
-      # then fails with a bare ENEEDAUTH that names the
-      # wrong cause. Check the preconditions up front.
+      # npm skips the OIDC exchange silently (log.silly) when
+      # it is too old or the id-token request variables are
+      # missing, then fails with a bare ENEEDAUTH that names
+      # the wrong cause. Check both preconditions up front.
       - name: Verify Trusted Publishing preconditions
         if: >-
           inputs.publish
           && steps.published.outputs.published == 'false'
         run: |
-          echo "npm $(npm --version)"
+          version=$(npm --version)
+          echo "npm ${version} at $(command -v npm)"
+          required=11.5.1
+          older=$(
+            printf '%s\n%s\n' "$required" "$version" \
+              | sort -V | head -n 1
+          )
+          if [ "$older" != "$required" ]; then
+            echo "::error::npm ${version} predates Trusted" \
+              "Publishing support (needs >= ${required}), so" \
+              "publish would fail with ENEEDAUTH."
+            exit 1
+          fi
           if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] \
             || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
             echo "::error::OIDC id-token request variables are" \

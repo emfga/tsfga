@@ -161,5 +161,14 @@ which reads like a missing token rather than a missing
 permission. The "Verify Trusted Publishing preconditions"
 step exists to catch that case with a useful message.
 
+npm itself only learned Trusted Publishing in 11.5.1, and
+Node 22 still bundles npm 10, so the workflow installs a
+pinned npm into `$RUNNER_TEMP/npm-cli` and prepends it to
+`PATH`. Self-updating the global npm is not reliable here:
+it reports success while landing somewhere that is not the
+`npm` later steps resolve, and npm 10 skips the OIDC
+exchange with the same silent ENEEDAUTH. The preconditions
+step also asserts the version for that reason.
+
 **Tag convention:** `@tsfga/core@0.3.0`,
 `@tsfga/kysely@0.3.0`.
