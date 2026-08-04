@@ -3,6 +3,17 @@
 Step-by-step guide for publishing `@tsfga/core` or
 `@tsfga/kysely` to npm.
 
+The release workflow is the **only** publish path. There is
+no local publish: the former root `release` and `version`
+npm scripts (which called `changeset publish` /
+`changeset version` outside the guarded workflow) have been
+removed. Versions are bumped with `scripts/bump.sh`;
+changesets exist only to document changes for release notes.
+
+> Note: the release-workflow safeguards described below
+> (test gate, packaging checks, idempotent re-run) ship as
+> part of the 0.3.0 release-hardening changes.
+
 ## Prerequisites
 
 - Push access to `emfga/tsfga`
@@ -17,9 +28,12 @@ scripts/bump.sh packages/core minor   # or patch / major
 scripts/bump.sh packages/kysely minor
 ```
 
-Commit the version bump, open a PR, and merge. Optionally
-add a changeset (`bun run changeset`) to document the
-change for release notes.
+The script updates `package.json` (including the
+`@tsfga/core` peer/dev range in `packages/kysely`) and
+`bun.lock`. Commit the version bump, update the package's
+`CHANGELOG.md`, open a PR, and merge. Optionally add a
+changeset (`bun run changeset`) to document the change for
+release notes.
 
 ## 2. Trigger the release workflow
 
@@ -29,10 +43,26 @@ change for release notes.
 4. Click **Run workflow**
 
 Without the publish checkbox, the workflow validates the
-build (dry run) without publishing.
+release (build, type check, tests, packaging checks)
+without publishing. Run a validate-only pass first.
 
 Release `@tsfga/core` before `@tsfga/kysely` when both
 have changes, since kysely depends on core.
+
+### What the workflow gates on
+
+Before anything is published, the workflow must pass:
+
+- **Full test suite** — unit, adapter, and conformance
+  tests run against real PostgreSQL and OpenFGA services
+  (Docker Compose), so nothing publishes from an untested
+  commit.
+- **Packaging checks** — `publint`,
+  `@arethetypeswrong/cli` (attw), and
+  `npm pack --dry-run` validate the tarball and its
+  exports map. The attw `node10` profile is ignored by
+  decision: the packages are ESM-only with no `main`
+  fallback.
 
 ## 3. Verify
 
@@ -52,22 +82,52 @@ needed.
 
 ### Using changesets for release notes
 
-When preparing a release, maintainers can create a
-changeset to document user-facing changes:
+Changesets play **no role in versioning** — versions are
+bumped by `scripts/bump.sh`, and nothing on the release
+path runs `changeset version` or `changeset publish`.
+Their only role is documentation: when preparing a
+release, maintainers can create a changeset to describe
+user-facing changes:
 
 ```bash
 bun run changeset
 ```
 
 The changeset body becomes part of release notes — write
-it for end users. Bump types: `major` (breaking), `minor`
-(features), `patch` (fixes/tooling). Changesets are not
-required — they are a convenience for structuring release
-notes.
+it for end users. Changesets are not required — they are
+a convenience for structuring release notes.
 
 Bot PRs (Renovate, Dependabot) and external contributor
 PRs do not need changesets. Maintainers add them when
 the change warrants a release note entry.
+
+## Recovering from a partial failure
+
+The workflow is safe to re-run. If a run fails **after**
+`npm publish` succeeded (e.g., a transient error while
+tagging or creating the GitHub release), re-run it with
+the same inputs: it detects that the version is already
+on npm, skips the publish, and resumes the remaining
+steps (tag, push, release notes, GitHub release) —
+without republishing.
+
+This also covers the two-package case: if the kysely
+publish fails after core succeeded, fix the problem and
+re-run — core is not republished.
+
+## Example: releasing 0.3.0
+
+1. On a branch: `scripts/bump.sh packages/core minor` and
+   `scripts/bump.sh packages/kysely minor` (both →
+   0.3.0). Update both `CHANGELOG.md` files. PR, merge.
+2. Run the **Release** workflow for `@tsfga/core` with
+   publish **unchecked** (validate-only). Repeat for
+   `@tsfga/kysely`.
+3. Run again for `@tsfga/core` with publish **checked**.
+4. After core succeeds, run for `@tsfga/kysely` with
+   publish checked.
+5. Verify both versions with `npm view` and check the
+   GitHub releases/tags.
 
 ## How it works
 
@@ -90,5 +150,5 @@ Actions workflow identity via Sigstore — no long-lived
 npm token needed. The `--provenance` flag adds attestation
 linking each package to its source repo and build.
 
-**Tag convention:** `@tsfga/core@0.2.0`,
-`@tsfga/kysely@0.2.0`.
+**Tag convention:** `@tsfga/core@0.3.0`,
+`@tsfga/kysely@0.3.0`.

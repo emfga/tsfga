@@ -31,6 +31,19 @@ The `@tsfga/core` package contains pure logic with no database dependencies.
 It communicates with storage through the `TupleStore` interface, which the
 `@tsfga/kysely` adapter implements for PostgreSQL.
 
+## Supported runtimes
+
+- **Node.js** `>= 22.12.0`. Support follows the
+  [Node.js release schedule](https://github.com/nodejs/release#release-schedule):
+  active and maintenance LTS lines only. Node.js 20 reached end of life
+  in April 2026 and is not supported.
+- **Bun** `>= 1.2`
+- **Deno** `>= 2.6`
+
+Both published packages are **ESM-only** — there is no CommonJS build.
+Use `import`; CommonJS consumers can load them via dynamic `import()`
+or Node's `require(esm)` support (stable since Node.js 22.12).
+
 ## Installation
 
 ```bash
@@ -41,17 +54,27 @@ npm install @tsfga/core
 npm install @tsfga/kysely kysely pg
 ```
 
+`@tsfga/kysely` supports `kysely >=0.27.0 <0.30.0` and `pg >=8.0.0`
+as peer dependencies.
+
 ## Quick start
 
 ```typescript
 import { createTsfga } from "@tsfga/core";
-import { KyselyTupleStore } from "@tsfga/kysely";
-import { Kysely, PostgresDialect } from "kysely";
-import Pool from "pg-pool";
+import { KyselyTupleStore, type DB } from "@tsfga/kysely";
+import { migrationProvider } from "@tsfga/kysely/migrations";
+import { Kysely, Migrator, PostgresDialect } from "kysely";
+import pg from "pg";
 
-const db = new Kysely({
-  dialect: new PostgresDialect({ pool: new Pool({ connectionString: "..." }) }),
+const db = new Kysely<DB>({
+  dialect: new PostgresDialect({
+    pool: new pg.Pool({ connectionString: "..." }),
+  }),
 });
+
+// Provision the tsfga schema (idempotent — applies pending migrations)
+const migrator = new Migrator({ db, provider: migrationProvider });
+await migrator.migrateToLatest();
 
 const store = new KyselyTupleStore(db);
 const fga = createTsfga(store);
@@ -86,7 +109,8 @@ const allowed = await fga.check({
 
 ## API
 
-`createTsfga(store, options?)` returns an `TsfgaClient` with the following methods:
+`createTsfga(store, options?)` returns a `TsfgaClient` with the
+following methods:
 
 | Method | Description |
 |---|---|
@@ -135,3 +159,12 @@ bun run infra:down            # Tear down with volumes (clean slate)
 
 PostgreSQL and OpenFGA share the same database instance but use separate schemas
 (`tsfga` and `openfga` respectively).
+
+## Releases
+
+Each package is versioned and published independently. See
+[RELEASING.md](RELEASING.md) for the release process and the
+per-package changelogs for notable changes:
+
+- [`packages/core/CHANGELOG.md`](packages/core/CHANGELOG.md)
+- [`packages/kysely/CHANGELOG.md`](packages/kysely/CHANGELOG.md)
