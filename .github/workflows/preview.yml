@@ -50,7 +50,7 @@ jobs:
 
       - name: Publish preview packages
         run: >-
-          bunx pkg-pr-new@0.0.61 publish
+          bunx pkg-pr-new@0.0.86 publish
           --comment=update
           --template './examples/node-kysely'
           './packages/core'

@@ -7,15 +7,15 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "@tsfga/core": "0.1.0",
-    "@tsfga/kysely": "0.1.0",
-    "kysely": "0.28.11",
-    "pg": "8.18.0"
+    "@tsfga/core": "0.3.0",
+    "@tsfga/kysely": "0.3.0",
+    "kysely": "0.29.4",
+    "pg": "8.22.0"
   },
   "devDependencies": {
-    "@types/node": "22.16.0",
-    "@types/pg": "8.16.0",
-    "tsx": "4.21.0",
-    "typescript": "5.9.3"
+    "@types/node": "22.20.1",
+    "@types/pg": "8.20.4",
+    "tsx": "4.23.5",
+    "typescript": "6.0.3"
   }
 }
