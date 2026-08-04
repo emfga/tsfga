@@ -553,6 +553,165 @@ describe("KyselyTupleStore", () => {
     });
   });
 
+  describe("Wildcard subjects", () => {
+    const sentinel = "00000000-0000-0000-0000-000000000000";
+
+    test("insertTuple stores the wildcard as the nil UUID", async () => {
+      await store.insertTuple({
+        objectType: "doc",
+        objectId: uuid1,
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "*",
+      });
+
+      const row = await db
+        .selectFrom("tsfga.tuples")
+        .select("subject_id")
+        .where("object_type", "=", "doc")
+        .where("object_id", "=", uuid1)
+        .executeTakeFirst();
+      expect(row?.subject_id).toBe(sentinel);
+    });
+
+    test("findDirectTuple maps the sentinel back to *", async () => {
+      await store.insertTuple({
+        objectType: "doc",
+        objectId: uuid1,
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "*",
+      });
+
+      const tuple = await store.findDirectTuple(
+        "doc",
+        uuid1,
+        "viewer",
+        "user",
+        "*",
+      );
+      expect(tuple).not.toBeNull();
+      expect(tuple?.subjectId).toBe("*");
+    });
+
+    test("findTuplesByRelation maps the sentinel back to *", async () => {
+      await store.insertTuple({
+        objectType: "doc",
+        objectId: uuid1,
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "*",
+      });
+
+      const tuples = await store.findTuplesByRelation("doc", uuid1, "viewer");
+      expect(tuples).toHaveLength(1);
+      expect(tuples[0]?.subjectId).toBe("*");
+    });
+
+    test("listDirectSubjects maps the sentinel back to *", async () => {
+      await store.insertTuple({
+        objectType: "doc",
+        objectId: uuid1,
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "*",
+      });
+      await store.insertTuple({
+        objectType: "doc",
+        objectId: uuid1,
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: uuid2,
+      });
+
+      const subjects = await store.listDirectSubjects("doc", uuid1, "viewer");
+      expect(subjects).toHaveLength(2);
+      expect(subjects.find((s) => s.subjectId === "*")).toBeTruthy();
+      expect(subjects.find((s) => s.subjectId === sentinel)).toBe(undefined);
+    });
+
+    test("deleteTuple removes a wildcard tuple by *", async () => {
+      await store.insertTuple({
+        objectType: "doc",
+        objectId: uuid1,
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "*",
+      });
+
+      expect(
+        await store.deleteTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "*",
+        }),
+      ).toBe(true);
+      expect(
+        await store.findDirectTuple("doc", uuid1, "viewer", "user", "*"),
+      ).toBeNull();
+    });
+  });
+
+  describe("Intersection round-trip", () => {
+    test("all operand kinds survive upsert and read", async () => {
+      const intersection = [
+        { type: "direct" as const },
+        { type: "computedUserset" as const, relation: "member" },
+        {
+          type: "tupleToUserset" as const,
+          tupleset: "owner",
+          computedUserset: "admin",
+        },
+      ];
+      await store.upsertRelationConfig({
+        objectType: "resource",
+        relation: "can_edit",
+        directlyAssignableTypes: ["user"],
+        impliedBy: null,
+        computedUserset: null,
+        tupleToUserset: null,
+        excludedBy: null,
+        intersection,
+        allowsUsersetSubjects: false,
+      });
+
+      const config = await store.findRelationConfig("resource", "can_edit");
+      expect(config?.intersection).toEqual(intersection);
+    });
+
+    test("upsert replaces an existing intersection", async () => {
+      await store.upsertRelationConfig({
+        objectType: "resource",
+        relation: "can_edit",
+        directlyAssignableTypes: null,
+        impliedBy: null,
+        computedUserset: null,
+        tupleToUserset: null,
+        excludedBy: null,
+        intersection: [{ type: "direct" }],
+        allowsUsersetSubjects: false,
+      });
+      await store.upsertRelationConfig({
+        objectType: "resource",
+        relation: "can_edit",
+        directlyAssignableTypes: null,
+        impliedBy: null,
+        computedUserset: null,
+        tupleToUserset: null,
+        excludedBy: null,
+        intersection: [{ type: "computedUserset", relation: "member" }],
+        allowsUsersetSubjects: false,
+      });
+
+      const config = await store.findRelationConfig("resource", "can_edit");
+      expect(config?.intersection).toEqual([
+        { type: "computedUserset", relation: "member" },
+      ]);
+    });
+  });
+
   describe("Query methods", () => {
     test("listCandidateObjectIds", async () => {
       await store.insertTuple({

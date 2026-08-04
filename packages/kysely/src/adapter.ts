@@ -12,7 +12,36 @@ import {
 import { type Kysely, sql } from "kysely";
 import type { DB, Json } from "./schema.ts";
 
+/**
+ * Storage representation of the public wildcard subject `"*"`.
+ *
+ * The `subject_id` column is `uuid`-typed, so the wildcard is stored
+ * as the nil UUID and mapped back to `"*"` on every read path. This
+ * reserves the nil UUID: a tuple written for a real subject with id
+ * `00000000-0000-0000-0000-000000000000` would be indistinguishable
+ * from a wildcard grant and would read back as `"*"`. Callers must
+ * never use the nil UUID as a real subject id.
+ */
 const WILDCARD_SENTINEL = "00000000-0000-0000-0000-000000000000";
+
+const VALID_PARAMETER_TYPES: ReadonlySet<string> = new Set([
+  "string",
+  "int",
+  "uint",
+  "bool",
+  "double",
+  "duration",
+  "timestamp",
+  "list",
+  "map",
+  "any",
+]);
+
+function isConditionParameterType(
+  value: string,
+): value is ConditionParameterType {
+  return VALID_PARAMETER_TYPES.has(value);
+}
 
 export class KyselyTupleStore implements TupleStore {
   constructor(private db: Kysely<DB>) {}
@@ -164,7 +193,10 @@ export class KyselyTupleStore implements TupleStore {
       .where("subject_type", "=", tuple.subjectType)
       .where("subject_id", "=", dbSubjectId)
       .$call((qb) => {
-        if (tuple.subjectRelation) {
+        if (
+          tuple.subjectRelation !== null &&
+          tuple.subjectRelation !== undefined
+        ) {
           return qb.where("subject_relation", "=", tuple.subjectRelation);
         }
         return qb.where("subject_relation", "is", null);
@@ -206,7 +238,7 @@ export class KyselyTupleStore implements TupleStore {
 
     return rows.map((r) => ({
       subjectType: r.subject_type,
-      subjectId: r.subject_id,
+      subjectId: r.subject_id === WILDCARD_SENTINEL ? "*" : r.subject_id,
       subjectRelation: r.subject_relation,
     }));
   }
@@ -324,22 +356,27 @@ export class KyselyTupleStore implements TupleStore {
         "expected array",
       );
     }
+    const result: Array<{ tupleset: string; computedUserset: string }> = [];
     for (const item of value) {
-      if (
-        typeof item !== "object" ||
-        item === null ||
-        Array.isArray(item) ||
-        typeof item["tupleset"] !== "string" ||
-        typeof item["computedUserset"] !== "string"
-      ) {
+      if (typeof item !== "object" || item === null || Array.isArray(item)) {
         throw new InvalidStoredDataError(
           "relation_configs",
           "tuple_to_userset",
           "each element must have string tupleset and computedUserset",
         );
       }
+      const tupleset = item["tupleset"];
+      const computedUserset = item["computedUserset"];
+      if (typeof tupleset !== "string" || typeof computedUserset !== "string") {
+        throw new InvalidStoredDataError(
+          "relation_configs",
+          "tuple_to_userset",
+          "each element must have string tupleset and computedUserset",
+        );
+      }
+      result.push({ tupleset, computedUserset });
     }
-    return value as Array<{ tupleset: string; computedUserset: string }>;
+    return result;
   }
 
   private parseIntersection(value: Json | null): IntersectionOperand[] | null {
@@ -351,6 +388,7 @@ export class KyselyTupleStore implements TupleStore {
         "expected array",
       );
     }
+    const result: IntersectionOperand[] = [];
     for (const item of value) {
       if (typeof item !== "object" || item === null || Array.isArray(item)) {
         throw new InvalidStoredDataError(
@@ -361,22 +399,27 @@ export class KyselyTupleStore implements TupleStore {
       }
       const type = item["type"];
       if (type === "direct") {
+        result.push({ type: "direct" });
         continue;
       }
       if (type === "computedUserset") {
-        if (typeof item["relation"] !== "string") {
+        const relation = item["relation"];
+        if (typeof relation !== "string") {
           throw new InvalidStoredDataError(
             "relation_configs",
             "intersection",
             "computedUserset operand must have string relation",
           );
         }
+        result.push({ type: "computedUserset", relation });
         continue;
       }
       if (type === "tupleToUserset") {
+        const tupleset = item["tupleset"];
+        const computedUserset = item["computedUserset"];
         if (
-          typeof item["tupleset"] !== "string" ||
-          typeof item["computedUserset"] !== "string"
+          typeof tupleset !== "string" ||
+          typeof computedUserset !== "string"
         ) {
           throw new InvalidStoredDataError(
             "relation_configs",
@@ -384,6 +427,7 @@ export class KyselyTupleStore implements TupleStore {
             "tupleToUserset operand must have string tupleset and computedUserset",
           );
         }
+        result.push({ type: "tupleToUserset", tupleset, computedUserset });
         continue;
       }
       throw new InvalidStoredDataError(
@@ -392,7 +436,7 @@ export class KyselyTupleStore implements TupleStore {
         `unknown operand type: ${String(type)}`,
       );
     }
-    return value as IntersectionOperand[];
+    return result;
   }
 
   private parseConditionParameters(
@@ -406,28 +450,18 @@ export class KyselyTupleStore implements TupleStore {
         "expected object",
       );
     }
-    const validTypes = new Set([
-      "string",
-      "int",
-      "uint",
-      "bool",
-      "double",
-      "duration",
-      "timestamp",
-      "list",
-      "map",
-      "any",
-    ]);
+    const result: Record<string, ConditionParameterType> = {};
     for (const [key, val] of Object.entries(value)) {
-      if (typeof val !== "string" || !validTypes.has(val)) {
+      if (typeof val !== "string" || !isConditionParameterType(val)) {
         throw new InvalidStoredDataError(
           "condition_definitions",
           "parameters",
           `invalid parameter type for "${key}": ${String(val)}`,
         );
       }
+      result[key] = val;
     }
-    return value as Record<string, ConditionParameterType>;
+    return result;
   }
 
   private parseConditionContext(
@@ -441,6 +475,6 @@ export class KyselyTupleStore implements TupleStore {
         "expected object",
       );
     }
-    return value as Record<string, unknown>;
+    return value;
   }
 }
