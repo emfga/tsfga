@@ -50,6 +50,8 @@ bun run turbo:test:conformance
 - `custom-roles` — dynamic custom role definitions
 - `public-access` — wildcard/public access
 - `blocklists` — exclusion-based access (but-not)
+- `intersection-exclusion` — exclusion applied on top
+  of an intersection result
 - `entitlements` — feature entitlement checks
 - `advanced-entitlements` — multi-condition
   entitlements

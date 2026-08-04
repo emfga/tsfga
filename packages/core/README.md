@@ -57,12 +57,45 @@ const allowed = await fga.check({
 | `check(request)` | Check if a subject has a relation on an object |
 | `addTuple(request)` | Insert or update a relationship tuple |
 | `removeTuple(request)` | Delete a relationship tuple |
-| `listObjects(objectType, relation, subjectType, subjectId)` | List object IDs the subject can access |
-| `listSubjects(objectType, objectId, relation)` | List direct subjects for an object + relation |
+| `listObjects(objectType, relation, subjectType, subjectId, context?)` | List object IDs the subject can access; `context` is forwarded to each check |
+| `listSubjects(objectType, objectId, relation)` | List direct subjects for an object + relation (no expansion) |
 | `writeRelationConfig(config)` | Insert or update a relation configuration |
 | `deleteRelationConfig(objectType, relation)` | Delete a relation configuration |
 | `writeConditionDefinition(condition)` | Insert or update a CEL condition definition |
 | `deleteConditionDefinition(name)` | Delete a CEL condition definition |
+
+## Depth limits and cycles
+
+`check()` resolves relations recursively with a configurable
+recursion budget (`maxDepth`, default 10, via the second
+argument of `createTsfga`).
+
+- When the budget is exhausted, or when the resolution path
+  revisits a node it already contains (a cyclic model),
+  `check()` throws `DepthExceededError` — mirroring OpenFGA's
+  "resolution too complex" error. Prior to 0.3.0 exhaustion
+  silently resolved to `false`, which could fail open: a
+  truncated `excludedBy` sub-check read as "not excluded" and
+  granted access.
+- Union-style branches (direct, userset, implied_by, computed
+  userset, tuple-to-userset) are resolved concurrently: a
+  branch that resolves `true` wins even if a sibling branch
+  threw `DepthExceededError`. If no branch grants and at least
+  one errored, the error propagates.
+- In exclusion (`excludedBy`) and intersection branches,
+  errors always propagate (fail closed). A definite `false`
+  base result still denies without waiting on the exclusion
+  branch's outcome.
+
+## Contextual tuples
+
+Contextual tuples passed on a `CheckRequest` are validated
+against relation configs with the same rules as `addTuple`:
+the relation config must exist, the subject type must be
+directly assignable (including `type:*` for wildcard
+subjects), and userset subjects must be allowed. Invalid
+contextual tuples throw `RelationConfigNotFoundError`,
+`InvalidSubjectTypeError`, or `UsersetNotAllowedError`.
 
 ## TupleStore interface
 
@@ -86,6 +119,12 @@ check algorithm evaluates them automatically.
 
 Context merge rule: tuple context properties take precedence
 over request context properties (matching OpenFGA behavior).
+
+Compiled CEL expressions are cached by expression source text
+(content-keyed). Redefining a condition via
+`writeConditionDefinition` therefore takes effect on the next
+evaluation — there is no per-name cache to go stale — and
+identical expressions share one compiled entry.
 
 ## License
 
