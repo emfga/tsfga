@@ -193,7 +193,7 @@ export interface CheckRequest {
 
 /** Options for the check algorithm */
 export interface CheckOptions {
-  /** Maximum recursion depth (default: 10) */
+  /** Maximum recursion depth (default: 25) */
   maxDepth?: number;
 }
 
@@ -428,7 +428,8 @@ export async function check(
 - Do NOT merge `impliedBy` and `computedUserset` into one concept; they are
   distinct OpenFGA features
 - The `depth` parameter is internal; it is not exposed in the public API
-- `maxDepth` defaults to 10 but is configurable via `CheckOptions`
+- `maxDepth` defaults to 25 (matching OpenFGA's
+  `OPENFGA_RESOLVE_NODE_LIMIT`) but is configurable via `CheckOptions`
 
 ## CEL Conditions (`packages/core/src/conditions.ts`)
 

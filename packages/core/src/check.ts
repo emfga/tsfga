@@ -17,7 +17,7 @@ import type { CheckOptions, CheckRequest, RelationConfig } from "./types.ts";
  *
  * Error semantics:
  * - Throws DepthExceededError when the recursion budget
- *   (`options.maxDepth`, default 10) is exhausted or a cycle is
+ *   (`options.maxDepth`, default 25) is exhausted or a cycle is
  *   detected in the resolution path. Exhaustion is never converted
  *   to `false`: inside an exclusion or intersection branch that
  *   would fail open.
@@ -34,7 +34,7 @@ export async function check(
   request: CheckRequest,
   options: CheckOptions = {},
 ): Promise<boolean> {
-  const maxDepth = options.maxDepth ?? 10;
+  const maxDepth = options.maxDepth ?? 25;
 
   // Wrap store with contextual tuples for the whole request.
   // Contextual tuples must pass the same validation as addTuple.

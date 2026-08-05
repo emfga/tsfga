@@ -2272,7 +2272,7 @@ export async function setupTheopenlane(): Promise<TheopenlaneSetup> {
   await beginTransaction(db);
 
   const store = new KyselyTupleStore(db);
-  const tsfgaClient = createTsfga(store, { maxDepth: 25 });
+  const tsfgaClient = createTsfga(store);
 
   for (const condDef of CONDITION_DEFS) {
     await tsfgaClient.writeConditionDefinition(condDef);

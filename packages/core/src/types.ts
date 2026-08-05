@@ -62,7 +62,7 @@ export interface CheckRequest {
 
 /** Options for the check algorithm */
 export interface CheckOptions {
-  /** Maximum recursion depth (default: 10) */
+  /** Maximum recursion depth (default: 25) */
   maxDepth?: number;
 }
 

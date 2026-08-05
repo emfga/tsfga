@@ -67,8 +67,10 @@ const allowed = await fga.check({
 ## Depth limits and cycles
 
 `check()` resolves relations recursively with a configurable
-recursion budget (`maxDepth`, default 10, via the second
-argument of `createTsfga`).
+recursion budget (`maxDepth`, default 25, via the second
+argument of `createTsfga`). The default matches OpenFGA's
+`OPENFGA_RESOLVE_NODE_LIMIT` (25), so both systems exhaust
+resolution at the same model depth.
 
 - When the budget is exhausted, or when the resolution path
   revisits a node it already contains (a cyclic model),

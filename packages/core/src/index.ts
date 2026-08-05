@@ -15,7 +15,7 @@ export interface TsfgaClient {
    * Check whether a subject has a relation on an object.
    *
    * @throws DepthExceededError when the recursion budget
-   *   (`maxDepth`, default 10) is exhausted or a cycle is detected
+   *   (`maxDepth`, default 25) is exhausted or a cycle is detected
    *   in the resolution path. Exhaustion never resolves to `false`
    *   — a truncated exclusion branch must not grant access.
    * @throws RelationConfigNotFoundError, InvalidSubjectTypeError,
