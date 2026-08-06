@@ -1,3 +1,4 @@
+import { CachingTupleStore } from "./caching-store.ts";
 import { evaluateTupleCondition } from "./conditions.ts";
 import { ContextualTupleStore } from "./contextual-store.ts";
 import { DepthExceededError } from "./errors.ts";
@@ -36,14 +37,21 @@ export async function check(
 ): Promise<boolean> {
   const maxDepth = options.maxDepth ?? 25;
 
+  // Request-scoped cache for relation configs and condition
+  // definitions: static per model, but read at every node.
+  const cachingStore = new CachingTupleStore(store);
+
   // Wrap store with contextual tuples for the whole request.
   // Contextual tuples must pass the same validation as addTuple.
-  let effectiveStore = store;
+  let effectiveStore: TupleStore = cachingStore;
   if (request.contextualTuples?.length) {
     for (const tuple of request.contextualTuples) {
-      await validateTupleWrite(store, tuple);
+      await validateTupleWrite(cachingStore, tuple);
     }
-    effectiveStore = new ContextualTupleStore(store, request.contextualTuples);
+    effectiveStore = new ContextualTupleStore(
+      cachingStore,
+      request.contextualTuples,
+    );
   }
 
   return checkNode(effectiveStore, request, maxDepth, 0, new Set());
