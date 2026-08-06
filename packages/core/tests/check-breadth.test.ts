@@ -271,7 +271,9 @@ describe("bounded launch behavior", () => {
       ["granted", "never"],
       ["granted"],
     );
-    const result = await check(recording, viewerRequest, {});
+    const result = await check(recording, viewerRequest, {
+      maxBreadth: Number.POSITIVE_INFINITY,
+    });
     expect(result).toBe(true);
     expect(recording.probedRelations.includes("never")).toBe(true);
   });
@@ -319,8 +321,25 @@ describe("bounded launch behavior", () => {
     expect(bounded.configHighWater).toBe(1);
 
     const unbounded = seedUnion(new GatedConfigStore(), relations, []);
-    await check(unbounded, viewerRequest, {});
+    await check(unbounded, viewerRequest, {
+      maxBreadth: Number.POSITIVE_INFINITY,
+    });
     expect(unbounded.configHighWater).toBe(4);
+  });
+
+  test("default maxBreadth is 10, matching OpenFGA's default", async () => {
+    // 12 branches: the default admits exactly 10 in flight;
+    // explicit Infinity restores unbounded fanout.
+    const relations = Array.from({ length: 12 }, (_, i) => `r${i}`);
+    const defaulted = seedUnion(new GatedConfigStore(), relations, []);
+    await check(defaulted, viewerRequest, {});
+    expect(defaulted.configHighWater).toBe(10);
+
+    const unbounded = seedUnion(new GatedConfigStore(), relations, []);
+    await check(unbounded, viewerRequest, {
+      maxBreadth: Number.POSITIVE_INFINITY,
+    });
+    expect(unbounded.configHighWater).toBe(12);
   });
 });
 
@@ -501,9 +520,11 @@ describe("adversarial-review regressions", () => {
     expect(
       check(makeStore(), viewerRequest, { maxBreadth: 1 }),
     ).rejects.toBeInstanceOf(ConditionNotFoundError);
-    expect(check(makeStore(), viewerRequest, {})).rejects.toBeInstanceOf(
-      DepthExceededError,
-    );
+    expect(
+      check(makeStore(), viewerRequest, {
+        maxBreadth: Number.POSITIVE_INFINITY,
+      }),
+    ).rejects.toBeInstanceOf(DepthExceededError);
   });
 });
 

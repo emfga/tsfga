@@ -45,8 +45,9 @@ type NodeReads = readonly [Tuple | null, Tuple | null, Tuple[]];
  *   InvalidSubjectTypeError, UsersetNotAllowedError).
  *
  * Concurrency: branches of one resolution node run concurrently,
- * bounded by `options.maxBreadth` (default Infinity — unbounded),
- * mirroring OpenFGA's `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT`.
+ * bounded by `options.maxBreadth` (default 10, matching OpenFGA's
+ * default `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT`; pass Infinity for
+ * unbounded fanout).
  * Breadth never changes the boolean result or whether a check
  * resolves versus rejects; when several branches fail, which
  * branch's error surfaces depends on completion order — the same
@@ -58,7 +59,7 @@ export async function check(
   options: CheckOptions = {},
 ): Promise<boolean> {
   const maxDepth = options.maxDepth ?? 25;
-  const maxBreadth = options.maxBreadth ?? Number.POSITIVE_INFINITY;
+  const maxBreadth = options.maxBreadth ?? 10;
   // The negated comparison also rejects NaN, which `< 1` misses.
   // Fractional values would admit one more branch than stated
   // (`active < 1.5` allows 2 in flight), so only integers — and

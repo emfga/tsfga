@@ -197,9 +197,9 @@ export interface CheckOptions {
   maxDepth?: number;
   /**
    * Maximum branches of one resolution node evaluated
-   * concurrently (default: Infinity). Mirrors OpenFGA's
-   * OPENFGA_RESOLVE_NODE_BREADTH_LIMIT. Integer >= 1 or
-   * Infinity.
+   * concurrently (default: 10, OpenFGA's default
+   * OPENFGA_RESOLVE_NODE_BREADTH_LIMIT). Integer >= 1 or
+   * Infinity (unbounded).
    */
   maxBreadth?: number;
 }

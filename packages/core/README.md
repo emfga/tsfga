@@ -98,9 +98,10 @@ resolution at the same model depth.
 ## Breadth limits
 
 Branches of one resolution node are evaluated concurrently,
-bounded by `maxBreadth` (default `Infinity` — unbounded, via
-the same options object as `maxDepth`). The option mirrors
-OpenFGA's `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT`. Bounding
+bounded by `maxBreadth` (default 10, via the same options
+object as `maxDepth`). The default matches OpenFGA's default
+`OPENFGA_RESOLVE_NODE_BREADTH_LIMIT` (10); pass
+`maxBreadth: Infinity` to restore unbounded fanout. Bounding
 breadth never changes the boolean result or whether a check
 errors — it caps how many concurrent store reads a single wide
 node can issue (useful to avoid saturating a connection pool).
