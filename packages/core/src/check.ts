@@ -1,7 +1,7 @@
 import { CachingTupleStore } from "./caching-store.ts";
 import { evaluateTupleCondition } from "./conditions.ts";
 import { ContextualTupleStore } from "./contextual-store.ts";
-import { DepthExceededError } from "./errors.ts";
+import { DepthExceededError, TsfgaError } from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
 import { validateTupleWrite } from "./tuple-validation.ts";
 import type {
@@ -43,6 +43,11 @@ type NodeReads = readonly [Tuple | null, Tuple | null, Tuple[]];
  * - Contextual tuples are validated against relation configs
  *   exactly like `addTuple` (RelationConfigNotFoundError,
  *   InvalidSubjectTypeError, UsersetNotAllowedError).
+ *
+ * Concurrency: branches of one resolution node run concurrently,
+ * bounded by `options.maxBreadth` (default Infinity — unbounded),
+ * mirroring OpenFGA's `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT`.
+ * Breadth only reorders work; answers never depend on it.
  */
 export async function check(
   store: TupleStore,
@@ -50,6 +55,11 @@ export async function check(
   options: CheckOptions = {},
 ): Promise<boolean> {
   const maxDepth = options.maxDepth ?? 25;
+  const maxBreadth = options.maxBreadth ?? Number.POSITIVE_INFINITY;
+  // The negated comparison also rejects NaN, which `< 1` misses.
+  if (!(maxBreadth >= 1)) {
+    throw new TsfgaError(`maxBreadth must be at least 1, got ${maxBreadth}`);
+  }
 
   // Request-scoped cache for relation configs and condition
   // definitions: static per model, but read at every node.
@@ -78,7 +88,7 @@ export async function check(
     );
   }
 
-  return checkNode(effectiveStore, request, maxDepth, 0, new Set());
+  return checkNode(effectiveStore, request, maxDepth, maxBreadth, 0, new Set());
 }
 
 /**
@@ -91,6 +101,7 @@ async function checkNode(
   store: TupleStore,
   request: CheckRequest,
   maxDepth: number,
+  maxBreadth: number,
   depth: number,
   path: ReadonlySet<string>,
 ): Promise<boolean> {
@@ -128,10 +139,20 @@ async function checkNode(
           config,
           reads,
           maxDepth,
+          maxBreadth,
           depth,
           visited,
         )
-      : checkBase(store, request, config, reads, maxDepth, depth, visited);
+      : checkBase(
+          store,
+          request,
+          config,
+          reads,
+          maxDepth,
+          maxBreadth,
+          depth,
+          visited,
+        );
 
   // Exclusion applies on top of the base result — including on top
   // of intersection results. A definitive deny short-circuits past
@@ -148,6 +169,7 @@ async function checkNode(
         store,
         { ...request, relation: excludedBy },
         maxDepth,
+        maxBreadth,
         depth + 1,
         visited,
       ),
@@ -211,6 +233,7 @@ async function checkBase(
   config: RelationConfig | null,
   reads: Promise<NodeReads>,
   maxDepth: number,
+  maxBreadth: number,
   depth: number,
   path: ReadonlySet<string>,
 ): Promise<boolean> {
@@ -262,6 +285,7 @@ async function checkBase(
           context: request.context,
         },
         maxDepth,
+        maxBreadth,
         depth + 1,
         path,
       );
@@ -276,6 +300,7 @@ async function checkBase(
           store,
           { ...request, relation: impliedRelation },
           maxDepth,
+          maxBreadth,
           depth + 1,
           path,
         ),
@@ -291,6 +316,7 @@ async function checkBase(
         store,
         { ...request, relation: computedUserset },
         maxDepth,
+        maxBreadth,
         depth + 1,
         path,
       ),
@@ -329,6 +355,7 @@ async function checkBase(
                 context: request.context,
               },
               maxDepth,
+              maxBreadth,
               depth + 1,
               path,
             ),
@@ -336,11 +363,11 @@ async function checkBase(
         }
       }
 
-      return resolveUnion(ttuHandlers);
+      return resolveUnion(ttuHandlers, maxBreadth);
     });
   }
 
-  return resolveUnion(handlers);
+  return resolveUnion(handlers, maxBreadth);
 }
 
 /**
@@ -352,6 +379,7 @@ async function checkIntersection(
   config: RelationConfig,
   reads: Promise<NodeReads>,
   maxDepth: number,
+  maxBreadth: number,
   depth: number,
   path: ReadonlySet<string>,
 ): Promise<boolean> {
@@ -363,7 +391,16 @@ async function checkIntersection(
   for (const operand of operands) {
     if (operand.type === "direct") {
       handlers.push(() =>
-        checkBase(store, request, config, reads, maxDepth, depth, path),
+        checkBase(
+          store,
+          request,
+          config,
+          reads,
+          maxDepth,
+          maxBreadth,
+          depth,
+          path,
+        ),
       );
     } else if (operand.type === "computedUserset") {
       handlers.push(() =>
@@ -371,6 +408,7 @@ async function checkIntersection(
           store,
           { ...request, relation: operand.relation },
           maxDepth,
+          maxBreadth,
           depth + 1,
           path,
         ),
@@ -397,118 +435,125 @@ async function checkIntersection(
                 context: request.context,
               },
               maxDepth,
+              maxBreadth,
               depth + 1,
               path,
             ),
           );
         }
-        return resolveUnion(ttuHandlers);
+        return resolveUnion(ttuHandlers, maxBreadth);
       });
     }
   }
 
-  return resolveIntersection(handlers);
+  return resolveIntersection(handlers, maxBreadth);
 }
 
 /**
- * Run handlers concurrently. Resolves true on first true
- * (short-circuit). A `true` result wins even when sibling branches
+ * Run handlers with at most `maxBreadth` in flight, short-circuit
+ * on first true. A `true` result wins even when sibling branches
  * rejected (e.g. with DepthExceededError). When no handler resolves
  * true, rejects with the first error if any handler rejected;
- * resolves false otherwise.
+ * resolves false otherwise. Handlers still queued when the union
+ * settles are never started.
  */
-async function resolveUnion(
+function resolveUnion(
   handlers: Array<() => Promise<boolean>>,
+  maxBreadth: number,
 ): Promise<boolean> {
-  if (handlers.length === 0) {
-    return false;
-  }
-
-  return new Promise((resolve, reject) => {
-    let remaining = handlers.length;
-    let firstError: unknown;
-    let hasError = false;
-
-    const settleIfDone = () => {
-      remaining--;
-      if (remaining === 0) {
-        if (hasError) {
-          reject(firstError);
-        } else {
-          resolve(false);
-        }
-      }
-    };
-
-    for (const handler of handlers) {
-      handler().then(
-        (result) => {
-          if (result) {
-            resolve(true);
-          } else {
-            settleIfDone();
-          }
-        },
-        (error) => {
-          if (!hasError) {
-            hasError = true;
-            firstError = error;
-          }
-          settleIfDone();
-        },
-      );
-    }
-  });
+  return resolveShortCircuit(handlers, maxBreadth, true);
 }
 
 /**
- * Run handlers concurrently. Resolves false on first false
- * (short-circuit) — a definitive false wins even when a sibling
+ * Run handlers with at most `maxBreadth` in flight, short-circuit
+ * on first false — a definitive false wins even when a sibling
  * operand errored, matching OpenFGA's intersection. Resolves true
  * when all return true. When no operand resolves false and at
  * least one errored, rejects with the first error (fail closed:
- * an errored operand never counts as satisfied).
+ * an errored operand never counts as satisfied). Handlers still
+ * queued when the intersection settles are never started.
  */
-async function resolveIntersection(
+function resolveIntersection(
   handlers: Array<() => Promise<boolean>>,
+  maxBreadth: number,
+): Promise<boolean> {
+  return resolveShortCircuit(handlers, maxBreadth, false);
+}
+
+/**
+ * Bounded pull-model combinator shared by union and intersection —
+ * duals of each other: union short-circuits on `true` and resolves
+ * `false` on exhaustion; intersection short-circuits on `false`
+ * and resolves `true` on exhaustion. Mirrors OpenFGA's reducers,
+ * which take the breadth limit as their concurrency bound.
+ *
+ * Handlers launch in array order while fewer than `maxBreadth` are
+ * in flight; each settlement pulls the next queued handler. Once
+ * the result is decided nothing new starts, in-flight losers are
+ * ignored on completion, and their rejections are consumed by the
+ * callbacks attached at launch — no unhandled rejections. On
+ * exhaustion with no decisive result, the first-recorded error
+ * (by completion order, matching OpenFGA) propagates; otherwise
+ * the non-short-circuit value resolves.
+ */
+function resolveShortCircuit(
+  handlers: Array<() => Promise<boolean>>,
+  maxBreadth: number,
+  shortCircuitOn: boolean,
 ): Promise<boolean> {
   if (handlers.length === 0) {
-    return true;
+    return Promise.resolve(!shortCircuitOn);
   }
 
   return new Promise((resolve, reject) => {
-    let remaining = handlers.length;
+    let next = 0;
+    let active = 0;
+    let settled = false;
     let firstError: unknown;
     let hasError = false;
 
-    const settleIfDone = () => {
-      remaining--;
-      if (remaining === 0) {
+    const onHandlerDone = () => {
+      active--;
+      if (next < handlers.length) {
+        launch();
+      } else if (active === 0) {
+        settled = true;
         if (hasError) {
           reject(firstError);
         } else {
-          resolve(true);
+          resolve(!shortCircuitOn);
         }
       }
     };
 
-    for (const handler of handlers) {
-      handler().then(
-        (result) => {
-          if (!result) {
-            resolve(false);
-          } else {
-            settleIfDone();
-          }
-        },
-        (error) => {
-          if (!hasError) {
-            hasError = true;
-            firstError = error;
-          }
-          settleIfDone();
-        },
-      );
-    }
+    const launch = () => {
+      while (!settled && active < maxBreadth && next < handlers.length) {
+        const handler = handlers[next];
+        next++;
+        if (!handler) continue;
+        active++;
+        handler().then(
+          (result) => {
+            if (settled) return;
+            if (result === shortCircuitOn) {
+              settled = true;
+              resolve(shortCircuitOn);
+              return;
+            }
+            onHandlerDone();
+          },
+          (error) => {
+            if (settled) return;
+            if (!hasError) {
+              hasError = true;
+              firstError = error;
+            }
+            onHandlerDone();
+          },
+        );
+      }
+    };
+
+    launch();
   });
 }

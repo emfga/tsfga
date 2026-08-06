@@ -95,6 +95,18 @@ resolution at the same model depth.
   matching OpenFGA's check behavior. A silently-unmet
   condition would fail open through an exclusion branch.
 
+## Breadth limits
+
+Branches of one resolution node are evaluated concurrently,
+bounded by `maxBreadth` (default `Infinity` — unbounded, via
+the same options object as `maxDepth`). The option mirrors
+OpenFGA's `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT`. Bounding
+breadth only reorders work — answers never depend on it — but
+caps how many concurrent store reads a single wide node can
+issue (useful to avoid saturating a connection pool). Branches
+still queued when a node settles are never started. Values
+below 1 throw `TsfgaError`.
+
 ## Contextual tuples
 
 Contextual tuples passed on a `CheckRequest` are validated

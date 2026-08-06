@@ -195,6 +195,12 @@ export interface CheckRequest {
 export interface CheckOptions {
   /** Maximum recursion depth (default: 25) */
   maxDepth?: number;
+  /**
+   * Maximum branches of one resolution node evaluated
+   * concurrently (default: Infinity). Mirrors OpenFGA's
+   * OPENFGA_RESOLVE_NODE_BREADTH_LIMIT. Must be >= 1.
+   */
+  maxBreadth?: number;
 }
 
 /** Parameters for adding a tuple */
