@@ -1125,6 +1125,160 @@ describe("check algorithm", () => {
     });
   });
 
+  describe("Definitive deny beats sibling error (OpenFGA parity)", () => {
+    test("intersection: false operand overrides erroring operand", async () => {
+      // OpenFGA's intersection swallows errors when another
+      // operand is definitively false.
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "can_view",
+          intersection: [
+            { type: "computedUserset", relation: "member" },
+            { type: "computedUserset", relation: "erring" },
+          ],
+          allowsUsersetSubjects: false,
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "member",
+          directlyAssignableTypes: ["user"],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "erring",
+          impliedBy: ["erring"],
+        }),
+      );
+      // alice is not a member: false wins over the cycle error.
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "can_view",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toBe(false);
+    });
+
+    test("intersection: true operand plus error still throws", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "can_view",
+          intersection: [
+            { type: "computedUserset", relation: "member" },
+            { type: "computedUserset", relation: "erring" },
+          ],
+          allowsUsersetSubjects: false,
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "member",
+          directlyAssignableTypes: ["user"],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "erring",
+          impliedBy: ["erring"],
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "member",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+      // No operand is definitively false: fail closed on the error.
+      await expect(
+        check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "can_view",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).rejects.toBeInstanceOf(DepthExceededError);
+    });
+
+    test("exclusion: granted exclusion branch overrides base error", async () => {
+      // OpenFGA short-circuits to deny when the subtracted branch
+      // grants, even if the base errored.
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          impliedBy: ["looper"],
+          excludedBy: "banned",
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "looper",
+          impliedBy: ["viewer"],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "banned",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "banned",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+      // The base cycles (error) but alice is banned: deny.
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toBe(false);
+    });
+
+    test("exclusion: base error with false exclusion still throws", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          impliedBy: ["looper"],
+          excludedBy: "banned",
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "looper",
+          impliedBy: ["viewer"],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "banned",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      // alice is not banned: the base error must fail closed.
+      await expect(
+        check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).rejects.toBeInstanceOf(DepthExceededError);
+    });
+  });
+
   describe("Multi-entry tuple-to-userset", () => {
     beforeEach(() => {
       store.relationConfigs.push(

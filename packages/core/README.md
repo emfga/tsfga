@@ -84,10 +84,16 @@ resolution at the same model depth.
   branch that resolves `true` wins even if a sibling branch
   threw `DepthExceededError`. If no branch grants and at least
   one errored, the error propagates.
-- In exclusion (`excludedBy`) and intersection branches,
-  errors always propagate (fail closed). A definite `false`
-  base result still denies without waiting on the exclusion
-  branch's outcome.
+- Exclusion (`excludedBy`) and intersection branches fail
+  closed: an errored branch never counts as satisfied or as
+  not-excluded. A definitive deny still short-circuits past a
+  sibling error, matching OpenFGA — an intersection operand
+  resolving `false`, or an exclusion branch resolving `true`,
+  denies even when the other branch errored.
+- Condition evaluation with missing declared parameters is an
+  error (`ConditionEvaluationError`), not an unmet condition —
+  matching OpenFGA's check behavior. A silently-unmet
+  condition would fail open through an exclusion branch.
 
 ## Contextual tuples
 

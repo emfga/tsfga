@@ -85,7 +85,7 @@ describe("evaluateTupleCondition", () => {
     expect(await evaluateTupleCondition(store, tuple)).toBe(true);
   });
 
-  test("returns false when a condition parameter is missing", async () => {
+  test("throws when a condition parameter is missing", async () => {
     const store = new MockTupleStore();
     store.conditionDefinitions.push({
       name: "in_region",
@@ -93,13 +93,18 @@ describe("evaluateTupleCondition", () => {
       parameters: { region: "string" },
     });
     const tuple = makeTuple({ conditionName: "in_region" });
-    // No context at all: the referenced variable is absent, which
-    // must deny (OpenFGA returns {allowed: false}), not throw.
-    expect(await evaluateTupleCondition(store, tuple)).toBe(false);
-    expect(await evaluateTupleCondition(store, tuple, {})).toBe(false);
+    // Missing declared parameters are an evaluation ERROR, not an
+    // unmet condition: OpenFGA's check path errors, and a silent
+    // `false` would fail open through an exclusion branch.
+    await expect(evaluateTupleCondition(store, tuple)).rejects.toBeInstanceOf(
+      ConditionEvaluationError,
+    );
+    await expect(
+      evaluateTupleCondition(store, tuple, {}),
+    ).rejects.toBeInstanceOf(ConditionEvaluationError);
   });
 
-  test("returns false when one of several parameters is missing", async () => {
+  test("throws when one of several parameters is missing", async () => {
     const store = new MockTupleStore();
     store.conditionDefinitions.push({
       name: "region_and_tier",
@@ -107,9 +112,9 @@ describe("evaluateTupleCondition", () => {
       parameters: { region: "string", tier: "string" },
     });
     const tuple = makeTuple({ conditionName: "region_and_tier" });
-    expect(await evaluateTupleCondition(store, tuple, { region: "us" })).toBe(
-      false,
-    );
+    await expect(
+      evaluateTupleCondition(store, tuple, { region: "us" }),
+    ).rejects.toBeInstanceOf(ConditionEvaluationError);
   });
 
   test("throws ConditionNotFoundError for missing condition", async () => {

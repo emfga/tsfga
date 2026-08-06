@@ -1,4 +1,4 @@
-import { EvaluationError, type ParseResult, parse } from "@marcbachmann/cel-js";
+import { type ParseResult, parse } from "@marcbachmann/cel-js";
 import { ConditionEvaluationError, ConditionNotFoundError } from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
 import type { ConditionParameterType, Tuple } from "./types.ts";
@@ -41,7 +41,10 @@ function coerceValue(
  * - The condition evaluates to true
  * Returns false if the condition evaluates to false.
  * Throws ConditionNotFoundError if conditionName references a missing definition.
- * Throws ConditionEvaluationError if CEL evaluation fails.
+ * Throws ConditionEvaluationError if a declared parameter is
+ * absent from the merged context or CEL evaluation fails —
+ * matching OpenFGA's check path, where missing parameters are an
+ * evaluation error, not an unmet condition.
  */
 export async function evaluateTupleCondition(
   store: TupleStore,
@@ -60,13 +63,28 @@ export async function evaluateTupleCondition(
   // Merge contexts: tuple context wins over request context
   const context = { ...requestContext, ...tuple.conditionContext };
 
+  // Every declared parameter must be present in the merged
+  // context. OpenFGA's check path rejects evaluation with missing
+  // parameters as an evaluation error rather than treating the
+  // condition as unmet — an unmet condition would fail open
+  // through an exclusion branch ("not excluded" grants).
+  const missing: string[] = [];
+
   // Coerce values based on declared parameter types
   if (condDef.parameters) {
     for (const [key, paramType] of Object.entries(condDef.parameters)) {
       if (key in context) {
         context[key] = coerceValue(context[key], paramType);
+      } else {
+        missing.push(key);
       }
     }
+  }
+  if (missing.length > 0) {
+    throw new ConditionEvaluationError(
+      condDef.name,
+      new Error(`missing context parameters: ${missing.join(", ")}`),
+    );
   }
 
   let compiled = exprCache.get(condDef.expression);
@@ -79,12 +97,6 @@ export async function evaluateTupleCondition(
     const result = compiled(context);
     return result === true;
   } catch (error) {
-    // When a condition parameter is missing, treat the condition as
-    // not satisfied (matching OpenFGA behavior where missing parameters
-    // result in {allowed: false}).
-    if (error instanceof EvaluationError && error.code === "unknown_variable") {
-      return false;
-    }
     throw new ConditionEvaluationError(condDef.name, error);
   }
 }

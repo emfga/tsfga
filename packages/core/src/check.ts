@@ -34,6 +34,12 @@ type NodeReads = readonly [Tuple | null, Tuple | null, Tuple[]];
  *   resolves `true` wins even if a sibling branch threw
  *   DepthExceededError. If no branch resolves `true` and at least
  *   one errored, the error propagates.
+ * - Exclusion and intersection fail closed — an errored branch
+ *   never counts as satisfied or as not-excluded — but a
+ *   definitive deny short-circuits past a sibling error, matching
+ *   OpenFGA: an intersection operand resolving `false`, or an
+ *   exclusion branch resolving `true`, denies even when the other
+ *   branch errored.
  * - Contextual tuples are validated against relation configs
  *   exactly like `addTuple` (RelationConfigNotFoundError,
  *   InvalidSubjectTypeError, UsersetNotAllowedError).
@@ -128,10 +134,12 @@ async function checkNode(
       : checkBase(store, request, config, reads, maxDepth, depth, visited);
 
   // Exclusion applies on top of the base result — including on top
-  // of intersection results. Errors in either branch fail closed:
-  // a definite base `false` denies regardless of the exclusion
-  // branch, but a base grant with an errored exclusion branch must
-  // propagate the error rather than grant.
+  // of intersection results. A definitive deny short-circuits past
+  // a sibling error, matching OpenFGA: a base `false` denies even
+  // when the exclusion branch errored, and a granted exclusion
+  // branch denies even when the base errored. Errors otherwise
+  // fail closed: a base grant with an errored exclusion branch
+  // propagates the error rather than granting.
   if (config?.excludedBy) {
     const excludedBy = config.excludedBy;
     const [baseResult, exclusionResult] = await Promise.allSettled([
@@ -144,6 +152,9 @@ async function checkNode(
         visited,
       ),
     ]);
+    if (exclusionResult.status === "fulfilled" && exclusionResult.value) {
+      return false;
+    }
     if (baseResult.status === "rejected") {
       throw baseResult.reason;
     }
@@ -153,7 +164,7 @@ async function checkNode(
     if (exclusionResult.status === "rejected") {
       throw exclusionResult.reason;
     }
-    return !exclusionResult.value;
+    return true;
   }
 
   return resolveBase();
@@ -452,9 +463,11 @@ async function resolveUnion(
 
 /**
  * Run handlers concurrently. Resolves false on first false
- * (short-circuit). Resolves true when all return true. Rejects on
- * first error (fail closed: an errored operand never counts as
- * satisfied).
+ * (short-circuit) — a definitive false wins even when a sibling
+ * operand errored, matching OpenFGA's intersection. Resolves true
+ * when all return true. When no operand resolves false and at
+ * least one errored, rejects with the first error (fail closed:
+ * an errored operand never counts as satisfied).
  */
 async function resolveIntersection(
   handlers: Array<() => Promise<boolean>>,
@@ -465,19 +478,36 @@ async function resolveIntersection(
 
   return new Promise((resolve, reject) => {
     let remaining = handlers.length;
+    let firstError: unknown;
+    let hasError = false;
+
+    const settleIfDone = () => {
+      remaining--;
+      if (remaining === 0) {
+        if (hasError) {
+          reject(firstError);
+        } else {
+          resolve(true);
+        }
+      }
+    };
+
     for (const handler of handlers) {
       handler().then(
         (result) => {
           if (!result) {
             resolve(false);
           } else {
-            remaining--;
-            if (remaining === 0) {
-              resolve(true);
-            }
+            settleIfDone();
           }
         },
-        (error) => reject(error),
+        (error) => {
+          if (!hasError) {
+            hasError = true;
+            firstError = error;
+          }
+          settleIfDone();
+        },
       );
     }
   });

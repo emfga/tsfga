@@ -1,0 +1,28 @@
+# anne holds a conditioned direct grant with NO stored context:
+# checks without request context fail condition evaluation
+- user: user:anne
+  relation: viewer
+  object: document:1
+  condition:
+    name: valid_ip
+
+# ...but anne is also a team member, and the team grants viewer
+- user: team:eng#member
+  relation: viewer
+  object: document:1
+- user: user:anne
+  relation: member
+  object: team:eng
+
+# bob is only a team member (no conditioned tuple)
+- user: user:bob
+  relation: member
+  object: team:eng
+
+# carl holds ONLY a conditioned grant on document:2 (no sibling
+# grant path exists there)
+- user: user:carl
+  relation: viewer
+  object: document:2
+  condition:
+    name: valid_ip
