@@ -160,23 +160,23 @@ const viewerRequest = {
 };
 
 describe("maxBreadth validation", () => {
-  test("rejects zero", () => {
+  test("rejects zero", async () => {
     const store = new MockTupleStore();
-    expect(
+    await expect(
       check(store, viewerRequest, { maxBreadth: 0 }),
     ).rejects.toBeInstanceOf(TsfgaError);
   });
 
-  test("rejects negative values", () => {
+  test("rejects negative values", async () => {
     const store = new MockTupleStore();
-    expect(
+    await expect(
       check(store, viewerRequest, { maxBreadth: -3 }),
     ).rejects.toBeInstanceOf(TsfgaError);
   });
 
-  test("rejects NaN", () => {
+  test("rejects NaN", async () => {
     const store = new MockTupleStore();
-    expect(
+    await expect(
       check(store, viewerRequest, { maxBreadth: Number.NaN }),
     ).rejects.toBeInstanceOf(TsfgaError);
   });
@@ -361,9 +361,9 @@ describe("error semantics under bounded breadth", () => {
     return store;
   }
 
-  test("error plus all-false at breadth 1 propagates the error", () => {
+  test("error plus all-false at breadth 1 propagates the error", async () => {
     const store = erringStore(["r2"], []);
-    expect(
+    await expect(
       check(store, viewerRequest, { maxBreadth: 1 }),
     ).rejects.toBeInstanceOf(DepthExceededError);
   });
@@ -449,16 +449,16 @@ describe("error semantics under bounded breadth", () => {
 });
 
 describe("adversarial-review regressions", () => {
-  test("rejects fractional maxBreadth", () => {
+  test("rejects fractional maxBreadth", async () => {
     // 1.5 would admit 2 branches in flight (`active < 1.5`),
     // silently exceeding the stated bound.
     const store = new MockTupleStore();
-    expect(
+    await expect(
       check(store, viewerRequest, { maxBreadth: 1.5 }),
     ).rejects.toBeInstanceOf(TsfgaError);
   });
 
-  test("empty intersection config errors instead of granting", () => {
+  test("empty intersection config errors instead of granting", async () => {
     // A zero-operand intersection used to resolve vacuously true
     // for every subject. OpenFGA's typesystem rejects set
     // operations with too few children as an invalid model.
@@ -470,7 +470,7 @@ describe("adversarial-review regressions", () => {
         intersection: [],
       }),
     );
-    expect(
+    await expect(
       check(store, { ...viewerRequest, relation: "access" }),
     ).rejects.toBeInstanceOf(TsfgaError);
   });
@@ -517,10 +517,10 @@ describe("adversarial-review regressions", () => {
       return store;
     }
 
-    expect(
+    await expect(
       check(makeStore(), viewerRequest, { maxBreadth: 1 }),
     ).rejects.toBeInstanceOf(ConditionNotFoundError);
-    expect(
+    await expect(
       check(makeStore(), viewerRequest, {
         maxBreadth: Number.POSITIVE_INFINITY,
       }),
@@ -565,13 +565,13 @@ describe("resolveShortCircuit hardening", () => {
     );
     expect(laterTrueWins).toBe(true);
 
-    expect(
+    await expect(
       resolveShortCircuit([async () => false, thrower], 1, true),
     ).rejects.toBeInstanceOf(SyncBoom);
 
     // Intersection dual: a sync throw with no definitive false
     // rejects; a definitive false still beats it.
-    expect(
+    await expect(
       resolveShortCircuit([async () => true, thrower], 1, false),
     ).rejects.toBeInstanceOf(SyncBoom);
     const falseBeatsThrow = await resolveShortCircuit(

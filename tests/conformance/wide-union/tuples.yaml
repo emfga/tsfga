@@ -1,0 +1,49 @@
+# document:1 viewer fans out to 12 team#member userset
+# branches — wider than the default maxBreadth of 10, so
+# resolving it exercises the queued-branch pull path.
+- user: team:team1#member
+  relation: viewer
+  object: document:1
+- user: team:team2#member
+  relation: viewer
+  object: document:1
+- user: team:team3#member
+  relation: viewer
+  object: document:1
+- user: team:team4#member
+  relation: viewer
+  object: document:1
+- user: team:team5#member
+  relation: viewer
+  object: document:1
+- user: team:team6#member
+  relation: viewer
+  object: document:1
+- user: team:team7#member
+  relation: viewer
+  object: document:1
+- user: team:team8#member
+  relation: viewer
+  object: document:1
+- user: team:team9#member
+  relation: viewer
+  object: document:1
+- user: team:team10#member
+  relation: viewer
+  object: document:1
+- user: team:team11#member
+  relation: viewer
+  object: document:1
+- user: team:team12#member
+  relation: viewer
+  object: document:1
+
+# anne is only in team12 (the last, queued-past-the-window
+# branch at the default breadth); bob only in team1 (an
+# in-window branch); carl is in no team.
+- user: user:anne
+  relation: member
+  object: team:team12
+- user: user:bob
+  relation: member
+  object: team:team1
