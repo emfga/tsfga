@@ -121,7 +121,7 @@ tsfga/
 ├── tsconfig.json                    references-only (whole-repo tsc)
 ├── biome.json                       shared lint/format
 ├── compose.yaml                     PostgreSQL + OpenFGA services
-├── .env                             environment variables
+├── .env.example                     environment variable template (copy to .env)
 └── CLAUDE.md
 ```
 
@@ -673,9 +673,9 @@ services:
       - OPENFGA_DATASTORE_URI=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable&search_path=openfga
       - OPENFGA_PLAYGROUND_ENABLED=true
     ports:
-      - "8080:8080"
-      - "8081:8081"
-      - "3000:3000"
+      - ${FGA_HTTP_PORT:-8080}:8080
+      - ${FGA_GRPC_PORT:-8081}:8081
+      - ${FGA_PLAYGROUND_PORT:-3000}:3000
     healthcheck:
       test: ["CMD", "/usr/local/bin/grpc_health_probe", "-addr=openfga:8081"]
       interval: 5s
@@ -688,15 +688,16 @@ uses the `tsfga` schema. They share the database but not schema.
 
 ### Environment (`.env`)
 
-```
-POSTGRES_DB=dev
-POSTGRES_HOST=localhost
-POSTGRES_PASSWORD=password
-POSTGRES_PORT=5432
-POSTGRES_USER=dev
-FGA_API_URL=http://localhost:8080
-PREFIX=tsfga
-```
+`.env` is gitignored; copy `.env.example` (the canonical,
+documented template — keep it up to date when adding variables)
+to `.env` and adjust locally.
+
+Host-side service ports are configurable so local dev never
+collides with other applications: `POSTGRES_PORT` and the
+`FGA_*_PORT` variables set only the host mapping — container-side
+ports stay fixed (5432, 8080, 8081, 3000, 2112). Bun expands
+`${VAR}` references inside `.env`, so `FGA_API_URL` follows
+`FGA_HTTP_PORT` automatically.
 
 All configuration comes from environment variables (loaded from `.env` by Bun).
 **Never hard-code default values** in `process.env` reads — use bare
