@@ -4,7 +4,15 @@ import { ContextualTupleStore } from "./contextual-store.ts";
 import { DepthExceededError } from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
 import { validateTupleWrite } from "./tuple-validation.ts";
-import type { CheckOptions, CheckRequest, RelationConfig } from "./types.ts";
+import type {
+  CheckOptions,
+  CheckRequest,
+  RelationConfig,
+  Tuple,
+} from "./types.ts";
+
+/** Results of the per-node tuple batch: direct, wildcard, userset. */
+type NodeReads = readonly [Tuple | null, Tuple | null, Tuple[]];
 
 /**
  * Recursive check algorithm with support for:
@@ -45,8 +53,18 @@ export async function check(
   // Contextual tuples must pass the same validation as addTuple.
   let effectiveStore: TupleStore = cachingStore;
   if (request.contextualTuples?.length) {
-    for (const tuple of request.contextualTuples) {
-      await validateTupleWrite(cachingStore, tuple);
+    // Validate all contextual tuples concurrently; surface the
+    // first failure in tuple order (not completion order) so the
+    // thrown error is deterministic.
+    const validations = await Promise.allSettled(
+      request.contextualTuples.map((tuple) =>
+        validateTupleWrite(cachingStore, tuple),
+      ),
+    );
+    for (const validation of validations) {
+      if (validation.status === "rejected") {
+        throw validation.reason;
+      }
     }
     effectiveStore = new ContextualTupleStore(
       cachingStore,
@@ -81,6 +99,14 @@ async function checkNode(
   const visited = new Set(path);
   visited.add(key);
 
+  // Speculatively start the tuple batch so it overlaps the config
+  // fetch: one round-trip wave per node instead of two. Some paths
+  // never await it (config error, or an intersection without a
+  // direct operand); the derived catch keeps such a rejection from
+  // going unhandled while awaiting callers still see the error.
+  const reads = readNodeTuples(store, request);
+  reads.catch(() => {});
+
   // Fetch relation config once for use across all steps
   const config = await store.findRelationConfig(
     request.objectType,
@@ -90,8 +116,16 @@ async function checkNode(
   // Base resolution: intersection replaces steps 1-5 when present
   const resolveBase = (): Promise<boolean> =>
     config?.intersection
-      ? checkIntersection(store, request, config, maxDepth, depth, visited)
-      : checkBase(store, request, config, maxDepth, depth, visited);
+      ? checkIntersection(
+          store,
+          request,
+          config,
+          reads,
+          maxDepth,
+          depth,
+          visited,
+        )
+      : checkBase(store, request, config, reads, maxDepth, depth, visited);
 
   // Exclusion applies on top of the base result — including on top
   // of intersection results. Errors in either branch fail closed:
@@ -126,18 +160,15 @@ async function checkNode(
 }
 
 /**
- * Base check: steps 1-5 without exclusion or intersection handling.
+ * Issue the three per-node tuple reads (direct probe, wildcard
+ * probe, userset scan) as one batch. Started at node entry so
+ * they overlap the relation-config fetch.
  */
-async function checkBase(
+function readNodeTuples(
   store: TupleStore,
   request: CheckRequest,
-  config: RelationConfig | null,
-  maxDepth: number,
-  depth: number,
-  path: ReadonlySet<string>,
-): Promise<boolean> {
-  // Batch initial reads: direct, wildcard, and userset tuples
-  const [directTuple, wildcardTuple, usersetTuples] = await Promise.all([
+): Promise<NodeReads> {
+  return Promise.all([
     store.findDirectTuple(
       request.objectType,
       request.objectId,
@@ -158,23 +189,48 @@ async function checkBase(
       request.relation,
     ),
   ]);
+}
 
-  // Step 1: Direct tuple fast path
-  if (directTuple) {
-    if (await evaluateTupleCondition(store, directTuple, request.context)) {
-      return true;
-    }
+/**
+ * Base check: steps 1-5 without exclusion or intersection handling.
+ */
+async function checkBase(
+  store: TupleStore,
+  request: CheckRequest,
+  config: RelationConfig | null,
+  reads: Promise<NodeReads>,
+  maxDepth: number,
+  depth: number,
+  path: ReadonlySet<string>,
+): Promise<boolean> {
+  const [directTuple, wildcardTuple, usersetTuples] = await reads;
+
+  // Steps 1/1b: an unconditioned direct or wildcard hit answers
+  // immediately, before any sub-check is launched
+  if (directTuple && !directTuple.conditionName) {
+    return true;
   }
-
-  // Step 1b: Wildcard fast path
-  if (wildcardTuple) {
-    if (await evaluateTupleCondition(store, wildcardTuple, request.context)) {
-      return true;
-    }
+  if (wildcardTuple && !wildcardTuple.conditionName) {
+    return true;
   }
 
   // Collect all sub-check handlers for concurrent resolution
   const handlers: Array<() => Promise<boolean>> = [];
+
+  // Conditioned direct/wildcard hits race as union branches so
+  // their condition evaluation (a possible condition-definition
+  // fetch) does not block the fanout below. Union semantics
+  // apply: a sibling `true` beats a condition error.
+  if (directTuple) {
+    handlers.push(() =>
+      evaluateTupleCondition(store, directTuple, request.context),
+    );
+  }
+  if (wildcardTuple) {
+    handlers.push(() =>
+      evaluateTupleCondition(store, wildcardTuple, request.context),
+    );
+  }
 
   // Step 2: Userset expansion handlers
   for (const userset of usersetTuples) {
@@ -283,6 +339,7 @@ async function checkIntersection(
   store: TupleStore,
   request: CheckRequest,
   config: RelationConfig,
+  reads: Promise<NodeReads>,
   maxDepth: number,
   depth: number,
   path: ReadonlySet<string>,
@@ -295,7 +352,7 @@ async function checkIntersection(
   for (const operand of operands) {
     if (operand.type === "direct") {
       handlers.push(() =>
-        checkBase(store, request, config, maxDepth, depth, path),
+        checkBase(store, request, config, reads, maxDepth, depth, path),
       );
     } else if (operand.type === "computedUserset") {
       handlers.push(() =>
