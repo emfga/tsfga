@@ -47,7 +47,10 @@ type NodeReads = readonly [Tuple | null, Tuple | null, Tuple[]];
  * Concurrency: branches of one resolution node run concurrently,
  * bounded by `options.maxBreadth` (default Infinity — unbounded),
  * mirroring OpenFGA's `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT`.
- * Breadth only reorders work; answers never depend on it.
+ * Breadth never changes the boolean result or whether a check
+ * resolves versus rejects; when several branches fail, which
+ * branch's error surfaces depends on completion order — the same
+ * nondeterminism OpenFGA has.
  */
 export async function check(
   store: TupleStore,
@@ -57,8 +60,16 @@ export async function check(
   const maxDepth = options.maxDepth ?? 25;
   const maxBreadth = options.maxBreadth ?? Number.POSITIVE_INFINITY;
   // The negated comparison also rejects NaN, which `< 1` misses.
-  if (!(maxBreadth >= 1)) {
-    throw new TsfgaError(`maxBreadth must be at least 1, got ${maxBreadth}`);
+  // Fractional values would admit one more branch than stated
+  // (`active < 1.5` allows 2 in flight), so only integers — and
+  // Infinity, which Number.isInteger rejects — are accepted.
+  if (
+    !(maxBreadth >= 1) ||
+    (maxBreadth !== Number.POSITIVE_INFINITY && !Number.isInteger(maxBreadth))
+  ) {
+    throw new TsfgaError(
+      `maxBreadth must be a positive integer or Infinity, got ${maxBreadth}`,
+    );
   }
 
   // Request-scoped cache for relation configs and condition
@@ -384,7 +395,16 @@ async function checkIntersection(
   path: ReadonlySet<string>,
 ): Promise<boolean> {
   const operands = config.intersection;
-  if (!operands) return true;
+  // An intersection with no operands would resolve vacuously true,
+  // granting access to every subject on a malformed config.
+  // OpenFGA's typesystem rejects set operations with too few
+  // children as an invalid model; fail closed with an error.
+  if (!operands || operands.length === 0) {
+    throw new TsfgaError(
+      `intersection for ${request.objectType}.${request.relation} ` +
+        "has no operands",
+    );
+  }
 
   const handlers: Array<() => Promise<boolean>> = [];
 
@@ -492,19 +512,20 @@ function resolveIntersection(
  * the result is decided nothing new starts, in-flight losers are
  * ignored on completion, and their rejections are consumed by the
  * callbacks attached at launch — no unhandled rejections. On
- * exhaustion with no decisive result, the first-recorded error
- * (by completion order, matching OpenFGA) propagates; otherwise
- * the non-short-circuit value resolves.
+ * exhaustion with no decisive result, one recorded error (the
+ * first by completion order) propagates; otherwise the
+ * non-short-circuit value resolves. Which branch's error surfaces
+ * when several fail is scheduling-dependent, as it is in OpenFGA
+ * (whose union keeps the last-completed error instead).
+ *
+ * Exported for direct unit tests only; not part of the public
+ * package API (not re-exported from index.ts).
  */
-function resolveShortCircuit(
+export function resolveShortCircuit(
   handlers: Array<() => Promise<boolean>>,
   maxBreadth: number,
   shortCircuitOn: boolean,
 ): Promise<boolean> {
-  if (handlers.length === 0) {
-    return Promise.resolve(!shortCircuitOn);
-  }
-
   return new Promise((resolve, reject) => {
     let next = 0;
     let active = 0;
@@ -512,17 +533,21 @@ function resolveShortCircuit(
     let firstError: unknown;
     let hasError = false;
 
+    const settleExhausted = () => {
+      settled = true;
+      if (hasError) {
+        reject(firstError);
+      } else {
+        resolve(!shortCircuitOn);
+      }
+    };
+
     const onHandlerDone = () => {
       active--;
       if (next < handlers.length) {
         launch();
       } else if (active === 0) {
-        settled = true;
-        if (hasError) {
-          reject(firstError);
-        } else {
-          resolve(!shortCircuitOn);
-        }
+        settleExhausted();
       }
     };
 
@@ -532,7 +557,21 @@ function resolveShortCircuit(
         next++;
         if (!handler) continue;
         active++;
-        handler().then(
+        let branch: Promise<boolean>;
+        try {
+          branch = handler();
+        } catch (error) {
+          // A synchronously-throwing handler counts as a rejected
+          // branch; without this its slot would leak and the
+          // combinator could stall with nothing in flight.
+          active--;
+          if (!hasError) {
+            hasError = true;
+            firstError = error;
+          }
+          continue;
+        }
+        branch.then(
           (result) => {
             if (settled) return;
             if (result === shortCircuitOn) {
@@ -551,6 +590,12 @@ function resolveShortCircuit(
             onHandlerDone();
           },
         );
+      }
+      // Empty input, holes, and synchronous throws can exhaust the
+      // array with nothing in flight; settle here so the returned
+      // promise can never stall.
+      if (!settled && active === 0 && next >= handlers.length) {
+        settleExhausted();
       }
     };
 

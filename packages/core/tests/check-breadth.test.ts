@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { check } from "../src/check.ts";
-import { DepthExceededError, TsfgaError } from "../src/errors.ts";
-import type { RelationConfig, Tuple } from "../src/types.ts";
+import { check, resolveShortCircuit } from "../src/check.ts";
+import {
+  ConditionNotFoundError,
+  DepthExceededError,
+  TsfgaError,
+} from "../src/errors.ts";
+import type {
+  ConditionDefinition,
+  RelationConfig,
+  Tuple,
+} from "../src/types.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
 
 function makeTuple(overrides: Partial<Tuple> = {}): Tuple {
@@ -91,6 +99,19 @@ class GatedConfigStore extends MockTupleStore {
     const result = await super.findRelationConfig(objectType, relation);
     this.configInflight--;
     return result;
+  }
+}
+
+/**
+ * Delays condition-definition lookups so a conditioned branch
+ * errors late while a cycling sibling errors immediately.
+ */
+class SlowConditionLookupStore extends MockTupleStore {
+  override async findConditionDefinition(
+    name: string,
+  ): Promise<ConditionDefinition | null> {
+    await delay(30);
+    return super.findConditionDefinition(name);
   }
 }
 
@@ -405,5 +426,138 @@ describe("error semantics under bounded breadth", () => {
     // Let the losing branch reject; an unhandled rejection would
     // fail the run.
     await delay(50);
+  });
+});
+
+describe("adversarial-review regressions", () => {
+  test("rejects fractional maxBreadth", () => {
+    // 1.5 would admit 2 branches in flight (`active < 1.5`),
+    // silently exceeding the stated bound.
+    const store = new MockTupleStore();
+    expect(
+      check(store, viewerRequest, { maxBreadth: 1.5 }),
+    ).rejects.toBeInstanceOf(TsfgaError);
+  });
+
+  test("empty intersection config errors instead of granting", () => {
+    // A zero-operand intersection used to resolve vacuously true
+    // for every subject. OpenFGA's typesystem rejects set
+    // operations with too few children as an invalid model.
+    const store = new MockTupleStore();
+    store.relationConfigs.push(
+      makeConfig({
+        objectType: "doc",
+        relation: "access",
+        intersection: [],
+      }),
+    );
+    expect(
+      check(store, { ...viewerRequest, relation: "access" }),
+    ).rejects.toBeInstanceOf(TsfgaError);
+  });
+
+  test("surfaced error class is pinned to array order at breadth 1", async () => {
+    // Two failing branches with different error classes: slowerr
+    // (first in array, ConditionNotFoundError after a delayed
+    // condition lookup) and fasterr (cycle, DepthExceededError
+    // immediately). The boolean/reject status is breadth-invariant
+    // but the surfaced class is completion-ordered: breadth 1
+    // completes in array order, unbounded lets the fast error
+    // record first. Pinned as accepted, upstream-matching
+    // nondeterminism (OpenFGA's union keeps a completion-ordered
+    // error too).
+    function makeStore(): MockTupleStore {
+      const store = new SlowConditionLookupStore();
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          impliedBy: ["slowerr", "fasterr"],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "slowerr",
+          directlyAssignableTypes: ["user"],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "fasterr",
+          impliedBy: ["viewer"],
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "slowerr",
+          subjectType: "user",
+          subjectId: "anne",
+          conditionName: "missing_definition",
+        }),
+      );
+      return store;
+    }
+
+    expect(
+      check(makeStore(), viewerRequest, { maxBreadth: 1 }),
+    ).rejects.toBeInstanceOf(ConditionNotFoundError);
+    expect(check(makeStore(), viewerRequest, {})).rejects.toBeInstanceOf(
+      DepthExceededError,
+    );
+  });
+});
+
+describe("resolveShortCircuit hardening", () => {
+  // Direct combinator tests: neither trap is reachable through
+  // check() (it only builds dense arrays of async closures), so
+  // the latent liveness bugs found in review are pinned here
+  // against the exported combinator itself.
+
+  class SyncBoom extends Error {}
+
+  test("array holes cannot stall the combinator", async () => {
+    // Before hardening, a hole consumed on the refill path could
+    // exhaust the array with nothing in flight and never settle.
+    const handlers: Array<() => Promise<boolean>> = [];
+    handlers[0] = async () => false;
+    handlers[2] = async () => false;
+    expect(await resolveShortCircuit(handlers, 1, true)).toBe(false);
+
+    const onlyHoles: Array<() => Promise<boolean>> = [];
+    onlyHoles.length = 3;
+    expect(await resolveShortCircuit(onlyHoles, 2, true)).toBe(false);
+    expect(await resolveShortCircuit([], 1, false)).toBe(true);
+  });
+
+  test("synchronously-throwing handler counts as a rejected branch", async () => {
+    // Before hardening, a sync throw launched from the refill path
+    // leaked its slot (permanent active over-count -> stall) and
+    // escaped as an unhandled rejection.
+    const thrower = (): Promise<boolean> => {
+      throw new SyncBoom("sync boom");
+    };
+
+    const laterTrueWins = await resolveShortCircuit(
+      [async () => false, thrower, async () => true],
+      1,
+      true,
+    );
+    expect(laterTrueWins).toBe(true);
+
+    expect(
+      resolveShortCircuit([async () => false, thrower], 1, true),
+    ).rejects.toBeInstanceOf(SyncBoom);
+
+    // Intersection dual: a sync throw with no definitive false
+    // rejects; a definitive false still beats it.
+    expect(
+      resolveShortCircuit([async () => true, thrower], 1, false),
+    ).rejects.toBeInstanceOf(SyncBoom);
+    const falseBeatsThrow = await resolveShortCircuit(
+      [thrower, async () => false],
+      1,
+      false,
+    );
+    expect(falseBeatsThrow).toBe(false);
   });
 });

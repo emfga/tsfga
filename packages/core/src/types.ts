@@ -68,8 +68,9 @@ export interface CheckOptions {
    * Maximum number of branches of one resolution node evaluated
    * concurrently (default: Infinity — unbounded). Mirrors
    * OpenFGA's `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT`. Bounding
-   * breadth only reorders work; it never changes answers.
-   * Must be at least 1.
+   * breadth never changes the boolean result or whether a check
+   * errors — only which branch's error surfaces when several
+   * fail. Must be an integer >= 1, or Infinity.
    */
   maxBreadth?: number;
 }

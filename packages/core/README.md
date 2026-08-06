@@ -101,11 +101,14 @@ Branches of one resolution node are evaluated concurrently,
 bounded by `maxBreadth` (default `Infinity` — unbounded, via
 the same options object as `maxDepth`). The option mirrors
 OpenFGA's `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT`. Bounding
-breadth only reorders work — answers never depend on it — but
-caps how many concurrent store reads a single wide node can
-issue (useful to avoid saturating a connection pool). Branches
-still queued when a node settles are never started. Values
-below 1 throw `TsfgaError`.
+breadth never changes the boolean result or whether a check
+errors — it caps how many concurrent store reads a single wide
+node can issue (useful to avoid saturating a connection pool).
+When several branches fail, which branch's error surfaces
+depends on completion order — the same nondeterminism OpenFGA
+has. Branches still queued when a node settles are never
+started. `maxBreadth` must be an integer >= 1 or `Infinity`;
+anything else throws `TsfgaError`.
 
 ## Contextual tuples
 
