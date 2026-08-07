@@ -633,6 +633,85 @@ export interface TsfgaClient {
 the `TupleStore` interface, `check`, `evaluateTupleCondition`, and
 `ContextualTupleStore`. `KyselyTupleStore` is exported from `@tsfga/kysely`.
 
+## API Stability Policy (pre-v1)
+
+**OpenFGA's API and behavior are the contract. tsfga's own API is not —
+not until v1.**
+
+- **Always respect OpenFGA.** Request/response shapes, error semantics,
+  limits and their defaults, evaluation order, and edge-case behavior
+  must match OpenFGA. Conformance tests are the arbiter. A change that
+  diverges from OpenFGA is a bug, no matter how much nicer it reads.
+- **Do not preserve tsfga's own API for its own sake.** Before the v1
+  release, breaking `@tsfga/core` / `@tsfga/kysely` public API is
+  allowed and expected whenever it moves us closer to OpenFGA parity
+  or removes an accidental design. Do not add compatibility shims,
+  deprecated aliases, or "legacy" code paths to keep an old tsfga
+  signature alive.
+- **Where OpenFGA has no opinion** (e.g. `TupleStore`, the Kysely
+  adapter, migration layout), we are free to design as we see fit —
+  and equally free to change it pre-v1.
+- When you break a tsfga API, say so plainly in the commit body and
+  update the affected package `README.md` and `CHANGELOG.md` in the
+  same commit.
+- This policy expires at v1. After the v1 release, tsfga's public API
+  becomes a semver contract like any other.
+
+## OpenFGA Source of Truth (`.openfga_repo`)
+
+The repo root has a gitignored `.openfga_repo` file whose single line
+is an absolute path to a local checkout of
+[`openfga/openfga`](https://github.com/openfga/openfga) (Go). Read the
+file to get the path — never hard-code it, it is per-machine:
+
+```bash
+OPENFGA_REPO=$(cat .openfga_repo)
+```
+
+**Use it whenever you need to understand OpenFGA's API or behavior at
+the code level** — before guessing, before inferring from docs alone,
+and before writing any code that claims OpenFGA parity. Docs describe
+intent; the Go source is what OpenFGA actually does, including the
+edge cases the docs omit.
+
+Reach for it when you are:
+- Implementing or changing anything in `packages/core/src/check.ts`
+- Deciding error semantics, error messages, or which errors short-circuit
+- Determining a limit's default value or how the limit is enforced
+- Resolving a conformance test disagreement between tsfga and OpenFGA
+- Working on condition evaluation, type coercion, or CEL semantics
+- Reasoning about evaluation order, concurrency, or short-circuiting
+
+Useful entry points inside the checkout:
+
+| Path | What lives there |
+|------|------------------|
+| `internal/graph/check.go` | Local check resolver — the real 5-step-equivalent algorithm |
+| `internal/graph/resolve_check_request.go` | Depth/dispatch bookkeeping per request |
+| `internal/graph/graph.go` | Relationship graph traversal |
+| `pkg/server/commands/check_command.go` | Check entry point, request validation, error mapping |
+| `pkg/typesystem/typesystem.go` | Model validation, relation rewrite semantics |
+| `internal/condition/` | CEL condition compilation, evaluation, parameter type coercion |
+| `pkg/server/config/` | Config defaults (`OPENFGA_RESOLVE_NODE_LIMIT`, `..._BREADTH_LIMIT`, etc.) |
+| `tests/` | OpenFGA's own behavioral test suites — good fixtures to mirror |
+
+**Rules for using it:**
+- **Read-only.** Never edit, build, or commit inside the checkout. It
+  is a reference, not a workspace.
+- **Check the version before trusting it.** Run
+  `git -C "$OPENFGA_REPO" describe --tags` and confirm it matches the
+  OpenFGA version in `compose.yaml`. A stale checkout will confidently
+  describe behavior the running container no longer has.
+- **The running container beats the checkout.** When source reading and
+  a conformance test disagree, the container is right — write a
+  conformance test to settle it rather than arguing from the Go code.
+- When a Go source file materially informs an implementation, cite it
+  in the commit body with a `Ref:` permalink pinned to the SHA of the
+  tag you read (not a `main` link, which rots).
+- If `.openfga_repo` is missing or the path does not exist, tell the
+  user and fall back to docs plus conformance tests — do not invent
+  the path or clone the repo without being asked.
+
 ## Conformance Testing
 
 Conformance tests validate that tsfga produces identical results to a real
@@ -1119,6 +1198,9 @@ history when interactive rebase is not available.
 
 - OpenFGA docs: https://openfga.dev/docs/modeling/getting-started
 - OpenFGA conditions: https://openfga.dev/docs/modeling/conditions
+- OpenFGA source: https://github.com/openfga/openfga — local checkout
+  path is in the gitignored `.openfga_repo` file; see
+  "OpenFGA Source of Truth"
 - CEL spec: https://github.com/google/cel-spec
 - `@marcbachmann/cel-js`: https://github.com/nicholasgasior/cel-js
 - Kysely docs: https://kysely.dev/

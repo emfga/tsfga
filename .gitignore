@@ -1,5 +1,6 @@
 .env*
 !.env.example
+.openfga_repo
 .turbo
 *.tsbuildinfo
 dist
