@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { check, resolveShortCircuit } from "../src/check.ts";
-import {
-  ConditionNotFoundError,
-  DepthExceededError,
-  TsfgaError,
-} from "../src/errors.ts";
+import { ConditionNotFoundError, TsfgaError } from "../src/errors.ts";
 import type {
   ConditionDefinition,
   RelationConfig,
   Tuple,
 } from "../src/types.ts";
+import {
+  ConfigErrorStore,
+  StoreReadFailure,
+} from "./helpers/erroring-store.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
 
 function makeTuple(overrides: Partial<Tuple> = {}): Tuple {
@@ -103,10 +103,11 @@ class GatedConfigStore extends MockTupleStore {
 }
 
 /**
- * Delays condition-definition lookups so a conditioned branch
- * errors late while a cycling sibling errors immediately.
+ * Slow condition lookups on top of the config-read failure, so one
+ * store can host a slow-failing branch and a fast-failing one with
+ * distinguishable error classes.
  */
-class SlowConditionLookupStore extends MockTupleStore {
+class SlowConditionLookupStore extends ConfigErrorStore {
   override async findConditionDefinition(
     name: string,
   ): Promise<ConditionDefinition | null> {
@@ -344,20 +345,19 @@ describe("bounded launch behavior", () => {
 });
 
 describe("error semantics under bounded breadth", () => {
-  /** viewer implied by [looper, ...rest]; looper cycles back. */
+  /**
+   * viewer implied by [broken, ...rest], where `broken`'s config
+   * read rejects. The error source is a store failure rather than
+   * a cycle: what is under test is how the bounded combinator
+   * treats *an* erroring branch, which is independent of cycle
+   * semantics.
+   */
   function erringStore(rest: string[], granted: string[]): MockTupleStore {
-    const store = seedUnion(new MockTupleStore(), rest, granted);
+    const store = seedUnion(new ConfigErrorStore(["broken"]), rest, granted);
     const viewer = store.relationConfigs.find((c) => c.relation === "viewer");
     if (viewer) {
-      viewer.impliedBy = ["looper", ...rest];
+      viewer.impliedBy = ["broken", ...rest];
     }
-    store.relationConfigs.push(
-      makeConfig({
-        objectType: "doc",
-        relation: "looper",
-        impliedBy: ["viewer"],
-      }),
-    );
     return store;
   }
 
@@ -365,7 +365,7 @@ describe("error semantics under bounded breadth", () => {
     const store = erringStore(["r2"], []);
     await expect(
       check(store, viewerRequest, { maxBreadth: 1 }),
-    ).rejects.toBeInstanceOf(DepthExceededError);
+    ).rejects.toBeInstanceOf(StoreReadFailure);
   });
 
   test("a later true beats an earlier error at breadth 1", async () => {
@@ -375,20 +375,15 @@ describe("error semantics under bounded breadth", () => {
   });
 
   test("false intersection operand beats an errored sibling at breadth 1", async () => {
-    const store = new MockTupleStore();
+    const store = new ConfigErrorStore(["broken"]);
     store.relationConfigs.push(
       makeConfig({
         objectType: "doc",
         relation: "access",
         intersection: [
-          { type: "computedUserset", relation: "looper" },
+          { type: "computedUserset", relation: "broken" },
           { type: "computedUserset", relation: "member" },
         ],
-      }),
-      makeConfig({
-        objectType: "doc",
-        relation: "looper",
-        impliedBy: ["access"],
       }),
       makeConfig({
         objectType: "doc",
@@ -405,12 +400,14 @@ describe("error semantics under bounded breadth", () => {
   });
 
   test("losing branch that errors after a win still resolves true", async () => {
-    const store = new MockTupleStore();
+    // `slowbroken` rejects 20ms in, well after the granted branch
+    // has already won the union.
+    const store = new ConfigErrorStore(["slowbroken"], 20);
     store.relationConfigs.push(
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        impliedBy: ["granted", "slowlooper"],
+        impliedBy: ["granted", "slowbroken"],
       }),
       makeConfig({
         objectType: "doc",
@@ -427,18 +424,6 @@ describe("error semantics under bounded breadth", () => {
         subjectId: "anne",
       }),
     );
-    const original = store.findRelationConfig.bind(store);
-    store.findRelationConfig = async (objectType, relation) => {
-      if (relation === "slowlooper") {
-        await delay(20);
-        return makeConfig({
-          objectType: "doc",
-          relation: "slowlooper",
-          impliedBy: ["viewer"],
-        });
-      }
-      return original(objectType, relation);
-    };
 
     const result = await check(store, viewerRequest, { maxBreadth: 2 });
     expect(result).toBe(true);
@@ -478,15 +463,15 @@ describe("adversarial-review regressions", () => {
   test("surfaced error class is pinned to array order at breadth 1", async () => {
     // Two failing branches with different error classes: slowerr
     // (first in array, ConditionNotFoundError after a delayed
-    // condition lookup) and fasterr (cycle, DepthExceededError
-    // immediately). The boolean/reject status is breadth-invariant
-    // but the surfaced class is completion-ordered: breadth 1
-    // completes in array order, unbounded lets the fast error
-    // record first. Pinned as accepted, upstream-matching
-    // nondeterminism (OpenFGA's union keeps a completion-ordered
-    // error too).
+    // condition lookup) and fasterr (StoreReadFailure from the
+    // config read, immediately). The boolean/reject status is
+    // breadth-invariant but the surfaced class is
+    // completion-ordered: breadth 1 completes in array order,
+    // unbounded lets the fast error record first. Pinned as
+    // accepted, upstream-matching nondeterminism (OpenFGA's union
+    // keeps a completion-ordered error too).
     function makeStore(): MockTupleStore {
-      const store = new SlowConditionLookupStore();
+      const store = new SlowConditionLookupStore(["fasterr"]);
       store.relationConfigs.push(
         makeConfig({
           objectType: "doc",
@@ -497,11 +482,6 @@ describe("adversarial-review regressions", () => {
           objectType: "doc",
           relation: "slowerr",
           directlyAssignableTypes: ["user"],
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "fasterr",
-          impliedBy: ["viewer"],
         }),
       );
       store.tuples.push(
@@ -524,7 +504,7 @@ describe("adversarial-review regressions", () => {
       check(makeStore(), viewerRequest, {
         maxBreadth: Number.POSITIVE_INFINITY,
       }),
-    ).rejects.toBeInstanceOf(DepthExceededError);
+    ).rejects.toBeInstanceOf(StoreReadFailure);
   });
 });
 

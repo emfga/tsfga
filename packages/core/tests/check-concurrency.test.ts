@@ -2,10 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { check } from "../src/check.ts";
 import {
   ConditionNotFoundError,
-  DepthExceededError,
   RelationConfigNotFoundError,
 } from "../src/errors.ts";
 import type { RelationConfig, Tuple } from "../src/types.ts";
+import {
+  ConfigErrorStore,
+  StoreReadFailure,
+} from "./helpers/erroring-store.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
 
 function makeTuple(overrides: Partial<Tuple> = {}): Tuple {
@@ -383,25 +386,20 @@ describe("single-wave node reads", () => {
     // Two erroring branches, no grant: the faster error wins, as
     // in OpenFGA's union (error identity is completion-ordered).
     // Here the direct branch's condition lookup is slowed, so the
-    // sibling cycle error surfaces deterministically.
-    class SlowConditionStore extends MockTupleStore {
+    // sibling's config-read failure surfaces deterministically.
+    class SlowConditionStore extends ConfigErrorStore {
       override async findConditionDefinition(name: string) {
         await delay(20);
         return super.findConditionDefinition(name);
       }
     }
-    const store = new SlowConditionStore();
+    const store = new SlowConditionStore(["broken"]);
     store.relationConfigs.push(
       makeConfig({
         objectType: "doc",
         relation: "viewer",
         directlyAssignableTypes: ["user"],
-        impliedBy: ["looper"],
-      }),
-      makeConfig({
-        objectType: "doc",
-        relation: "looper",
-        impliedBy: ["viewer"],
+        impliedBy: ["broken"],
       }),
     );
     store.tuples.push(
@@ -423,7 +421,7 @@ describe("single-wave node reads", () => {
         subjectType: "user",
         subjectId: "alice",
       }),
-    ).rejects.toBeInstanceOf(DepthExceededError);
+    ).rejects.toBeInstanceOf(StoreReadFailure);
   });
 
   test("tuples sampled before a mid-request config swap deny", async () => {

@@ -8,6 +8,10 @@ import {
 } from "../src/errors.ts";
 import { createTsfga } from "../src/index.ts";
 import type { RelationConfig, Tuple } from "../src/types.ts";
+import {
+  ConfigErrorStore,
+  StoreReadFailure,
+} from "./helpers/erroring-store.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
 
 function makeTuple(overrides: Partial<Tuple> = {}): Tuple {
@@ -1013,20 +1017,21 @@ describe("check algorithm", () => {
         }),
       ).rejects.toBeInstanceOf(DepthExceededError);
     });
+  });
 
-    test("true branch wins over a cyclic sibling branch", async () => {
-      // member is implied by both a cyclic relation and admin;
-      // the cyclic branch throws but the admin branch grants.
-      store.relationConfigs.push(
+  describe("Union error semantics", () => {
+    /**
+     * member is implied by a branch whose config read fails and by
+     * admin. The error source is deliberately *not* a cycle: the
+     * contract here is about any failing branch.
+     */
+    function unionStore(): ConfigErrorStore {
+      const erring = new ConfigErrorStore(["broken"]);
+      erring.relationConfigs.push(
         makeConfig({
           objectType: "doc",
           relation: "member",
-          impliedBy: ["looper", "admin"],
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "looper",
-          impliedBy: ["member"],
+          impliedBy: ["broken", "admin"],
         }),
         makeConfig({
           objectType: "doc",
@@ -1034,7 +1039,20 @@ describe("check algorithm", () => {
           directlyAssignableTypes: ["user"],
         }),
       );
-      store.tuples.push(
+      return erring;
+    }
+
+    const memberRequest = {
+      objectType: "doc",
+      objectId: "1",
+      relation: "member",
+      subjectType: "user",
+      subjectId: "alice",
+    };
+
+    test("true branch wins over an erroring sibling branch", async () => {
+      const erring = unionStore();
+      erring.tuples.push(
         makeTuple({
           objectType: "doc",
           objectId: "1",
@@ -1044,73 +1062,33 @@ describe("check algorithm", () => {
         }),
       );
 
-      expect(
-        await check(store, {
-          objectType: "doc",
-          objectId: "1",
-          relation: "member",
-          subjectType: "user",
-          subjectId: "alice",
-        }),
-      ).toBe(true);
+      expect(await check(erring, memberRequest)).toBe(true);
     });
 
     test("propagates error when no sibling branch grants", async () => {
-      store.relationConfigs.push(
-        makeConfig({
-          objectType: "doc",
-          relation: "member",
-          impliedBy: ["looper", "admin"],
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "looper",
-          impliedBy: ["member"],
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "admin",
-          directlyAssignableTypes: ["user"],
-        }),
-      );
-      // alice has no admin tuple: the cyclic branch's error must
+      // alice has no admin tuple: the failing branch's error must
       // surface instead of resolving false.
-      await expect(
-        check(store, {
-          objectType: "doc",
-          objectId: "1",
-          relation: "member",
-          subjectType: "user",
-          subjectId: "alice",
-        }),
-      ).rejects.toBeInstanceOf(DepthExceededError);
+      await expect(check(unionStore(), memberRequest)).rejects.toBeInstanceOf(
+        StoreReadFailure,
+      );
     });
   });
 
-  describe("Exclusion fails closed on depth exhaustion", () => {
-    test("cyclic exclusion branch throws instead of granting", async () => {
+  describe("Exclusion fails closed on a failed branch", () => {
+    test("errored exclusion branch throws instead of granting", async () => {
       // carl has a direct editor tuple, but the excludedBy relation
-      // cannot be resolved (cyclic). Pre-0.3.0 this failed open:
-      // the truncated exclusion read as "not excluded" and granted.
-      store.relationConfigs.push(
+      // cannot be resolved. Pre-0.3.0 this failed open: the
+      // truncated exclusion read as "not excluded" and granted.
+      const erring = new ConfigErrorStore(["banned"]);
+      erring.relationConfigs.push(
         makeConfig({
           objectType: "doc",
           relation: "editor",
           directlyAssignableTypes: ["user"],
           excludedBy: "banned",
         }),
-        makeConfig({
-          objectType: "doc",
-          relation: "banned",
-          impliedBy: ["banned_loop"],
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "banned_loop",
-          impliedBy: ["banned"],
-        }),
       );
-      store.tuples.push(
+      erring.tuples.push(
         makeTuple({
           objectType: "doc",
           objectId: "1",
@@ -1121,14 +1099,14 @@ describe("check algorithm", () => {
       );
 
       await expect(
-        check(store, {
+        check(erring, {
           objectType: "doc",
           objectId: "1",
           relation: "editor",
           subjectType: "user",
           subjectId: "carl",
         }),
-      ).rejects.toBeInstanceOf(DepthExceededError);
+      ).rejects.toBeInstanceOf(StoreReadFailure);
     });
 
     test("deep exclusion branch throws instead of granting", async () => {
@@ -1203,22 +1181,18 @@ describe("check algorithm", () => {
     });
 
     test("base false denies even when exclusion branch errors", async () => {
-      store.relationConfigs.push(
+      const erring = new ConfigErrorStore(["banned"]);
+      erring.relationConfigs.push(
         makeConfig({
           objectType: "doc",
           relation: "editor",
           directlyAssignableTypes: ["user"],
           excludedBy: "banned",
         }),
-        makeConfig({
-          objectType: "doc",
-          relation: "banned",
-          impliedBy: ["banned"],
-        }),
       );
       // No editor tuple: definite deny regardless of exclusion.
       expect(
-        await check(store, {
+        await check(erring, {
           objectType: "doc",
           objectId: "1",
           relation: "editor",
@@ -1230,65 +1204,72 @@ describe("check algorithm", () => {
   });
 
   describe("Definitive deny beats sibling error (OpenFGA parity)", () => {
+    /** can_view = member AND broken, where broken's config read fails. */
+    function intersectionStore(): ConfigErrorStore {
+      const erring = new ConfigErrorStore(["broken"]);
+      erring.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "can_view",
+          intersection: [
+            { type: "computedUserset", relation: "member" },
+            { type: "computedUserset", relation: "broken" },
+          ],
+          allowsUsersetSubjects: false,
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "member",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      return erring;
+    }
+
+    /** viewer = broken BUT NOT banned, where broken's read fails. */
+    function exclusionStore(): ConfigErrorStore {
+      const erring = new ConfigErrorStore(["broken"]);
+      erring.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          impliedBy: ["broken"],
+          excludedBy: "banned",
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "banned",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      return erring;
+    }
+
+    const canViewRequest = {
+      objectType: "doc",
+      objectId: "1",
+      relation: "can_view",
+      subjectType: "user",
+      subjectId: "alice",
+    };
+    const viewerRequest = {
+      objectType: "doc",
+      objectId: "1",
+      relation: "viewer",
+      subjectType: "user",
+      subjectId: "alice",
+    };
+
     test("intersection: false operand overrides erroring operand", async () => {
       // OpenFGA's intersection swallows errors when another
       // operand is definitively false.
-      store.relationConfigs.push(
-        makeConfig({
-          objectType: "doc",
-          relation: "can_view",
-          intersection: [
-            { type: "computedUserset", relation: "member" },
-            { type: "computedUserset", relation: "erring" },
-          ],
-          allowsUsersetSubjects: false,
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "member",
-          directlyAssignableTypes: ["user"],
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "erring",
-          impliedBy: ["erring"],
-        }),
-      );
-      // alice is not a member: false wins over the cycle error.
-      expect(
-        await check(store, {
-          objectType: "doc",
-          objectId: "1",
-          relation: "can_view",
-          subjectType: "user",
-          subjectId: "alice",
-        }),
-      ).toBe(false);
+      // alice is not a member: false wins over the read failure.
+      expect(await check(intersectionStore(), canViewRequest)).toBe(false);
     });
 
     test("intersection: true operand plus error still throws", async () => {
-      store.relationConfigs.push(
-        makeConfig({
-          objectType: "doc",
-          relation: "can_view",
-          intersection: [
-            { type: "computedUserset", relation: "member" },
-            { type: "computedUserset", relation: "erring" },
-          ],
-          allowsUsersetSubjects: false,
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "member",
-          directlyAssignableTypes: ["user"],
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "erring",
-          impliedBy: ["erring"],
-        }),
-      );
-      store.tuples.push(
+      const erring = intersectionStore();
+      erring.tuples.push(
         makeTuple({
           objectType: "doc",
           objectId: "1",
@@ -1298,39 +1279,16 @@ describe("check algorithm", () => {
         }),
       );
       // No operand is definitively false: fail closed on the error.
-      await expect(
-        check(store, {
-          objectType: "doc",
-          objectId: "1",
-          relation: "can_view",
-          subjectType: "user",
-          subjectId: "alice",
-        }),
-      ).rejects.toBeInstanceOf(DepthExceededError);
+      await expect(check(erring, canViewRequest)).rejects.toBeInstanceOf(
+        StoreReadFailure,
+      );
     });
 
     test("exclusion: granted exclusion branch overrides base error", async () => {
       // OpenFGA short-circuits to deny when the subtracted branch
       // grants, even if the base errored.
-      store.relationConfigs.push(
-        makeConfig({
-          objectType: "doc",
-          relation: "viewer",
-          impliedBy: ["looper"],
-          excludedBy: "banned",
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "looper",
-          impliedBy: ["viewer"],
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "banned",
-          directlyAssignableTypes: ["user"],
-        }),
-      );
-      store.tuples.push(
+      const erring = exclusionStore();
+      erring.tuples.push(
         makeTuple({
           objectType: "doc",
           objectId: "1",
@@ -1339,47 +1297,15 @@ describe("check algorithm", () => {
           subjectId: "alice",
         }),
       );
-      // The base cycles (error) but alice is banned: deny.
-      expect(
-        await check(store, {
-          objectType: "doc",
-          objectId: "1",
-          relation: "viewer",
-          subjectType: "user",
-          subjectId: "alice",
-        }),
-      ).toBe(false);
+      // The base errors but alice is banned: deny.
+      expect(await check(erring, viewerRequest)).toBe(false);
     });
 
     test("exclusion: base error with false exclusion still throws", async () => {
-      store.relationConfigs.push(
-        makeConfig({
-          objectType: "doc",
-          relation: "viewer",
-          impliedBy: ["looper"],
-          excludedBy: "banned",
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "looper",
-          impliedBy: ["viewer"],
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "banned",
-          directlyAssignableTypes: ["user"],
-        }),
-      );
       // alice is not banned: the base error must fail closed.
       await expect(
-        check(store, {
-          objectType: "doc",
-          objectId: "1",
-          relation: "viewer",
-          subjectType: "user",
-          subjectId: "alice",
-        }),
-      ).rejects.toBeInstanceOf(DepthExceededError);
+        check(exclusionStore(), viewerRequest),
+      ).rejects.toBeInstanceOf(StoreReadFailure);
     });
   });
 
