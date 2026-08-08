@@ -318,11 +318,12 @@ export async function check(
   options: CheckOptions = {},
   depth: number = 0,
 ): Promise<boolean> {
-  const maxDepth = options.maxDepth ?? 10;
+  const maxDepth = options.maxDepth ?? 25;
 
-  // Prevent infinite recursion
-  if (depth > maxDepth) {
-    return false;
+  // Prevent infinite recursion. Only dispatches to another object
+  // (steps 2 and 5) spend the budget, so the guard trips on `>=`.
+  if (depth >= maxDepth) {
+    throw new DepthExceededError(...);
   }
 
   // Step 1: Direct tuple check
@@ -376,10 +377,11 @@ export async function check(
   // → recursively check if user has "channels_admin" on the same object
   if (config?.impliedBy) {
     for (const impliedRelation of config.impliedBy) {
+      // Same object: a rewrite, not a dispatch — no depth cost
       const hasRelation = await check(store, {
         ...request,
         relation: impliedRelation,
-      }, options, depth + 1);
+      }, options, depth);
       if (hasRelation) {
         return true;
       }
@@ -390,10 +392,11 @@ export async function check(
   // e.g., for branch.can_merge, computed_userset = "can_push" means
   // users who can push can also merge (on the same object)
   if (config?.computedUserset) {
+    // Same object: a rewrite, not a dispatch — no depth cost
     const hasRelation = await check(store, {
       ...request,
       relation: config.computedUserset,
-    }, options, depth + 1);
+    }, options, depth);
     if (hasRelation) {
       return true;
     }
@@ -437,6 +440,13 @@ export async function check(
 - The `depth` parameter is internal; it is not exposed in the public API
 - `maxDepth` defaults to 25 (matching OpenFGA's
   `OPENFGA_RESOLVE_NODE_LIMIT`) but is configurable via `CheckOptions`
+- **Only dispatches spend depth.** Userset expansion (step 2) and
+  tuple-to-userset expansion (step 5) move to another object and cost
+  one depth each. Rewrites of the same object — `impliedBy` (step 3),
+  `computedUserset` (step 4), `excludedBy` and intersection operands —
+  cost none, matching OpenFGA, which increments resolution depth only
+  in `dispatch`. Unbounded rewrite recursion is prevented by the cycle
+  path, not by the depth budget
 
 ## CEL Conditions (`packages/core/src/conditions.ts`)
 

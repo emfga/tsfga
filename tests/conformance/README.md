@@ -56,6 +56,15 @@ bun run turbo:test:conformance
 - `advanced-entitlements` — multi-condition
   entitlements
 
+**Resolution limits and error semantics:**
+- `wide-union` — a node fanning out wider than the
+  default breadth limit of 10
+- `deep-rewrite` — a rewrite ladder deeper than the
+  default depth limit of 25; pins that rewrites of the
+  same object cost no resolution depth
+- `condition-error-siblings` — how a condition error on
+  one branch interacts with its siblings
+
 **Conditions:**
 - `organization-context` — org-scoped conditions
 - `contextual-time-based` — time-window conditions

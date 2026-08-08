@@ -1,0 +1,22 @@
+# anne: at the bottom of the ladder, permitted, not blocked.
+# bob:  same, but blocked at lvl15.
+# carl: same, but fails the intersection at lvl20.
+# dave: nothing at all.
+- user: user:anne
+  relation: lvl30
+  object: document:1
+- user: user:anne
+  relation: allowed
+  object: document:1
+- user: user:bob
+  relation: lvl30
+  object: document:1
+- user: user:bob
+  relation: allowed
+  object: document:1
+- user: user:bob
+  relation: blocked
+  object: document:1
+- user: user:carl
+  relation: lvl30
+  object: document:1

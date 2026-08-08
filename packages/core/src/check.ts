@@ -30,6 +30,17 @@ type NodeReads = readonly [Tuple | null, Tuple | null, Tuple[]];
  *   detected in the resolution path. Exhaustion is never converted
  *   to `false`: inside an exclusion or intersection branch that
  *   would fail open.
+ *
+ * Depth accounting: only steps that move to a *different object*
+ * — userset expansion and tuple-to-userset expansion — cost
+ * depth. Rewrites of the same object (implied_by, computed
+ * userset, exclusion, intersection operands) cost none. This
+ * mirrors OpenFGA, which increments resolution depth solely in
+ * `dispatch` (`internal/graph/check.go`, called only for userset
+ * and TTU children) and notes explicitly at `checkComputedUserset`
+ * that "we don't want to increase resolution depth". Rewrite
+ * recursion is bounded by the cycle path instead: the relation
+ * set of one object is finite, so it always terminates.
  * - Within union-style resolution (steps 1-5), a branch that
  *   resolves `true` wins even if a sibling branch threw
  *   DepthExceededError. If no branch resolves `true` and at least
@@ -117,7 +128,10 @@ async function checkNode(
   depth: number,
   path: ReadonlySet<string>,
 ): Promise<boolean> {
-  if (depth > maxDepth) {
+  // `depth` counts dispatches already made, so the budget is spent
+  // once it reaches maxDepth — OpenFGA errors on
+  // `Depth == maxResolutionDepth`, before resolving the node.
+  if (depth >= maxDepth) {
     throw new DepthExceededError(`max depth of ${maxDepth} exceeded`);
   }
 
@@ -177,12 +191,14 @@ async function checkNode(
     const excludedBy = config.excludedBy;
     const [baseResult, exclusionResult] = await Promise.allSettled([
       resolveBase(),
+      // Same object, a rewrite of it — no depth cost (upstream
+      // builds the subtract branch on the unchanged request).
       checkNode(
         store,
         { ...request, relation: excludedBy },
         maxDepth,
         maxBreadth,
-        depth + 1,
+        depth,
         visited,
       ),
     ]);
@@ -278,7 +294,8 @@ async function checkBase(
     );
   }
 
-  // Step 2: Userset expansion handlers
+  // Step 2: Userset expansion handlers. This moves to another
+  // object, so it is a dispatch and costs one depth.
   for (const userset of usersetTuples) {
     if (!userset.subjectRelation) continue;
     const relation = userset.subjectRelation;
@@ -304,7 +321,9 @@ async function checkBase(
     });
   }
 
-  // Step 3: Relation inheritance (implied_by) handlers
+  // Step 3: Relation inheritance (implied_by) handlers.
+  // Same object, so no depth cost — see the depth-accounting note
+  // on `check`.
   if (config?.impliedBy) {
     for (const impliedRelation of config.impliedBy) {
       handlers.push(() =>
@@ -313,14 +332,14 @@ async function checkBase(
           { ...request, relation: impliedRelation },
           maxDepth,
           maxBreadth,
-          depth + 1,
+          depth,
           path,
         ),
       );
     }
   }
 
-  // Step 4: Computed userset handler
+  // Step 4: Computed userset handler. Same object, no depth cost.
   if (config?.computedUserset) {
     const computedUserset = config.computedUserset;
     handlers.push(() =>
@@ -329,13 +348,14 @@ async function checkBase(
         { ...request, relation: computedUserset },
         maxDepth,
         maxBreadth,
-        depth + 1,
+        depth,
         path,
       ),
     );
   }
 
-  // Step 5: Tuple-to-userset composite handler
+  // Step 5: Tuple-to-userset composite handler. Like step 2 this
+  // moves to another object, so each child costs one depth.
   if (config?.tupleToUserset) {
     const ttuEntries = config.tupleToUserset;
     handlers.push(async () => {
@@ -424,13 +444,14 @@ async function checkIntersection(
         ),
       );
     } else if (operand.type === "computedUserset") {
+      // Same object, no depth cost — as with the other rewrites.
       handlers.push(() =>
         checkNode(
           store,
           { ...request, relation: operand.relation },
           maxDepth,
           maxBreadth,
-          depth + 1,
+          depth,
           path,
         ),
       );

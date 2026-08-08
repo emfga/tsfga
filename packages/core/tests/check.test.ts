@@ -860,10 +860,11 @@ describe("check algorithm", () => {
   describe("Max depth protection", () => {
     /**
      * Build a computedUserset chain lvl0 -> lvl1 -> ... -> lvlN
-     * with a direct tuple at lvlN. Resolving lvl0 requires N
-     * recursion steps.
+     * with a direct tuple at lvlN, all on doc:1. Every hop is a
+     * rewrite of the same object, so the whole chain costs zero
+     * depth.
      */
-    function buildChain(length: number) {
+    function buildRewriteChain(length: number) {
       for (let i = 0; i < length; i++) {
         store.relationConfigs.push(
           makeConfig({
@@ -884,8 +885,58 @@ describe("check algorithm", () => {
       );
     }
 
-    test("resolves when chain depth is exactly at the limit", async () => {
-      buildChain(3);
+    /**
+     * Build a userset chain group:0#member <- group:1#member <-
+     * ... <- group:N#member with a direct tuple at group:N.
+     * Resolving group:0 takes N dispatches, so it needs a budget
+     * of N + 1.
+     */
+    function buildUsersetChain(length: number) {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "group",
+          relation: "member",
+          directlyAssignableTypes: ["user"],
+          allowsUsersetSubjects: true,
+        }),
+      );
+      for (let i = 0; i < length; i++) {
+        store.tuples.push(
+          makeTuple({
+            objectType: "group",
+            objectId: String(i),
+            relation: "member",
+            subjectType: "group",
+            subjectId: String(i + 1),
+            subjectRelation: "member",
+          }),
+        );
+      }
+      store.tuples.push(
+        makeTuple({
+          objectType: "group",
+          objectId: String(length),
+          relation: "member",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+    }
+
+    const groupRequest = {
+      objectType: "group",
+      objectId: "0",
+      relation: "member",
+      subjectType: "user",
+      subjectId: "alice",
+    };
+
+    test("rewrites of the same object cost no depth", async () => {
+      // Three computed-userset hops resolve on the smallest legal
+      // budget. OpenFGA increments resolution depth only when it
+      // dispatches to another object; a rewrite ladder never
+      // exhausts the budget however long it is.
+      buildRewriteChain(3);
       expect(
         await check(
           store,
@@ -896,25 +947,22 @@ describe("check algorithm", () => {
             subjectType: "user",
             subjectId: "alice",
           },
-          { maxDepth: 3 },
+          { maxDepth: 1 },
         ),
       ).toBe(true);
     });
 
+    test("resolves when dispatch depth is exactly at the limit", async () => {
+      // Root plus three dispatches occupies depths 0..3, so the
+      // budget must be 4: the guard trips on `depth === maxDepth`.
+      buildUsersetChain(3);
+      expect(await check(store, groupRequest, { maxDepth: 4 })).toBe(true);
+    });
+
     test("throws DepthExceededError beyond the limit", async () => {
-      buildChain(3);
+      buildUsersetChain(3);
       await expect(
-        check(
-          store,
-          {
-            objectType: "doc",
-            objectId: "1",
-            relation: "lvl0",
-            subjectType: "user",
-            subjectId: "alice",
-          },
-          { maxDepth: 2 },
-        ),
+        check(store, groupRequest, { maxDepth: 3 }),
       ).rejects.toBeInstanceOf(DepthExceededError);
     });
   });
@@ -931,6 +979,35 @@ describe("check algorithm", () => {
           objectType: "doc",
           objectId: "1",
           relation: "a",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).rejects.toBeInstanceOf(DepthExceededError);
+    });
+
+    test("long rewrite cycle terminates without the depth guard", async () => {
+      // 40 rewrite hops on doc:1 closing back on lvl0 — longer than
+      // the default budget of 25, but rewrites cost no depth, so
+      // only the resolution path can stop it. It must reject, not
+      // hang. This is the safety argument for charging no depth on
+      // rewrites: one object has a finite set of relations, so the
+      // path Set always closes the loop.
+      const length = 40;
+      for (let i = 0; i < length; i++) {
+        store.relationConfigs.push(
+          makeConfig({
+            objectType: "doc",
+            relation: `lvl${i}`,
+            computedUserset: i === length - 1 ? "lvl0" : `lvl${i + 1}`,
+          }),
+        );
+      }
+
+      await expect(
+        check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "lvl0",
           subjectType: "user",
           subjectId: "alice",
         }),
@@ -1056,20 +1133,47 @@ describe("check algorithm", () => {
 
     test("deep exclusion branch throws instead of granting", async () => {
       // The exclusion chain needs more depth than maxDepth allows.
+      // It has to be a *userset* chain: rewrites of doc:1 cost no
+      // depth, so only dispatch to another object can exhaust the
+      // budget.
       store.relationConfigs.push(
         makeConfig({
           objectType: "doc",
           relation: "editor",
           directlyAssignableTypes: ["user"],
-          excludedBy: "b0",
+          excludedBy: "banned",
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "banned",
+          allowsUsersetSubjects: true,
+        }),
+        makeConfig({
+          objectType: "blocklist",
+          relation: "member",
+          directlyAssignableTypes: ["user"],
+          allowsUsersetSubjects: true,
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "banned",
+          subjectType: "blocklist",
+          subjectId: "0",
+          subjectRelation: "member",
         }),
       );
       for (let i = 0; i < 5; i++) {
-        store.relationConfigs.push(
-          makeConfig({
-            objectType: "doc",
-            relation: `b${i}`,
-            computedUserset: `b${i + 1}`,
+        store.tuples.push(
+          makeTuple({
+            objectType: "blocklist",
+            objectId: String(i),
+            relation: "member",
+            subjectType: "blocklist",
+            subjectId: String(i + 1),
+            subjectRelation: "member",
           }),
         );
       }
@@ -2182,49 +2286,48 @@ describe("createTsfga client", () => {
 
   describe("maxDepth option", () => {
     test("client-level maxDepth applies to checks", async () => {
+      // One userset hop: group:0 sits at depth 0 and group:1 at
+      // depth 1, so a budget of 1 is exhausted and 2 resolves.
       store.relationConfigs.push(
         makeConfig({
-          objectType: "doc",
-          relation: "a",
-          computedUserset: "b",
-        }),
-        makeConfig({
-          objectType: "doc",
-          relation: "b",
-          computedUserset: "c",
+          objectType: "group",
+          relation: "member",
+          directlyAssignableTypes: ["user"],
+          allowsUsersetSubjects: true,
         }),
       );
       store.tuples.push(
         makeTuple({
-          objectType: "doc",
+          objectType: "group",
+          objectId: "0",
+          relation: "member",
+          subjectType: "group",
+          subjectId: "1",
+          subjectRelation: "member",
+        }),
+        makeTuple({
+          objectType: "group",
           objectId: "1",
-          relation: "c",
+          relation: "member",
           subjectType: "user",
           subjectId: "alice",
         }),
       );
+      const request = {
+        objectType: "group",
+        objectId: "0",
+        relation: "member",
+        subjectType: "user",
+        subjectId: "alice",
+      };
 
       const shallow = createTsfga(store, { maxDepth: 1 });
-      await expect(
-        shallow.check({
-          objectType: "doc",
-          objectId: "1",
-          relation: "a",
-          subjectType: "user",
-          subjectId: "alice",
-        }),
-      ).rejects.toBeInstanceOf(DepthExceededError);
+      await expect(shallow.check(request)).rejects.toBeInstanceOf(
+        DepthExceededError,
+      );
 
       const deep = createTsfga(store, { maxDepth: 2 });
-      expect(
-        await deep.check({
-          objectType: "doc",
-          objectId: "1",
-          relation: "a",
-          subjectType: "user",
-          subjectId: "alice",
-        }),
-      ).toBe(true);
+      expect(await deep.check(request)).toBe(true);
     });
   });
 });

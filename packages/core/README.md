@@ -72,6 +72,17 @@ argument of `createTsfga`). The default matches OpenFGA's
 `OPENFGA_RESOLVE_NODE_LIMIT` (25), so both systems exhaust
 resolution at the same model depth.
 
+**Only hops to another object spend the budget.** Userset
+expansion and tuple-to-userset expansion each cost one depth;
+rewrites of the same object — `impliedBy`, `computedUserset`,
+`excludedBy`, and intersection operands — cost none. This
+matches OpenFGA, which increments resolution depth solely when
+it dispatches to a child object. A rewrite ladder can therefore
+be arbitrarily long without exhausting the budget; it is
+bounded instead by cycle detection, since one object has a
+finite set of relations. A budget of `maxDepth` admits a root
+node plus `maxDepth - 1` dispatches.
+
 - When the budget is exhausted, or when the resolution path
   revisits a node it already contains (a cyclic model),
   `check()` throws `DepthExceededError` — mirroring OpenFGA's

@@ -5,6 +5,26 @@ Notable changes to `@tsfga/core`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
+## Unreleased
+
+### Changed
+
+- **Only dispatches to another object spend the depth budget.**
+  Userset expansion and tuple-to-userset expansion cost one depth
+  each, as before; rewrites of the same object — `impliedBy`,
+  `computedUserset`, `excludedBy` and intersection operands — now
+  cost none. Previously every one of them charged a depth, so
+  tsfga exhausted `maxDepth` earlier than OpenFGA and threw
+  `DepthExceededError` on models OpenFGA resolves — reachable at
+  the default limit of 25. The guard also moved from
+  `depth > maxDepth` to `depth >= maxDepth`, matching OpenFGA's
+  `Depth == maxResolutionDepth`: a budget of `maxDepth` admits a
+  root node plus `maxDepth - 1` dispatches. Behavior-visible, not
+  an API change: checks that used to throw may now resolve, and a
+  check one dispatch past the limit throws where it previously
+  resolved. Long rewrite ladders are still bounded — by cycle
+  detection, since one object has a finite set of relations.
+
 ## 0.3.1 — 2026-08
 
 Maintenance release. No changes to the published code — the
