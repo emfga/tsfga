@@ -15,19 +15,28 @@ import { createTsfga, check } from "../../packages/core/dist/index.js";
 assert(typeof createTsfga === "function", "createTsfga should be a function");
 assert(typeof check === "function", "check should be a function");
 
-// Minimal mock store (only methods used by a simple direct-tuple check)
+// Minimal mock store (only methods used by a simple direct-tuple
+// check). `findCheckTuples` answers all three per-node reads at
+// once; a store may use the query's include* flags to skip work,
+// but core re-clamps the reply, so returning a slot that was not
+// asked for just loses it.
 const mockStore = {
-  findDirectTuple: async (_objectType, _objectId, _relation, _subjectType, _subjectId) => ({
-    objectType: "doc",
-    objectId: "1",
-    relation: "viewer",
-    subjectType: "user",
-    subjectId: "alice",
-    subjectRelation: null,
-    conditionName: null,
-    conditionContext: null,
+  findCheckTuples: async (query) => ({
+    direct: query.includeDirect
+      ? {
+          objectType: query.objectType,
+          objectId: query.objectId,
+          relation: query.relation,
+          subjectType: query.subjectType,
+          subjectId: query.subjectId,
+          subjectRelation: null,
+          conditionName: null,
+          conditionContext: null,
+        }
+      : null,
+    wildcard: null,
+    usersets: [],
   }),
-  findUsersetTuples: async () => [],
   findTuplesByRelation: async () => [],
   findRelationConfig: async () => null,
   findConditionDefinition: async () => null,
@@ -56,7 +65,11 @@ assert(allowed === true, `expected true, got ${allowed}`);
 // No matching tuple — should return false
 const notAllowedStore = {
   ...mockStore,
-  findDirectTuple: async () => null,
+  findCheckTuples: async () => ({
+    direct: null,
+    wildcard: null,
+    usersets: [],
+  }),
 };
 const notAllowedClient = createTsfga(notAllowedStore);
 const denied = await notAllowedClient.check({

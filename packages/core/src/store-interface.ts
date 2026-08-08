@@ -1,5 +1,7 @@
 import type {
   AddTupleRequest,
+  CheckTuples,
+  CheckTuplesQuery,
   ConditionDefinition,
   RelationConfig,
   RemoveTupleRequest,
@@ -9,21 +11,31 @@ import type {
 export interface TupleStore {
   // === Read ===
 
-  /** Check if a direct tuple exists (no subject_relation) */
-  findDirectTuple(
-    objectType: string,
-    objectId: string,
-    relation: string,
-    subjectType: string,
-    subjectId: string,
-  ): Promise<Tuple | null>;
-
-  /** Find tuples where subject_relation IS NOT NULL (userset expansion) */
-  findUsersetTuples(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<Tuple[]>;
+  /**
+   * Read the tuples one check node needs: the subject's direct
+   * tuple, the `subjectType:*` wildcard tuple, and the usersets
+   * assigned to the relation.
+   *
+   * These three are asked for together because a check issues
+   * them together, at every node it visits — serving them in one
+   * round-trip is the single largest thing an adapter can do for
+   * check latency. An implementation is free to run three queries
+   * instead; it just gives that up.
+   *
+   * The `include*` flags are there so a store can **narrow** its
+   * query — that is where the saving is. They are not a contract
+   * you can breach dangerously: the check algorithm re-clamps
+   * every reply against the query it sent, so returning a part
+   * that was not asked for, or filing a row under the wrong slot,
+   * loses that row. It cannot widen what the model admits.
+   *
+   * Slots are exact. `direct` is the tuple for this subject with
+   * no subject relation; `wildcard` is the one for
+   * `subjectType:*`, likewise with no subject relation; every row
+   * in `usersets` has a subject relation. Anything else is
+   * discarded.
+   */
+  findCheckTuples(query: CheckTuplesQuery): Promise<CheckTuples>;
 
   /** Find tuples by object + relation (for tuple-to-userset tupleset lookup) */
   findTuplesByRelation(

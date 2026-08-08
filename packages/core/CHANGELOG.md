@@ -9,6 +9,70 @@ releases may contain breaking changes).
 
 ### Breaking changes
 
+- **`TupleStore.findDirectTuple` and `TupleStore.findUsersetTuples`
+  are replaced by `findCheckTuples`.** A check node wanted all
+  three reads — the subject's direct tuple, the `type:*` wildcard
+  tuple, the userset rows — and issued three calls for them. It
+  now issues one, taking a `CheckTuplesQuery` and returning a
+  `CheckTuples`; both types are exported. Custom `TupleStore`
+  implementations must be updated: the two old methods are gone,
+  with no fallback shim.
+
+  The query carries which parts the caller wants, so the relation
+  config gating below still applies. Those `include*` flags let a
+  store narrow its query, but they are not a trust boundary: the
+  check algorithm re-clamps every reply against the query it
+  sent, so a store that ignores a flag or files a row under the
+  wrong slot loses that row rather than granting access the model
+  forbids. A node whose config rules out all three parts skips
+  the store altogether.
+
+  This is a latency change, not a work change: the number of rows
+  read is the same, and the store-call count barely moves,
+  because the type-restriction gating below had already cut most
+  nodes to a single admitted read. What moves is round-trips and
+  connection-pool pressure. A node used to issue up to three
+  concurrent reads, so at the default `maxBreadth` of 10 a single
+  wide node could demand up to 30 connections at once; it now
+  demands 10. Measured against PostgreSQL on a 10-connection
+  pool, relations that admit more than one part (`[user,
+  group#member]`, the common nested-group shape) resolve
+  1.8x–3.0x faster; relations that admit exactly one part emit
+  identical SQL and are unchanged. On a single-connection handle
+  every shape improves, 1.1x–2.3x.
+
+  Porting a custom store is mechanical. The minimal version keeps
+  whatever queries you already had and drops the flags:
+
+  ```ts
+  async findCheckTuples(query) {
+    const onNode = [query.objectType, query.objectId, query.relation];
+    return {
+      direct: query.includeDirect
+        ? await this.oldFindDirectTuple(
+            ...onNode, query.subjectType, query.subjectId)
+        : null,
+      wildcard: query.includeWildcard
+        ? await this.oldFindDirectTuple(
+            ...onNode, query.subjectType, "*")
+        : null,
+      usersets: query.includeUsersets
+        ? await this.oldFindUsersetTuples(...onNode)
+        : [],
+    };
+  }
+  ```
+
+  That is correct but keeps three round-trips. The point of the
+  change is to serve the parts in one query where the backend can
+  — see `@tsfga/kysely` for a SQL implementation.
+
+  `ContextualTupleStore`'s overlay is unchanged and still
+  deliberately asymmetric: a contextual tuple *replaces* the
+  stored direct or wildcard tuple (a probe returns one row, so an
+  override has to win outright) but is *concatenated* with the
+  stored userset rows.
+
 - **A cycle in the resolution path no longer throws.** Revisiting
   a node used to raise `DepthExceededError`, the same error as
   depth exhaustion. It now resolves `false`, and `check()` returns

@@ -1,4 +1,8 @@
-import type { RelationConfig, Tuple } from "../../src/types.ts";
+import type {
+  CheckTuples,
+  CheckTuplesQuery,
+  RelationConfig,
+} from "../../src/types.ts";
 import { MockTupleStore } from "./mock-store.ts";
 
 /**
@@ -65,25 +69,24 @@ export class ConfigErrorStore extends MockTupleStore {
 }
 
 /**
- * Rejects the userset scan for the named relations instead of the
+ * Rejects the tuple read for the named relations instead of the
  * config read, so a branch can fail *after* its config resolved —
- * the other half of the node's single read wave.
+ * the node's other read, and the one a store is most likely to
+ * fail on in practice.
  */
-export class UsersetErrorStore extends MockTupleStore {
+export class TupleReadErrorStore extends MockTupleStore {
   constructor(private readonly erringRelations: readonly string[]) {
     super();
   }
 
-  override async findUsersetTuples(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<Tuple[]> {
-    if (this.erringRelations.includes(relation)) {
+  override async findCheckTuples(
+    query: CheckTuplesQuery,
+  ): Promise<CheckTuples> {
+    if (this.erringRelations.includes(query.relation)) {
       throw new StoreReadFailure(
-        `userset scan failed for ${objectType}.${relation}`,
+        `tuple read failed for ${query.objectType}.${query.relation}`,
       );
     }
-    return super.findUsersetTuples(objectType, objectId, relation);
+    return super.findCheckTuples(query);
   }
 }

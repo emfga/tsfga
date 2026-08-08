@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { check } from "../src/check.ts";
+import { ContextualTupleStore } from "../src/contextual-store.ts";
 import {
   DepthExceededError,
   InvalidSubjectTypeError,
@@ -858,6 +859,183 @@ describe("check algorithm", () => {
           ],
         }),
       ).toBe(false);
+    });
+
+    /**
+     * The overlay is asymmetric and has to stay that way. A probe
+     * returns one tuple, so a contextual tuple on that key
+     * *replaces* the stored one; the userset scan returns a set,
+     * so there the two are *concatenated*. Serving all three reads
+     * from one call makes it easy to even them out by accident,
+     * and either direction of that mistake is silent: replacing
+     * usersets drops stored grants, unioning a probe resurrects
+     * the stored tuple a caller was overriding.
+     */
+    describe("the overlay replaces probes and concatenates usersets", () => {
+      test("an unconditioned contextual tuple overrides a conditioned stored one", async () => {
+        // The stored tuple names a condition that does not exist,
+        // so evaluating it throws. Nothing should evaluate it: the
+        // contextual tuple takes its place entirely.
+        store.tuples.push(
+          makeTuple({
+            objectType: "doc",
+            objectId: "1",
+            relation: "viewer",
+            subjectType: "user",
+            subjectId: "alice",
+            conditionName: "missing",
+          }),
+        );
+
+        expect(
+          await check(store, {
+            objectType: "doc",
+            objectId: "1",
+            relation: "viewer",
+            subjectType: "user",
+            subjectId: "alice",
+            contextualTuples: [
+              {
+                objectType: "doc",
+                objectId: "1",
+                relation: "viewer",
+                subjectType: "user",
+                subjectId: "alice",
+              },
+            ],
+          }),
+        ).toBe(true);
+      });
+
+      test("a contextual wildcard overrides a conditioned stored one", async () => {
+        store.relationConfigs.push(
+          makeConfig({
+            objectType: "doc",
+            relation: "public",
+            directlyAssignableTypes: ["user", "user:*"],
+          }),
+        );
+        store.tuples.push(
+          makeTuple({
+            objectType: "doc",
+            objectId: "1",
+            relation: "public",
+            subjectType: "user",
+            subjectId: "*",
+            conditionName: "missing",
+          }),
+        );
+
+        expect(
+          await check(store, {
+            objectType: "doc",
+            objectId: "1",
+            relation: "public",
+            subjectType: "user",
+            subjectId: "alice",
+            contextualTuples: [
+              {
+                objectType: "doc",
+                objectId: "1",
+                relation: "public",
+                subjectType: "user",
+                subjectId: "*",
+              },
+            ],
+          }),
+        ).toBe(true);
+      });
+
+      test("a contextual userset does not hide a stored one", async () => {
+        // Only the *stored* userset leads to alice. If contextual
+        // rows replaced stored ones the way probes do, the grant
+        // would disappear.
+        store.relationConfigs.push(
+          makeConfig({
+            objectType: "team",
+            relation: "member",
+            directlyAssignableTypes: ["user"],
+          }),
+        );
+        store.tuples.push(
+          makeTuple({
+            objectType: "doc",
+            objectId: "1",
+            relation: "viewer",
+            subjectType: "team",
+            subjectId: "writers",
+            subjectRelation: "member",
+          }),
+          makeTuple({
+            objectType: "team",
+            objectId: "writers",
+            relation: "member",
+            subjectType: "user",
+            subjectId: "alice",
+          }),
+        );
+
+        expect(
+          await check(store, {
+            objectType: "doc",
+            objectId: "1",
+            relation: "viewer",
+            subjectType: "user",
+            subjectId: "alice",
+            contextualTuples: [
+              {
+                objectType: "doc",
+                objectId: "1",
+                relation: "viewer",
+                subjectType: "team",
+                subjectId: "readers",
+                subjectRelation: "member",
+              },
+            ],
+          }),
+        ).toBe(true);
+      });
+
+      test("a probe the overlay answers is dropped from the store query", async () => {
+        // Replacement means the stored row can never be used, so
+        // asking for it is wasted work. The userset part is still
+        // asked for, because there both halves are kept.
+        store.tuples.push(
+          makeTuple({
+            objectType: "doc",
+            objectId: "1",
+            relation: "viewer",
+            subjectType: "user",
+            subjectId: "alice",
+          }),
+        );
+        const overlay = new ContextualTupleStore(store, [
+          {
+            objectType: "doc",
+            objectId: "1",
+            relation: "viewer",
+            subjectType: "user",
+            subjectId: "alice",
+          },
+        ]);
+        store.resetCounts();
+
+        await overlay.findCheckTuples({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+          includeDirect: true,
+          includeWildcard: true,
+          includeUsersets: true,
+        });
+
+        const [inner] = store.queriesFor("doc", "1", "viewer");
+        expect(inner?.includeDirect).toBe(false);
+        expect(inner?.includeWildcard).toBe(true);
+        expect(inner?.includeUsersets).toBe(true);
+      });
     });
   });
 

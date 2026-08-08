@@ -1,6 +1,8 @@
 import type { TupleStore } from "../../src/store-interface.ts";
 import type {
   AddTupleRequest,
+  CheckTuples,
+  CheckTuplesQuery,
   ConditionDefinition,
   RelationConfig,
   RemoveTupleRequest,
@@ -26,10 +28,32 @@ export class MockTupleStore implements TupleStore {
    */
   calls: Array<{ method: string; args: unknown[] }> = [];
 
+  /**
+   * Every `findCheckTuples` query, in call order. The call log
+   * above records a node's identity; this records which of the
+   * three reads the relation config let it ask for.
+   */
+  checkQueries: CheckTuplesQuery[] = [];
+
   /** Reset all call counts and the call log (data is untouched). */
   resetCounts(): void {
     this.counts = {};
     this.calls = [];
+    this.checkQueries = [];
+  }
+
+  /** Recorded check queries against one node, in call order. */
+  queriesFor(
+    objectType: string,
+    objectId: string,
+    relation: string,
+  ): CheckTuplesQuery[] {
+    return this.checkQueries.filter(
+      (q) =>
+        q.objectType === objectType &&
+        q.objectId === objectId &&
+        q.relation === relation,
+    );
   }
 
   /** Count calls to `method` whose arguments start with `args`. */
@@ -45,47 +69,42 @@ export class MockTupleStore implements TupleStore {
     this.calls.push({ method, args });
   }
 
-  async findDirectTuple(
-    objectType: string,
-    objectId: string,
-    relation: string,
-    subjectType: string,
-    subjectId: string,
-  ): Promise<Tuple | null> {
+  async findCheckTuples(query: CheckTuplesQuery): Promise<CheckTuples> {
+    // Tallied with the node's five identifying strings ahead of
+    // the query object, so `callsWith` can match a node by prefix
+    // the way it could when this was three separate methods.
     this.tally(
-      "findDirectTuple",
-      objectType,
-      objectId,
-      relation,
-      subjectType,
-      subjectId,
+      "findCheckTuples",
+      query.objectType,
+      query.objectId,
+      query.relation,
+      query.subjectType,
+      query.subjectId,
+      query,
     );
-    return (
-      this.tuples.find(
+    this.checkQueries.push(query);
+
+    const onRelation = this.tuples.filter(
+      (t) =>
+        t.objectType === query.objectType &&
+        t.objectId === query.objectId &&
+        t.relation === query.relation,
+    );
+    const findDirect = (subjectId: string) =>
+      onRelation.find(
         (t) =>
-          t.objectType === objectType &&
-          t.objectId === objectId &&
-          t.relation === relation &&
-          t.subjectType === subjectType &&
+          t.subjectType === query.subjectType &&
           t.subjectId === subjectId &&
           t.subjectRelation == null,
-      ) ?? null
-    );
-  }
+      ) ?? null;
 
-  async findUsersetTuples(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<Tuple[]> {
-    this.tally("findUsersetTuples", objectType, objectId, relation);
-    return this.tuples.filter(
-      (t) =>
-        t.objectType === objectType &&
-        t.objectId === objectId &&
-        t.relation === relation &&
-        t.subjectRelation != null,
-    );
+    return {
+      direct: query.includeDirect ? findDirect(query.subjectId) : null,
+      wildcard: query.includeWildcard ? findDirect("*") : null,
+      usersets: query.includeUsersets
+        ? onRelation.filter((t) => t.subjectRelation != null)
+        : [],
+    };
   }
 
   async findTuplesByRelation(

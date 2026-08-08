@@ -58,74 +58,78 @@ describe("structurally impossible reads are skipped", () => {
     return check(store, request);
   }
 
+  /**
+   * The one query the node under test sent, or `null` when it sent
+   * none at all.
+   */
+  function nodeQuery() {
+    return store.queriesFor("doc", "1", "viewer")[0] ?? null;
+  }
+
   describe("each read is gated on its own declaration", () => {
     test("a type list without the subject skips its probe", async () => {
-      await checkWith({ directlyAssignableTypes: ["team"] });
+      // Usersets stay allowed so a query is still sent — otherwise
+      // nothing is asked for at all and this would pass for the
+      // wrong reason. That case has its own test below.
+      await checkWith({
+        directlyAssignableTypes: ["team"],
+        allowsUsersetSubjects: true,
+      });
 
-      expect(
-        store.callsWith(
-          "findDirectTuple",
-          "doc",
-          "1",
-          "viewer",
-          "user",
-          "alice",
-        ),
-      ).toBe(0);
+      expect(nodeQuery()?.includeDirect).toBe(false);
     });
 
     test("a type list with the subject keeps its probe", async () => {
       await checkWith({ directlyAssignableTypes: ["user"] });
 
-      expect(
-        store.callsWith(
-          "findDirectTuple",
-          "doc",
-          "1",
-          "viewer",
-          "user",
-          "alice",
-        ),
-      ).toBe(1);
+      expect(nodeQuery()?.includeDirect).toBe(true);
     });
 
     test("no `type:*` in the list skips the wildcard probe", async () => {
       await checkWith({ directlyAssignableTypes: ["user"] });
 
-      expect(
-        store.callsWith("findDirectTuple", "doc", "1", "viewer", "user", "*"),
-      ).toBe(0);
+      expect(nodeQuery()?.includeWildcard).toBe(false);
     });
 
     test("`type:*` in the list keeps the wildcard probe", async () => {
       await checkWith({ directlyAssignableTypes: ["user", "user:*"] });
 
-      expect(
-        store.callsWith("findDirectTuple", "doc", "1", "viewer", "user", "*"),
-      ).toBe(1);
+      expect(nodeQuery()?.includeWildcard).toBe(true);
     });
 
     test("forbidding userset subjects skips the userset scan", async () => {
       await checkWith({ allowsUsersetSubjects: false });
 
-      expect(store.counts.findUsersetTuples).toBe(undefined);
+      expect(nodeQuery()?.includeUsersets).toBe(false);
     });
 
     test("allowing userset subjects keeps the userset scan", async () => {
       await checkWith({ allowsUsersetSubjects: true });
 
-      expect(store.counts.findUsersetTuples).toBe(1);
+      expect(nodeQuery()?.includeUsersets).toBe(true);
+    });
+
+    test("a relation that admits nothing sends no query", async () => {
+      // Nothing left to ask for, so the node skips the store
+      // rather than sending a query that cannot match.
+      await checkWith({
+        directlyAssignableTypes: [],
+        allowsUsersetSubjects: false,
+      });
+
+      expect(nodeQuery()).toBeNull();
     });
   });
 
   describe("only a positive exclusion skips a read", () => {
-    test("a null type list reads both probes", async () => {
+    test("a null type list asks for both probes", async () => {
       // `null` means the config declines to narrow the relation,
       // not that the relation is purely computed. Reading it as
       // "none" would skip probes for tuples `addTuple` accepts.
       await checkWith({ directlyAssignableTypes: null });
 
-      expect(store.counts.findDirectTuple).toBe(2);
+      expect(nodeQuery()?.includeDirect).toBe(true);
+      expect(nodeQuery()?.includeWildcard).toBe(true);
     });
 
     test("no config at all reads everything", async () => {
@@ -133,8 +137,9 @@ describe("structurally impossible reads are skipped", () => {
 
       await check(store, request);
 
-      expect(store.counts.findDirectTuple).toBe(2);
-      expect(store.counts.findUsersetTuples).toBe(1);
+      expect(nodeQuery()?.includeDirect).toBe(true);
+      expect(nodeQuery()?.includeWildcard).toBe(true);
+      expect(nodeQuery()?.includeUsersets).toBe(true);
     });
   });
 
@@ -256,26 +261,8 @@ describe("structurally impossible reads are skipped", () => {
       store.resetCounts();
 
       expect(await check(store, request)).toBe(true);
-      expect(
-        store.callsWith(
-          "findDirectTuple",
-          "doc",
-          "1",
-          "viewer",
-          "user",
-          "alice",
-        ),
-      ).toBe(0);
-      expect(
-        store.callsWith(
-          "findDirectTuple",
-          "doc",
-          "1",
-          "owner",
-          "user",
-          "alice",
-        ),
-      ).toBe(1);
+      expect(store.queriesFor("doc", "1", "viewer")).toEqual([]);
+      expect(store.queriesFor("doc", "1", "owner")).toHaveLength(1);
     });
   });
 });

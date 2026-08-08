@@ -1,5 +1,7 @@
 import {
   type AddTupleRequest,
+  type CheckTuples,
+  type CheckTuplesQuery,
   type ConditionDefinition,
   type ConditionParameterType,
   type IntersectionOperand,
@@ -46,44 +48,85 @@ function isConditionParameterType(
 export class KyselyTupleStore implements TupleStore {
   constructor(private db: Kysely<DB>) {}
 
-  async findDirectTuple(
-    objectType: string,
-    objectId: string,
-    relation: string,
-    subjectType: string,
-    subjectId: string,
-  ): Promise<Tuple | null> {
-    const dbSubjectId = subjectId === "*" ? WILDCARD_SENTINEL : subjectId;
-    const row = await this.db
-      .selectFrom("tsfga.tuples")
-      .selectAll()
-      .where("object_type", "=", objectType)
-      .where("object_id", "=", objectId)
-      .where("relation", "=", relation)
-      .where("subject_type", "=", subjectType)
-      .where("subject_id", "=", dbSubjectId)
-      .where("subject_relation", "is", null)
-      .executeTakeFirst();
+  /**
+   * All three per-node check reads in one round-trip.
+   *
+   * The parts share `(object_type, object_id, relation)` and
+   * differ only in their subject predicate, so they are one scan
+   * with an OR of the requested predicates rather than three
+   * queries. Only the requested disjuncts are emitted: an
+   * excluded part cannot match, so the planner never widens the
+   * scan for it, and nothing has to be filtered back out
+   * afterwards.
+   */
+  async findCheckTuples(query: CheckTuplesQuery): Promise<CheckTuples> {
+    const { includeDirect, includeWildcard, includeUsersets } = query;
+    // Every part excluded means no row could be used. Return the
+    // empty result rather than a `WHERE false` round-trip.
+    if (!includeDirect && !includeWildcard && !includeUsersets) {
+      return { direct: null, wildcard: null, usersets: [] };
+    }
 
-    if (!row) return null;
-    return this.rowToTuple(row);
-  }
+    const dbSubjectId =
+      query.subjectId === "*" ? WILDCARD_SENTINEL : query.subjectId;
 
-  async findUsersetTuples(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<Tuple[]> {
     const rows = await this.db
       .selectFrom("tsfga.tuples")
       .selectAll()
-      .where("object_type", "=", objectType)
-      .where("object_id", "=", objectId)
-      .where("relation", "=", relation)
-      .where("subject_relation", "is not", null)
+      .where("object_type", "=", query.objectType)
+      .where("object_id", "=", query.objectId)
+      .where("relation", "=", query.relation)
+      .where((eb) =>
+        eb.or([
+          ...(includeDirect
+            ? [
+                eb.and([
+                  eb("subject_type", "=", query.subjectType),
+                  eb("subject_id", "=", dbSubjectId),
+                  eb("subject_relation", "is", null),
+                ]),
+              ]
+            : []),
+          ...(includeWildcard
+            ? [
+                eb.and([
+                  eb("subject_type", "=", query.subjectType),
+                  eb("subject_id", "=", WILDCARD_SENTINEL),
+                  eb("subject_relation", "is", null),
+                ]),
+              ]
+            : []),
+          ...(includeUsersets ? [eb("subject_relation", "is not", null)] : []),
+        ]),
+      )
       .execute();
 
-    return rows.map((r) => this.rowToTuple(r));
+    let direct: Tuple | null = null;
+    let wildcard: Tuple | null = null;
+    const usersets: Tuple[] = [];
+
+    for (const row of rows) {
+      const tuple = this.rowToTuple(row);
+      if (row.subject_relation !== null) {
+        usersets.push(tuple);
+      } else if (includeDirect && row.subject_id === dbSubjectId) {
+        // Checked first, so a check *for* the wildcard subject —
+        // where both disjuncts are the same query — lands in
+        // `direct` rather than being reported twice.
+        direct = tuple;
+      } else if (includeWildcard && row.subject_id === WILDCARD_SENTINEL) {
+        wildcard = tuple;
+      }
+      // Partitioned on the raw column, never on the round-tripped
+      // tuple: `rowToTuple` maps the sentinel to `"*"`, so a real
+      // subject whose id happens to be the nil UUID would look
+      // like a wildcard here. Both arms are also positively
+      // matched rather than falling through to `wildcard`, so a
+      // row the query did not ask for is dropped instead of being
+      // filed under whichever slot is left.
+    }
+
+    return { direct, wildcard, usersets };
   }
 
   async findTuplesByRelation(

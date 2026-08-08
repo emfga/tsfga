@@ -34,15 +34,11 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
 }
 
 /**
- * These tests count `findDirectTuple` for the subject as the
- * "this node was resolved" signal. It used to be
- * `findUsersetTuples`, which read better, but the read gating
- * skips the userset scan on any relation that forbids userset
- * subjects — which is most of the fixtures here — so that call no
- * longer happens once per node visit. The subject's direct probe
- * does, on every relation these fixtures declare. The extra
- * subject arguments matter: a node also probes for a wildcard, and
- * `callsWith` on the object alone would count both.
+ * These tests count `findCheckTuples` as the "this node was
+ * resolved" signal. A node makes exactly one of those calls, for
+ * whichever of the three reads its relation config admits, so the
+ * node's identity alone is enough to count visits — no subject
+ * arguments needed to disambiguate.
  *
  * Every test here runs at `maxBreadth: 1` unless it says otherwise.
  * The memo publishes settled results only — never in-flight
@@ -103,16 +99,7 @@ describe("request-scoped node memoization", () => {
       store.resetCounts();
 
       expect(await check(store, viewerRequest, SEQUENTIAL)).toBe(false);
-      expect(
-        store.callsWith(
-          "findDirectTuple",
-          "doc",
-          "1",
-          "shared",
-          "user",
-          "alice",
-        ),
-      ).toBe(1);
+      expect(store.callsWith("findCheckTuples", "doc", "1", "shared")).toBe(1);
     });
 
     test("a definitive true is served from the memo", async () => {
@@ -136,26 +123,8 @@ describe("request-scoped node memoization", () => {
       expect(await check(store, viewerRequest, SEQUENTIAL)).toBe(true);
       // `left` grants and the union stops, so `shared` is read once
       // — by `left`, never by `right`.
-      expect(
-        store.callsWith(
-          "findDirectTuple",
-          "doc",
-          "1",
-          "shared",
-          "user",
-          "alice",
-        ),
-      ).toBe(1);
-      expect(
-        store.callsWith(
-          "findDirectTuple",
-          "doc",
-          "1",
-          "right",
-          "user",
-          "alice",
-        ),
-      ).toBe(0);
+      expect(store.callsWith("findCheckTuples", "doc", "1", "shared")).toBe(1);
+      expect(store.callsWith("findCheckTuples", "doc", "1", "right")).toBe(0);
     });
 
     test("without a shared node nothing is deduplicated", async () => {
@@ -181,12 +150,8 @@ describe("request-scoped node memoization", () => {
       store.resetCounts();
 
       expect(await check(store, viewerRequest, SEQUENTIAL)).toBe(false);
-      expect(
-        store.callsWith("findDirectTuple", "doc", "1", "l2", "user", "alice"),
-      ).toBe(1);
-      expect(
-        store.callsWith("findDirectTuple", "doc", "1", "r2", "user", "alice"),
-      ).toBe(1);
+      expect(store.callsWith("findCheckTuples", "doc", "1", "l2")).toBe(1);
+      expect(store.callsWith("findCheckTuples", "doc", "1", "r2")).toBe(1);
     });
   });
 
@@ -208,12 +173,8 @@ describe("request-scoped node memoization", () => {
       store.resetCounts();
 
       expect(await check(store, viewerRequest, SEQUENTIAL)).toBe(false);
-      expect(
-        store.callsWith("findDirectTuple", "doc", "1", "x", "user", "alice"),
-      ).toBe(2);
-      expect(
-        store.callsWith("findDirectTuple", "doc", "1", "p", "user", "alice"),
-      ).toBe(2);
+      expect(store.callsWith("findCheckTuples", "doc", "1", "x")).toBe(2);
+      expect(store.callsWith("findCheckTuples", "doc", "1", "p")).toBe(2);
     });
 
     test("a cross-branch cycle terminates instead of deadlocking", async () => {
@@ -322,16 +283,9 @@ describe("request-scoped node memoization", () => {
       store.resetCounts();
 
       expect(await check(store, viewerRequest, { maxBreadth: 1 })).toBe(false);
-      expect(
-        store.callsWith(
-          "findDirectTuple",
-          "group",
-          "g",
-          "member",
-          "user",
-          "alice",
-        ),
-      ).toBe(1);
+      expect(store.callsWith("findCheckTuples", "group", "g", "member")).toBe(
+        1,
+      );
     });
 
     test("an entry recorded shallower is not reused deeper", async () => {
@@ -379,16 +333,7 @@ describe("request-scoped node memoization", () => {
       store.resetCounts();
       await check(store, viewerRequest, SEQUENTIAL);
 
-      expect(
-        store.callsWith(
-          "findDirectTuple",
-          "doc",
-          "1",
-          "shared",
-          "user",
-          "alice",
-        ),
-      ).toBe(1);
+      expect(store.callsWith("findCheckTuples", "doc", "1", "shared")).toBe(1);
     });
   });
 });

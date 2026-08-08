@@ -204,7 +204,16 @@ describe("Invalid stored data", () => {
         .execute();
 
       await expect(
-        store.findDirectTuple("doc", uuid1, "viewer", "user", uuid2),
+        store.findCheckTuples({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: uuid2,
+          includeDirect: true,
+          includeWildcard: false,
+          includeUsersets: false,
+        }),
       ).rejects.toBeInstanceOf(InvalidStoredDataError);
     });
   });

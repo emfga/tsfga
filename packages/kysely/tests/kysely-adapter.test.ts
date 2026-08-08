@@ -7,6 +7,7 @@ import {
   expect,
   test,
 } from "bun:test";
+import type { Tuple } from "@tsfga/core";
 import type { Kysely } from "kysely";
 import { KyselyTupleStore } from "../src/adapter.ts";
 import type { DB } from "../src/schema.ts";
@@ -16,6 +17,15 @@ import {
   getDb,
   rollbackTransaction,
 } from "./helpers/db.ts";
+
+/** Row order is not part of the read contract; compare as sets. */
+function sortedBySubject(tuples: readonly Tuple[]): Tuple[] {
+  return [...tuples].sort((a, b) =>
+    `${a.subjectType}:${a.subjectId}#${a.subjectRelation}`.localeCompare(
+      `${b.subjectType}:${b.subjectId}#${b.subjectRelation}`,
+    ),
+  );
+}
 
 describe("KyselyTupleStore", () => {
   let db: Kysely<DB>;
@@ -43,6 +53,31 @@ describe("KyselyTupleStore", () => {
   afterAll(async () => {
     await destroyDb();
   });
+
+  /**
+   * The direct probe on its own. Most read-back assertions want
+   * exactly one tuple by its natural key, which is one of the
+   * three parts `findCheckTuples` can serve.
+   */
+  async function readDirect(
+    objectType: string,
+    objectId: string,
+    relation: string,
+    subjectType: string,
+    subjectId: string,
+  ): Promise<Tuple | null> {
+    const { direct } = await store.findCheckTuples({
+      objectType,
+      objectId,
+      relation,
+      subjectType,
+      subjectId,
+      includeDirect: true,
+      includeWildcard: false,
+      includeUsersets: false,
+    });
+    return direct;
+  }
 
   describe("Relation configs", () => {
     test("upsertRelationConfig and findRelationConfig", async () => {
@@ -178,7 +213,7 @@ describe("KyselyTupleStore", () => {
   });
 
   describe("Tuples", () => {
-    test("insertTuple and findDirectTuple", async () => {
+    test("insertTuple then read back the direct probe", async () => {
       await store.insertTuple({
         objectType: "workspace",
         objectId: uuid1,
@@ -187,7 +222,7 @@ describe("KyselyTupleStore", () => {
         subjectId: uuid2,
       });
 
-      const tuple = await store.findDirectTuple(
+      const tuple = await readDirect(
         "workspace",
         uuid1,
         "member",
@@ -201,19 +236,13 @@ describe("KyselyTupleStore", () => {
       expect(tuple?.subjectRelation).toBeNull();
     });
 
-    test("findDirectTuple returns null for missing tuple", async () => {
+    test("the direct probe is null for a missing tuple", async () => {
       expect(
-        await store.findDirectTuple(
-          "workspace",
-          uuid1,
-          "member",
-          "user",
-          uuid2,
-        ),
+        await readDirect("workspace", uuid1, "member", "user", uuid2),
       ).toBeNull();
     });
 
-    test("findDirectTuple ignores tuples with subject_relation", async () => {
+    test("the direct probe ignores tuples with subject_relation", async () => {
       await store.insertTuple({
         objectType: "channel",
         objectId: uuid1,
@@ -224,17 +253,11 @@ describe("KyselyTupleStore", () => {
       });
 
       expect(
-        await store.findDirectTuple(
-          "channel",
-          uuid1,
-          "writer",
-          "workspace",
-          uuid2,
-        ),
+        await readDirect("channel", uuid1, "writer", "workspace", uuid2),
       ).toBeNull();
     });
 
-    test("findUsersetTuples", async () => {
+    test("the userset part returns only subject_relation rows", async () => {
       await store.insertTuple({
         objectType: "channel",
         objectId: uuid1,
@@ -252,9 +275,22 @@ describe("KyselyTupleStore", () => {
         subjectId: uuid3,
       });
 
-      const tuples = await store.findUsersetTuples("channel", uuid1, "writer");
-      expect(tuples).toHaveLength(1);
-      expect(tuples[0]?.subjectRelation).toBe("member");
+      const { direct, wildcard, usersets } = await store.findCheckTuples({
+        objectType: "channel",
+        objectId: uuid1,
+        relation: "writer",
+        subjectType: "user",
+        subjectId: uuid3,
+        includeDirect: false,
+        includeWildcard: false,
+        includeUsersets: true,
+      });
+      expect(usersets).toHaveLength(1);
+      expect(usersets[0]?.subjectRelation).toBe("member");
+      // The parts the query excluded stay empty even though rows
+      // matching them exist.
+      expect(direct).toBeNull();
+      expect(wildcard).toBeNull();
     });
 
     test("findTuplesByRelation returns all tuples", async () => {
@@ -300,7 +336,7 @@ describe("KyselyTupleStore", () => {
         conditionName: "new_cond",
       });
 
-      const tuple = await store.findDirectTuple(
+      const tuple = await readDirect(
         "workspace",
         uuid1,
         "member",
@@ -321,13 +357,7 @@ describe("KyselyTupleStore", () => {
         conditionContext: { region: "us" },
       });
 
-      const tuple = await store.findDirectTuple(
-        "doc",
-        uuid1,
-        "viewer",
-        "user",
-        uuid2,
-      );
+      const tuple = await readDirect("doc", uuid1, "viewer", "user", uuid2);
       expect(tuple?.conditionName).toBe("in_region");
       expect(tuple?.conditionContext).toEqual({ region: "us" });
     });
@@ -352,13 +382,7 @@ describe("KyselyTupleStore", () => {
       ).toBe(true);
 
       expect(
-        await store.findDirectTuple(
-          "workspace",
-          uuid1,
-          "member",
-          "user",
-          uuid2,
-        ),
+        await readDirect("workspace", uuid1, "member", "user", uuid2),
       ).toBeNull();
     });
 
@@ -407,7 +431,7 @@ describe("KyselyTupleStore", () => {
         subjectId: uuid2,
       });
 
-      const tuple = await store.findDirectTuple(
+      const tuple = await readDirect(
         "workspace",
         uuid1,
         "member",
@@ -437,13 +461,7 @@ describe("KyselyTupleStore", () => {
         conditionName: null,
       });
 
-      const tuple = await store.findDirectTuple(
-        "doc",
-        uuid1,
-        "viewer",
-        "user",
-        uuid2,
-      );
+      const tuple = await readDirect("doc", uuid1, "viewer", "user", uuid2);
       expect(tuple?.conditionName).toBeNull();
     });
 
@@ -467,13 +485,7 @@ describe("KyselyTupleStore", () => {
         conditionContext: null,
       });
 
-      const tuple = await store.findDirectTuple(
-        "doc",
-        uuid1,
-        "viewer",
-        "user",
-        uuid2,
-      );
+      const tuple = await readDirect("doc", uuid1, "viewer", "user", uuid2);
       expect(tuple?.conditionContext).toBeNull();
     });
 
@@ -574,7 +586,7 @@ describe("KyselyTupleStore", () => {
       expect(row?.subject_id).toBe(sentinel);
     });
 
-    test("findDirectTuple maps the sentinel back to *", async () => {
+    test("the direct probe maps the sentinel back to *", async () => {
       await store.insertTuple({
         objectType: "doc",
         objectId: uuid1,
@@ -583,13 +595,7 @@ describe("KyselyTupleStore", () => {
         subjectId: "*",
       });
 
-      const tuple = await store.findDirectTuple(
-        "doc",
-        uuid1,
-        "viewer",
-        "user",
-        "*",
-      );
+      const tuple = await readDirect("doc", uuid1, "viewer", "user", "*");
       expect(tuple).not.toBeNull();
       expect(tuple?.subjectId).toBe("*");
     });
@@ -648,9 +654,140 @@ describe("KyselyTupleStore", () => {
           subjectId: "*",
         }),
       ).toBe(true);
-      expect(
-        await store.findDirectTuple("doc", uuid1, "viewer", "user", "*"),
-      ).toBeNull();
+      expect(await readDirect("doc", uuid1, "viewer", "user", "*")).toBeNull();
+    });
+  });
+
+  /**
+   * The merged read has to return exactly the rows the three
+   * separate predicates would have. The oracle here is
+   * `findTuplesByRelation`, which returns every row on the
+   * object+relation and is independent of the query being tested:
+   * partitioning its output by the same three predicates gives the
+   * expected answer without reusing the code under test.
+   *
+   * Run over every combination of the three flags, on a fixture
+   * that puts a matching row in each part plus rows that must not
+   * be picked up — a different subject, a different subject type,
+   * a different relation.
+   */
+  describe("the merged read agrees with the predicates it replaces", () => {
+    const parts = [false, true];
+
+    async function seed() {
+      const rows = [
+        // The subject's own direct tuple.
+        { subjectType: "user", subjectId: uuid2 },
+        // The public wildcard.
+        { subjectType: "user", subjectId: "*" },
+        // Two usersets.
+        { subjectType: "team", subjectId: uuid3, subjectRelation: "member" },
+        { subjectType: "team", subjectId: uuid1, subjectRelation: "owner" },
+        // Must never be returned: another subject of the same
+        // type, and a wildcard of a different type.
+        { subjectType: "user", subjectId: uuid3 },
+        { subjectType: "robot", subjectId: "*" },
+      ];
+      for (const row of rows) {
+        await store.insertTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          ...row,
+        });
+      }
+      // Same object, different relation — out of scope entirely.
+      await store.insertTuple({
+        objectType: "doc",
+        objectId: uuid1,
+        relation: "editor",
+        subjectType: "user",
+        subjectId: uuid2,
+      });
+    }
+
+    for (const includeDirect of parts) {
+      for (const includeWildcard of parts) {
+        for (const includeUsersets of parts) {
+          const label = [
+            includeDirect ? "direct" : null,
+            includeWildcard ? "wildcard" : null,
+            includeUsersets ? "usersets" : null,
+          ]
+            .filter((part) => part !== null)
+            .join("+");
+
+          test(`${label || "nothing"} requested`, async () => {
+            await seed();
+
+            const all = await store.findTuplesByRelation(
+              "doc",
+              uuid1,
+              "viewer",
+            );
+            const expected = {
+              direct: includeDirect
+                ? (all.find(
+                    (t) =>
+                      t.subjectType === "user" &&
+                      t.subjectId === uuid2 &&
+                      t.subjectRelation === null,
+                  ) ?? null)
+                : null,
+              wildcard: includeWildcard
+                ? (all.find(
+                    (t) =>
+                      t.subjectType === "user" &&
+                      t.subjectId === "*" &&
+                      t.subjectRelation === null,
+                  ) ?? null)
+                : null,
+              usersets: includeUsersets
+                ? all.filter((t) => t.subjectRelation !== null)
+                : [],
+            };
+
+            const actual = await store.findCheckTuples({
+              objectType: "doc",
+              objectId: uuid1,
+              relation: "viewer",
+              subjectType: "user",
+              subjectId: uuid2,
+              includeDirect,
+              includeWildcard,
+              includeUsersets,
+            });
+
+            expect(actual.direct).toEqual(expected.direct);
+            expect(actual.wildcard).toEqual(expected.wildcard);
+            // Row order is not part of the contract; compare as
+            // sets keyed by the subject.
+            expect(sortedBySubject(actual.usersets)).toEqual(
+              sortedBySubject(expected.usersets),
+            );
+          });
+        }
+      }
+    }
+
+    test("a wildcard subject lands in the direct slot, not both", async () => {
+      // Checking `user:*` itself makes the two probes the same
+      // query. It must be reported once, and as the direct hit.
+      await seed();
+
+      const result = await store.findCheckTuples({
+        objectType: "doc",
+        objectId: uuid1,
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "*",
+        includeDirect: true,
+        includeWildcard: true,
+        includeUsersets: false,
+      });
+
+      expect(result.direct?.subjectId).toBe("*");
+      expect(result.wildcard).toBeNull();
     });
   });
 

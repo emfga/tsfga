@@ -5,6 +5,41 @@ Notable changes to `@tsfga/kysely`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
+## Unreleased
+
+### Breaking changes
+
+- **`KyselyTupleStore.findDirectTuple` and `findUsersetTuples` are
+  replaced by `findCheckTuples`**, following the same change to
+  the `TupleStore` interface in `@tsfga/core`. Code calling the
+  adapter directly (rather than through `createTsfga`) must be
+  updated; there is no fallback shim.
+
+  The three per-node reads a check used to make separately are now
+  one query: the same `(object_type, object_id, relation)`
+  predicate with an OR over only the subject predicates the caller
+  asked for. One round-trip instead of up to three, and one
+  connection instead of up to three held at once — which is where
+  the measured win comes from, since a wide node at the default
+  `maxBreadth` of 10 could otherwise demand 30 connections from
+  the pool.
+
+  Relations admitting more than one part resolve 1.8x–3.0x faster
+  on a 10-connection pool; relations admitting exactly one part
+  emit identical SQL and are unchanged.
+
+  The plan varies with the model shape: PostgreSQL uses an
+  `idx_tuples_check` prefix scan plus a filter in the general
+  case, and collapses to the full five-column index condition when
+  the disjuncts differ only in `subject_id` (the `[user, user:*]`
+  shape). One narrow window is worth knowing about: a relation
+  admitting both a direct type and usersets, on an object with
+  roughly 20–150 subjects, scans and discards rows the old direct
+  probe would have looked up exactly. Measured at 0.17 ms against
+  0.13 ms — still net faster, since the round-trip it removes
+  costs more than the difference — and above ~150 rows the planner
+  switches to a `BitmapOr` that closes the gap.
+
 ## 0.3.1 — 2026-08
 
 Maintenance release. No changes to the published code — the

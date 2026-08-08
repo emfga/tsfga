@@ -4,10 +4,16 @@ import {
   ConditionNotFoundError,
   RelationConfigNotFoundError,
 } from "../src/errors.ts";
-import type { RelationConfig, Tuple } from "../src/types.ts";
+import type {
+  CheckTuples,
+  CheckTuplesQuery,
+  RelationConfig,
+  Tuple,
+} from "../src/types.ts";
 import {
   ConfigErrorStore,
   StoreReadFailure,
+  TupleReadErrorStore,
 } from "./helpers/erroring-store.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
 
@@ -69,32 +75,8 @@ class GatedStore extends MockTupleStore {
     return this.gate(() => super.findRelationConfig(objectType, relation));
   }
 
-  override findDirectTuple(
-    objectType: string,
-    objectId: string,
-    relation: string,
-    subjectType: string,
-    subjectId: string,
-  ): Promise<Tuple | null> {
-    return this.gate(() =>
-      super.findDirectTuple(
-        objectType,
-        objectId,
-        relation,
-        subjectType,
-        subjectId,
-      ),
-    );
-  }
-
-  override findUsersetTuples(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<Tuple[]> {
-    return this.gate(() =>
-      super.findUsersetTuples(objectType, objectId, relation),
-    );
+  override findCheckTuples(query: CheckTuplesQuery): Promise<CheckTuples> {
+    return this.gate(() => super.findCheckTuples(query));
   }
 }
 
@@ -134,7 +116,7 @@ class SlowConfigStore extends MockTupleStore {
   }
 }
 
-describe("node read waves", () => {
+describe("node reads", () => {
   /** A relation that admits all three reads, so none is gated out. */
   function wideOpenConfig(relation: string): RelationConfig {
     return makeConfig({
@@ -145,11 +127,11 @@ describe("node read waves", () => {
     });
   }
 
-  test("the admitted tuple reads are issued as one wave", async () => {
-    // The config read no longer overlaps them: the reads are
-    // gated on what the config admits, so it has to land first.
-    // What is still asserted is that the reads it does admit go
-    // out together rather than one at a time.
+  test("a node asks the store once, not three times", async () => {
+    // A relation that admits all three reads. They used to be
+    // three concurrent store calls — one wave, but three
+    // round-trips, which on a single-connection handle serialize.
+    // They are now one call, so the gate never sees two at once.
     const store = new GatedStore();
     store.relationConfigs.push(wideOpenConfig("viewer"));
 
@@ -162,7 +144,8 @@ describe("node read waves", () => {
     });
 
     expect(result).toBe(false);
-    expect(store.highWater).toBe(3);
+    expect(store.highWater).toBe(1);
+    expect(store.counts.findCheckTuples).toBe(1);
   });
 
   test("a second node of the same relation pays no config read", async () => {
@@ -212,9 +195,11 @@ describe("node read waves", () => {
     expect(store.callsWith("findRelationConfig", "doc", "inner")).toBe(2);
   });
 
-  test("skipped reads do not stall the wave", async () => {
-    // A gated-out slot is filled synchronously. If it were left
-    // as a pending promise the batch would never settle.
+  test("the gated-out parts are not asked for", async () => {
+    // One call either way, so the saving is no longer in the call
+    // count — it is in what the call asks for. A part the config
+    // rules out must be absent from the query, or the store has no
+    // way to narrow the scan.
     const store = new GatedStore();
     store.relationConfigs.push(
       makeConfig({
@@ -233,9 +218,82 @@ describe("node read waves", () => {
         subjectId: "alice",
       }),
     ).toBe(false);
-    // Only the subject's direct probe survives the gate: no
-    // `user:*` in the type list, and no userset subjects.
-    expect(store.highWater).toBe(1);
+    // No `user:*` in the type list, and no userset subjects.
+    expect(store.queriesFor("doc", "1", "viewer")).toEqual([
+      {
+        objectType: "doc",
+        objectId: "1",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+        includeDirect: true,
+        includeWildcard: false,
+        includeUsersets: false,
+      },
+    ]);
+  });
+
+  test("a node the config closes entirely reads nothing", async () => {
+    // Every part gated out leaves no query worth sending. The node
+    // still resolves — through its rewrite, which reads for itself.
+    const store = new GatedStore();
+    store.relationConfigs.push(
+      makeConfig({
+        objectType: "doc",
+        relation: "viewer",
+        directlyAssignableTypes: [],
+        computedUserset: "owner",
+      }),
+      makeConfig({
+        objectType: "doc",
+        relation: "owner",
+        directlyAssignableTypes: ["user"],
+      }),
+    );
+    store.tuples.push(
+      makeTuple({
+        objectType: "doc",
+        objectId: "1",
+        relation: "owner",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    );
+
+    expect(
+      await check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    ).toBe(true);
+    expect(store.queriesFor("doc", "1", "viewer")).toEqual([]);
+    expect(store.counts.findCheckTuples).toBe(1);
+  });
+
+  test("a tuple-read error fails the node", async () => {
+    // The counterpart to the config-read failure below: the read
+    // that happens after the config resolved.
+    const store = new TupleReadErrorStore(["viewer"]);
+    store.relationConfigs.push(
+      makeConfig({
+        objectType: "doc",
+        relation: "viewer",
+        directlyAssignableTypes: ["user"],
+      }),
+    );
+
+    await expect(
+      check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    ).rejects.toBeInstanceOf(StoreReadFailure);
   });
 
   test("a config-read error fails the node", async () => {
@@ -311,11 +369,9 @@ describe("node read waves", () => {
     });
 
     expect(result).toBe(true);
-    // Only the root node's subject probe; the wildcard probe is
-    // gated out (no `user:*` in the type list) and the 3 userset
-    // branches would each have added one more.
-    expect(store.counts.findDirectTuple).toBe(1);
-    expect(store.counts.findUsersetTuples).toBe(1);
+    // Only the root node's read; each of the 3 userset branches
+    // would have added one more.
+    expect(store.counts.findCheckTuples).toBe(1);
   });
 
   test("sibling grant wins over a direct-condition error", async () => {
@@ -461,10 +517,10 @@ describe("node read waves", () => {
     });
 
     expect(result).toBe(true);
-    // One root probe plus one per launched userset branch. Was 8
-    // before the read gating: every node also probed for a
-    // `user:*` tuple that neither type list admits.
-    expect(store.counts.findDirectTuple).toBe(4);
+    // The root node plus one per launched userset branch. Was 4
+    // direct probes and 4 userset scans when a node read three
+    // times; the branches still all launch, they just read once.
+    expect(store.counts.findCheckTuples).toBe(4);
   });
 
   test("surfaced error follows completion order across branches", async () => {

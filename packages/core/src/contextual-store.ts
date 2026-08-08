@@ -1,6 +1,8 @@
 import type { TupleStore } from "./store-interface.ts";
 import type {
   AddTupleRequest,
+  CheckTuples,
+  CheckTuplesQuery,
   ConditionDefinition,
   RelationConfig,
   RemoveTupleRequest,
@@ -31,52 +33,68 @@ export class ContextualTupleStore implements TupleStore {
     }));
   }
 
-  async findDirectTuple(
-    objectType: string,
-    objectId: string,
-    relation: string,
-    subjectType: string,
-    subjectId: string,
-  ): Promise<Tuple | null> {
-    // Check contextual tuples first
-    const contextual = this.contextualTuples.find(
-      (t) =>
-        t.objectType === objectType &&
-        t.objectId === objectId &&
-        t.relation === relation &&
-        t.subjectType === subjectType &&
-        t.subjectId === subjectId &&
-        t.subjectRelation === null,
-    );
-    if (contextual) return contextual;
+  /**
+   * The overlay is deliberately asymmetric, and merging the three
+   * reads into one call must not quietly even it out.
+   *
+   * A direct or wildcard probe returns *one* tuple, so a
+   * contextual tuple on that exact key **replaces** the stored one
+   * — it is not unioned with it. That is what lets a caller
+   * override a conditioned stored tuple with an unconditioned
+   * contextual one. The userset scan returns a *set*, so there
+   * contextual rows are **concatenated** with the stored ones.
+   *
+   * A part the overlay already answers is dropped from the inner
+   * query, so a replaced probe still costs the store nothing.
+   */
+  async findCheckTuples(query: CheckTuplesQuery): Promise<CheckTuples> {
+    const direct = query.includeDirect
+      ? this.findContextualDirect(query, query.subjectId)
+      : null;
+    const wildcard = query.includeWildcard
+      ? this.findContextualDirect(query, "*")
+      : null;
 
-    return this.inner.findDirectTuple(
-      objectType,
-      objectId,
-      relation,
-      subjectType,
-      subjectId,
+    const stored = await this.inner.findCheckTuples({
+      ...query,
+      includeDirect: query.includeDirect && direct === null,
+      includeWildcard: query.includeWildcard && wildcard === null,
+    });
+
+    return {
+      direct: direct ?? stored.direct,
+      wildcard: wildcard ?? stored.wildcard,
+      usersets: query.includeUsersets
+        ? [...this.findContextualUsersets(query), ...stored.usersets]
+        : stored.usersets,
+    };
+  }
+
+  private findContextualDirect(
+    query: CheckTuplesQuery,
+    subjectId: string,
+  ): Tuple | null {
+    return (
+      this.contextualTuples.find(
+        (t) =>
+          t.objectType === query.objectType &&
+          t.objectId === query.objectId &&
+          t.relation === query.relation &&
+          t.subjectType === query.subjectType &&
+          t.subjectId === subjectId &&
+          t.subjectRelation === null,
+      ) ?? null
     );
   }
 
-  async findUsersetTuples(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<Tuple[]> {
-    const contextual = this.contextualTuples.filter(
+  private findContextualUsersets(query: CheckTuplesQuery): Tuple[] {
+    return this.contextualTuples.filter(
       (t) =>
-        t.objectType === objectType &&
-        t.objectId === objectId &&
-        t.relation === relation &&
+        t.objectType === query.objectType &&
+        t.objectId === query.objectId &&
+        t.relation === query.relation &&
         t.subjectRelation !== null,
     );
-    const stored = await this.inner.findUsersetTuples(
-      objectType,
-      objectId,
-      relation,
-    );
-    return [...contextual, ...stored];
   }
 
   async findTuplesByRelation(

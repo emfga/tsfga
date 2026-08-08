@@ -3,7 +3,12 @@ import { check } from "../src/check.ts";
 import { DepthExceededError } from "../src/errors.ts";
 import { createTsfga } from "../src/index.ts";
 import { listObjects } from "../src/list-objects.ts";
-import type { RelationConfig, Tuple } from "../src/types.ts";
+import type {
+  CheckTuples,
+  CheckTuplesQuery,
+  RelationConfig,
+  Tuple,
+} from "../src/types.ts";
 import { delay, StoreReadFailure } from "./helpers/erroring-store.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
 
@@ -37,12 +42,12 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
 }
 
 /**
- * Every candidate check opens with a direct-tuple read on the
- * candidate object, which makes that read a usable proxy for "this
- * candidate has started". Stalling it parks each candidate at a
- * point where the pool's concurrency is observable, and failing it
- * fails exactly one candidate without disturbing the shared
- * subtree behind them all.
+ * Every candidate check opens with a tuple read on the candidate
+ * object, which makes that read a usable proxy for "this candidate
+ * has started". Stalling it parks each candidate at a point where
+ * the pool's concurrency is observable, and failing it fails
+ * exactly one candidate without disturbing the shared subtree
+ * behind them all.
  */
 class CandidateStore extends MockTupleStore {
   inFlight = 0;
@@ -53,25 +58,16 @@ class CandidateStore extends MockTupleStore {
   /** Candidate object id -> ms to stall before settling. */
   delays = new Map<string, number>();
 
-  override async findDirectTuple(
-    objectType: string,
-    objectId: string,
-    relation: string,
-    subjectType: string,
-    subjectId: string,
-  ): Promise<Tuple | null> {
-    // A node reads its direct tuple and its wildcard tuple in one
-    // wave; instrument only the former, so one candidate counts
-    // as one in flight.
-    if (objectType !== "doc" || subjectId === "*") {
-      return super.findDirectTuple(
-        objectType,
-        objectId,
-        relation,
-        subjectType,
-        subjectId,
-      );
+  override async findCheckTuples(
+    query: CheckTuplesQuery,
+  ): Promise<CheckTuples> {
+    // Instrument only the candidate objects, so one candidate
+    // counts as one in flight and the shared subtree behind them
+    // is neither stalled nor failed.
+    if (query.objectType !== "doc") {
+      return super.findCheckTuples(query);
     }
+    const objectId = query.objectId;
     this.started.push(objectId);
     this.inFlight++;
     this.peakInFlight = Math.max(this.peakInFlight, this.inFlight);
@@ -81,13 +77,7 @@ class CandidateStore extends MockTupleStore {
       if (failure) {
         throw failure;
       }
-      return await super.findDirectTuple(
-        objectType,
-        objectId,
-        relation,
-        subjectType,
-        subjectId,
-      );
+      return await super.findCheckTuples(query);
     } finally {
       this.inFlight--;
     }
@@ -185,7 +175,7 @@ describe("listObjects", () => {
       });
 
       expect(
-        store.callsWith("findUsersetTuples", "folder", "shared", "member"),
+        store.callsWith("findCheckTuples", "folder", "shared", "member"),
       ).toBe(1);
     });
 
@@ -212,7 +202,7 @@ describe("listObjects", () => {
       }
 
       expect(
-        store.callsWith("findUsersetTuples", "folder", "shared", "member"),
+        store.callsWith("findCheckTuples", "folder", "shared", "member"),
       ).toBe(5);
     });
   });

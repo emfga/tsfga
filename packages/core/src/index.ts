@@ -158,6 +158,8 @@ export type {
   AddTupleRequest,
   CheckOptions,
   CheckRequest,
+  CheckTuples,
+  CheckTuplesQuery,
   ConditionDefinition,
   ConditionParameterType,
   IntersectionOperand,

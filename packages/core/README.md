@@ -193,18 +193,27 @@ candidate after a failure is started.
 
 ## Relation configs gate the reads
 
-Each node of a check can issue three tuple reads: a direct probe
-for the subject, a probe for a `type:*` wildcard, and a scan for
-userset rows. A read is skipped when the relation config says
+Each node of a check wants up to three things about its object and
+relation: a direct tuple for the subject, a `type:*` wildcard
+tuple, and the userset rows. They are asked for **in one store
+call**, `findCheckTuples`, because they share an object, a
+relation and a plan — three separate queries cost three
+round-trips and, on a single-connection handle, three serialized
+ones.
+
+A part is left out of the query when the relation config says
 nothing it could find would be valid:
 
-| Read | Skipped when |
+| Part | Left out when |
 |---|---|
 | direct probe | `directlyAssignableTypes` omits the subject type |
 | wildcard probe | `directlyAssignableTypes` omits `subjectType:*` |
 | userset scan | `allowsUsersetSubjects` is `false` |
 
-A read is skipped only on a *positive* exclusion. A relation with
+With all three ruled out there is nothing to ask, and the node
+skips the store entirely — it still resolves through its rewrites.
+
+A part is left out only on a *positive* exclusion. A relation with
 no config at all, or with `directlyAssignableTypes: null` — which
 means "not narrowed", not "purely computed" — still reads
 everything. The gate is the same predicate `addTuple` applies, so
@@ -246,6 +255,28 @@ contextual tuples throw `RelationConfigNotFoundError`,
 The `TupleStore` interface is the extension point for custom
 database adapters. The core check algorithm depends only on
 this interface — it has no database dependencies.
+
+Its read surface is deliberately shaped around what a check
+actually asks for, not around individual predicates. The one to
+understand when writing an adapter is `findCheckTuples`: it takes
+a `CheckTuplesQuery` (the node, plus which of the three parts are
+wanted) and returns a `CheckTuples` (`direct`, `wildcard`,
+`usersets`). Both types are exported. Serving it as one query is
+the single largest thing an adapter can do for check latency; an
+implementation may run three instead, and simply gives that up.
+
+The `include*` flags exist so a store can **narrow** its query —
+that is where the saving is. They are a hint, not a trust
+boundary: `check` re-clamps every reply against the query it
+sent, so returning a part that was not asked for, or filing a row
+under the wrong slot, loses that row. An adapter bug cannot widen
+what the model admits, only lose grants it should have found.
+
+Slots are exact. `direct` is the tuple for this subject with no
+subject relation, `wildcard` the one for `subjectType:*` likewise,
+and every row in `usersets` has a subject relation. A minimal
+correct implementation may ignore the flags entirely and return
+all three parts; it just gives up the saving.
 
 See
 [`src/store-interface.ts`](src/store-interface.ts)

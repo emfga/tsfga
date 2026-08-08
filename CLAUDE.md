@@ -239,21 +239,15 @@ database backend. All methods return `Promise`.
 export interface TupleStore {
   // === Read ===
 
-  /** Check if a direct tuple exists (no subject_relation) */
-  findDirectTuple(
-    objectType: string,
-    objectId: string,
-    relation: string,
-    subjectType: string,
-    subjectId: string,
-  ): Promise<Tuple | null>;
-
-  /** Find tuples where subject_relation IS NOT NULL (userset expansion) */
-  findUsersetTuples(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<Tuple[]>;
+  /**
+   * All three per-node check reads in one call: the subject's
+   * direct tuple, the `subjectType:*` wildcard tuple, and the
+   * usersets on the relation. A part the query excludes must be
+   * reported absent even if rows for it exist — the exclusions
+   * come from the relation config, so such a row is one the model
+   * does not admit.
+   */
+  findCheckTuples(query: CheckTuplesQuery): Promise<CheckTuples>;
 
   /** Find tuples by object + relation (for tuple-to-userset tupleset lookup) */
   findTuplesByRelation(
@@ -329,15 +323,18 @@ export async function check(
     throw new DepthExceededError(...);
   }
 
+  // Steps 1 and 2 read together. `findCheckTuples` returns the
+  // direct tuple, the wildcard tuple and the userset rows in one
+  // call, and takes the relation config's gates so a part the
+  // model cannot admit is never asked for.
+  const { direct: directTuple, usersets: usersetTuples } =
+    await store.findCheckTuples({ ...node, ...gatesFrom(config) });
+
   // Step 1: Direct tuple check
-  // Look for exact match: (objectType, objectId, relation, subjectType, subjectId)
-  // where subject_relation IS NULL.
+  // Exact match on (objectType, objectId, relation, subjectType,
+  // subjectId) where subject_relation IS NULL.
   // If the tuple has a conditionName, evaluate the CEL condition.
   // Return true only if no condition or condition evaluates to true.
-  const directTuple = await store.findDirectTuple(
-    request.objectType, request.objectId, request.relation,
-    request.subjectType, request.subjectId,
-  );
   if (directTuple) {
     if (await evaluateTupleCondition(store, directTuple, request.context)) {
       return true;
@@ -345,14 +342,11 @@ export async function check(
   }
 
   // Step 2: Userset expansion
-  // Find tuples where subject_relation IS NOT NULL.
+  // The rows with subject_relation IS NOT NULL, read above.
   // e.g., (channel:proj, writer, workspace:sandcastle#member)
   // For each, recursively check if the user has the subject_relation
   // on the referenced subject object.
   // If the userset tuple has a conditionName, evaluate before recursing.
-  const usersetTuples = await store.findUsersetTuples(
-    request.objectType, request.objectId, request.relation,
-  );
   for (const userset of usersetTuples) {
     if (!await evaluateTupleCondition(store, userset, request.context)) {
       continue;

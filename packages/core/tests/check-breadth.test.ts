@@ -8,6 +8,8 @@ import {
 } from "../src/check.ts";
 import { ConditionNotFoundError, TsfgaError } from "../src/errors.ts";
 import type {
+  CheckTuples,
+  CheckTuplesQuery,
   ConditionDefinition,
   RelationConfig,
   Tuple,
@@ -52,7 +54,7 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Records which relations are probed (direct reads and config
+ * Records which relations are probed (node tuple reads and config
  * reads), so tests can assert that queued branches beyond the
  * breadth limit never start once the node has settled.
  */
@@ -60,21 +62,9 @@ class RecordingStore extends MockTupleStore {
   probedRelations: string[] = [];
   configRelations: string[] = [];
 
-  override findDirectTuple(
-    objectType: string,
-    objectId: string,
-    relation: string,
-    subjectType: string,
-    subjectId: string,
-  ): Promise<Tuple | null> {
-    this.probedRelations.push(relation);
-    return super.findDirectTuple(
-      objectType,
-      objectId,
-      relation,
-      subjectType,
-      subjectId,
-    );
+  override findCheckTuples(query: CheckTuplesQuery): Promise<CheckTuples> {
+    this.probedRelations.push(query.relation);
+    return super.findCheckTuples(query);
   }
 
   override findRelationConfig(

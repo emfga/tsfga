@@ -1,6 +1,8 @@
 import type { TupleStore } from "./store-interface.ts";
 import type {
   AddTupleRequest,
+  CheckTuples,
+  CheckTuplesQuery,
   ConditionDefinition,
   RelationConfig,
   RemoveTupleRequest,
@@ -89,28 +91,8 @@ export class CachingTupleStore implements TupleStore {
     });
   }
 
-  findDirectTuple(
-    objectType: string,
-    objectId: string,
-    relation: string,
-    subjectType: string,
-    subjectId: string,
-  ): Promise<Tuple | null> {
-    return this.inner.findDirectTuple(
-      objectType,
-      objectId,
-      relation,
-      subjectType,
-      subjectId,
-    );
-  }
-
-  findUsersetTuples(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<Tuple[]> {
-    return this.inner.findUsersetTuples(objectType, objectId, relation);
+  findCheckTuples(query: CheckTuplesQuery): Promise<CheckTuples> {
+    return this.inner.findCheckTuples(query);
   }
 
   findTuplesByRelation(

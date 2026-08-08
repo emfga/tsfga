@@ -235,10 +235,20 @@ describe("CachingTupleStore", () => {
   });
 
   test("tuple reads pass through uncached", async () => {
-    await caching.findDirectTuple("doc", "d1", "viewer", "user", "alice");
-    await caching.findDirectTuple("doc", "d1", "viewer", "user", "alice");
+    const query = {
+      objectType: "doc",
+      objectId: "d1",
+      relation: "viewer",
+      subjectType: "user",
+      subjectId: "alice",
+      includeDirect: true,
+      includeWildcard: true,
+      includeUsersets: true,
+    };
+    await caching.findCheckTuples(query);
+    await caching.findCheckTuples(query);
 
-    expect(store.counts.findDirectTuple).toBe(2);
+    expect(store.counts.findCheckTuples).toBe(2);
   });
 });
 

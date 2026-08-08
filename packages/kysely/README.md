@@ -78,6 +78,35 @@ Migrations create a `tsfga` schema with three tables:
 | `tsfga.relation_configs` | Relation definitions (implied_by, computed_userset, etc.) |
 | `tsfga.condition_definitions` | Named CEL condition expressions |
 
+## How a check reads
+
+Every node of a check calls `findCheckTuples` once. The adapter
+serves it as a single query: one `(object_type, object_id,
+relation)` predicate with an OR over just the subject predicates
+the caller asked for — the subject's own direct tuple, the
+`type:*` wildcard tuple, the userset rows, or any subset.
+
+One round-trip per node instead of up to three, and one
+connection held instead of up to three. The latter is usually the
+bigger effect: branches of a node resolve concurrently up to
+`maxBreadth`, so three reads per node meant a wide node could ask
+the pool for three times as many connections as it has branches.
+
+Which plan PostgreSQL picks depends on the disjuncts. Asking for
+one part gives the same plan as before this was merged. Asking
+for a direct probe and a wildcard probe collapses to the full
+five-column `idx_tuples_check` condition, since they differ only
+in `subject_id`. Mixing a probe with the userset scan generally
+gives an `idx_tuples_check` prefix scan plus a filter, which
+reads a few rows it discards — cheaper than the round-trip it
+saves, but not free on objects with many subjects on one
+relation.
+
+Parts the caller excludes are omitted from the SQL, so they cost
+nothing to skip. Note this narrows the `Filter`, not the
+`Index Cond`, in the prefix-scan plan — the saving is in rows
+examined, not in index descent.
+
 ## License
 
 MIT

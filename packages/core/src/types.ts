@@ -10,6 +10,59 @@ export interface Tuple {
   conditionContext: Record<string, unknown> | null;
 }
 
+/**
+ * The tuple reads one node of a check needs, as one request.
+ *
+ * A node can want up to three things about `objectType:objectId`
+ * and `relation`: whether the subject holds it directly, whether
+ * a `subjectType:*` wildcard grants it publicly, and which
+ * usersets are assigned to it. They are asked for together so a
+ * store can serve them in one round-trip.
+ *
+ * The three `include*` flags say which parts the caller wants.
+ * They reflect the relation config: a part the model cannot admit
+ * is not requested at all.
+ *
+ * They are a **narrowing hint, not a trust boundary**. A store
+ * may use them to skip work — that is the point of sending them —
+ * but it is never relied on to. The check algorithm re-clamps
+ * every reply against the query it sent, so a store that ignores
+ * a flag, or files a row under the wrong slot, loses that row
+ * rather than smuggling it past the model's type restrictions.
+ * Narrowing is the store's business; widening is impossible.
+ */
+export interface CheckTuplesQuery {
+  objectType: string;
+  objectId: string;
+  relation: string;
+  subjectType: string;
+  subjectId: string;
+  /** Direct tuple for exactly this subject, no subject relation. */
+  includeDirect: boolean;
+  /** Direct tuple for `subjectType:*`, no subject relation. */
+  includeWildcard: boolean;
+  /** Every tuple on this relation with a subject relation. */
+  includeUsersets: boolean;
+}
+
+/**
+ * What a `CheckTuplesQuery` found.
+ *
+ * A part the query excluded reads back as `null` / `[]` — the same
+ * value it would have on a miss. That is deliberate: the check
+ * algorithm treats "the model forbids it" and "nothing is stored"
+ * identically, so nothing downstream has to tell them apart.
+ *
+ * `usersets` is `readonly` because the check algorithm aliases a
+ * shared empty array for the excluded case rather than allocating
+ * one per node.
+ */
+export interface CheckTuples {
+  direct: Tuple | null;
+  wildcard: Tuple | null;
+  usersets: readonly Tuple[];
+}
+
 /** An operand in an intersection expression */
 export type IntersectionOperand =
   | { type: "direct" }

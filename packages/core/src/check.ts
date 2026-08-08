@@ -12,17 +12,11 @@ import {
 import type {
   CheckOptions,
   CheckRequest,
+  CheckTuples,
+  CheckTuplesQuery,
   RelationConfig,
   Tuple,
 } from "./types.ts";
-
-/**
- * Results of the per-node tuple batch: direct, wildcard, userset.
- * A slot the relation config rules out is filled with the same
- * empty value the store would have returned, so consumers never
- * distinguish "not read" from "read, found nothing".
- */
-type NodeReads = readonly [Tuple | null, Tuple | null, readonly Tuple[]];
 
 /**
  * Internal result of resolving one node.
@@ -522,16 +516,17 @@ async function resolveNode(
 }
 
 /**
- * Issue the per-node tuple reads (direct probe, wildcard probe,
- * userset scan) as one batch, skipping any the relation config
- * says cannot match.
+ * Ask the store for the node's tuples — direct probe, wildcard
+ * probe, userset scan — in one request, excluding any part the
+ * relation config says cannot match.
  *
- * A read is skipped only when the config *positively excludes* it.
- * No config, or a config that declines to narrow the relation
- * (`directlyAssignableTypes: null`), reads everything. The gate is
- * the same predicate the write path applies, imported from
- * `tuple-validation.ts` rather than restated, so a tuple that can
- * be written is always a tuple that can be found.
+ * A part is excluded only when the config *positively rules it
+ * out*. No config, or a config that declines to narrow the
+ * relation (`directlyAssignableTypes: null`), asks for
+ * everything. The gate is the same predicate the write path
+ * applies, imported from `tuple-validation.ts` rather than
+ * restated, so a tuple that can be written is always a tuple that
+ * can be found.
  *
  * This mirrors upstream, which builds `checkDirect`'s three
  * handlers behind `shouldCheckDirectTuple`,
@@ -541,46 +536,130 @@ async function resolveNode(
  * purely computed relation issues no reads at all there, whereas
  * tsfga encodes "purely computed" as the same `null` that means
  * "unrestricted", so it cannot tell the two apart.
+ *
+ * The gates are sent to the store so it can narrow its query, and
+ * re-applied to its reply by `clampToQuery` so that narrowing
+ * stays an optimization rather than a correctness dependency.
  */
-function readNodeTuples(
+async function readNodeTuples(
   store: TupleStore,
   request: CheckRequest,
   config: RelationConfig | null,
-): Promise<NodeReads> {
+): Promise<CheckTuples> {
   const subjectRef = directSubjectRef(request.subjectType, request.subjectId);
   const wildcardRef = `${request.subjectType}:*`;
 
-  return Promise.all([
-    admitsDirectSubject(config, subjectRef)
-      ? store.findDirectTuple(
-          request.objectType,
-          request.objectId,
-          request.relation,
-          request.subjectType,
-          request.subjectId,
-        )
-      : null,
-    admitsDirectSubject(config, wildcardRef)
-      ? store.findDirectTuple(
-          request.objectType,
-          request.objectId,
-          request.relation,
-          request.subjectType,
-          "*",
-        )
-      : null,
-    admitsUsersetSubjects(config)
-      ? store.findUsersetTuples(
-          request.objectType,
-          request.objectId,
-          request.relation,
-        )
-      : NO_TUPLES,
-  ]);
+  const includeDirect = admitsDirectSubject(config, subjectRef);
+  // Checking the wildcard subject itself makes the two probes the
+  // same query, and `directSubjectRef` makes their gates agree
+  // too. Ask once: `checkBase` reads the slots identically, so
+  // folding it into `direct` loses nothing and saves a duplicate
+  // condition evaluation.
+  const includeWildcard =
+    request.subjectId === "*"
+      ? false
+      : admitsDirectSubject(config, wildcardRef);
+  const includeUsersets = admitsUsersetSubjects(config);
+
+  // A relation that admits none of the three — say one that is
+  // purely an intersection of rewrites — has nothing to ask for.
+  // Skip the round-trip rather than send a query that cannot
+  // match; the node still resolves through its rewrites.
+  if (!includeDirect && !includeWildcard && !includeUsersets) {
+    return NO_TUPLES;
+  }
+
+  const query: CheckTuplesQuery = {
+    objectType: request.objectType,
+    objectId: request.objectId,
+    relation: request.relation,
+    subjectType: request.subjectType,
+    subjectId: request.subjectId,
+    includeDirect,
+    includeWildcard,
+    includeUsersets,
+  };
+  return clampToQuery(await store.findCheckTuples(query), query);
 }
 
-/** Stand-in for a userset scan the config rules out. Never mutated. */
-const NO_TUPLES: readonly Tuple[] = [];
+/**
+ * Stand-in for a node whose reads the config rules out entirely.
+ * Never mutated, so aliasing it across nodes is safe.
+ */
+const NO_TUPLES: CheckTuples = { direct: null, wildcard: null, usersets: [] };
+
+/**
+ * Discard anything in a store's reply that the query did not ask
+ * for, or that is filed under the wrong slot.
+ *
+ * Before the three reads were merged, the relation config's type
+ * restrictions were enforced by *not making the call* — a tuple
+ * the model forbids was unreachable because no code path looked
+ * for it. Merging moved that enforcement into a flag on a request,
+ * and a flag is only as good as the store honouring it. That
+ * would make every adapter, including third-party ones, part of
+ * the security boundary: a store that ignored `includeUsersets`
+ * would hand back a userset row on a relation that forbids
+ * usersets, and `checkBase` would expand it and grant. Silently.
+ *
+ * So the flags stay a hint and the guarantee moves back here.
+ * Clamping is cheap, it is one place, and it makes the failure
+ * direction closed: a store that over-returns loses rows rather
+ * than smuggling them past the model. Upstream reaches the same
+ * conclusion by a different route, filtering each handler's rows
+ * through `validation.FilterInvalidTuples` after having already
+ * chosen the handlers by type (`internal/graph/check.go`).
+ *
+ * A misfiled row is dropped rather than raised. There is no safe
+ * reading of it, and a check is the wrong place to discover an
+ * adapter bug — denying is the conservative answer, and the
+ * adapter's own tests are where this should have been caught.
+ */
+function clampToQuery(
+  reply: CheckTuples,
+  query: CheckTuplesQuery,
+): CheckTuples {
+  const onNode = (tuple: Tuple): boolean =>
+    tuple.objectType === query.objectType &&
+    tuple.objectId === query.objectId &&
+    tuple.relation === query.relation;
+
+  // A probe answers for one subject with no subject relation; the
+  // wildcard slot answers for `*` and nothing else.
+  const isProbe = (tuple: Tuple | null, subjectId: string): boolean =>
+    tuple !== null &&
+    onNode(tuple) &&
+    tuple.subjectType === query.subjectType &&
+    tuple.subjectId === subjectId &&
+    tuple.subjectRelation === null;
+
+  // Usersets carry their own subject type — `team:eng#member` on a
+  // `user` check — so only the node and the subject relation are
+  // checkable here.
+  const isUserset = (tuple: Tuple): boolean =>
+    onNode(tuple) && tuple.subjectRelation !== null;
+
+  let usersets: readonly Tuple[] = NO_TUPLES.usersets;
+  if (query.includeUsersets) {
+    // Reuse the reply's array when it is already clean, which is
+    // every well-behaved store on every node.
+    usersets = reply.usersets.every(isUserset)
+      ? reply.usersets
+      : reply.usersets.filter(isUserset);
+  }
+
+  return {
+    direct:
+      query.includeDirect && isProbe(reply.direct, query.subjectId)
+        ? reply.direct
+        : null,
+    wildcard:
+      query.includeWildcard && isProbe(reply.wildcard, "*")
+        ? reply.wildcard
+        : null,
+    usersets,
+  };
+}
 
 /**
  * A tuple's condition as a union branch. Condition evaluation can
@@ -604,14 +683,18 @@ async function checkBase(
   store: TupleStore,
   request: CheckRequest,
   config: RelationConfig | null,
-  reads: Promise<NodeReads>,
+  reads: Promise<CheckTuples>,
   maxDepth: number,
   maxBreadth: number,
   depth: number,
   path: ReadonlySet<string>,
   memo: NodeMemo,
 ): Promise<CheckResult> {
-  const [directTuple, wildcardTuple, usersetTuples] = await reads;
+  const {
+    direct: directTuple,
+    wildcard: wildcardTuple,
+    usersets: usersetTuples,
+  } = await reads;
 
   // Steps 1/1b: an unconditioned direct or wildcard hit answers
   // immediately, before any sub-check is launched
@@ -757,7 +840,7 @@ async function checkIntersection(
   store: TupleStore,
   request: CheckRequest,
   config: RelationConfig,
-  reads: Promise<NodeReads>,
+  reads: Promise<CheckTuples>,
   maxDepth: number,
   maxBreadth: number,
   depth: number,
