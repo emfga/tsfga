@@ -191,6 +191,46 @@ surfaces is deterministic: it is the first failing candidate in
 *candidate* order, not the first to fail in wall-clock order. No
 candidate after a failure is started.
 
+## Relation configs gate the reads
+
+Each node of a check can issue three tuple reads: a direct probe
+for the subject, a probe for a `type:*` wildcard, and a scan for
+userset rows. A read is skipped when the relation config says
+nothing it could find would be valid:
+
+| Read | Skipped when |
+|---|---|
+| direct probe | `directlyAssignableTypes` omits the subject type |
+| wildcard probe | `directlyAssignableTypes` omits `subjectType:*` |
+| userset scan | `allowsUsersetSubjects` is `false` |
+
+A read is skipped only on a *positive* exclusion. A relation with
+no config at all, or with `directlyAssignableTypes: null` — which
+means "not narrowed", not "purely computed" — still reads
+everything. The gate is the same predicate `addTuple` applies, so
+a tuple that can be written is always a tuple that can be found.
+
+**This makes relation configs load-bearing rather than
+advisory.** A tuple written straight to the database, bypassing
+`addTuple`, or left behind by a relation that has since narrowed
+its type list, is no longer found by `check` — it is treated as
+the invalid row it is. Previously it would have granted access.
+This matches OpenFGA, whose reads are typed and which rejects
+such a tuple at write time; the failure direction is closed, not
+open.
+
+The config for a relation is read once per request and cached, so
+this ordering costs one round-trip per relation, not per node.
+
+tsfga skips less than upstream in one case. A purely computed
+relation (`define viewer: owner`) issues no tuple reads at all in
+OpenFGA, which dispatches on the relation's rewrite. tsfga
+encodes "purely computed" as the same `directlyAssignableTypes:
+null` that also means "unrestricted", so it cannot tell the two
+apart and reads. Distinguishing them would mean changing what
+`null` means for writes as well, so it is deliberately not folded
+in here.
+
 ## Contextual tuples
 
 Contextual tuples passed on a `CheckRequest` are validated

@@ -3,7 +3,12 @@ import { evaluateTupleCondition } from "./conditions.ts";
 import { ContextualTupleStore } from "./contextual-store.ts";
 import { DepthExceededError, TsfgaError } from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
-import { validateTupleWrite } from "./tuple-validation.ts";
+import {
+  admitsDirectSubject,
+  admitsUsersetSubjects,
+  directSubjectRef,
+  validateTupleWrite,
+} from "./tuple-validation.ts";
 import type {
   CheckOptions,
   CheckRequest,
@@ -11,8 +16,13 @@ import type {
   Tuple,
 } from "./types.ts";
 
-/** Results of the per-node tuple batch: direct, wildcard, userset. */
-type NodeReads = readonly [Tuple | null, Tuple | null, Tuple[]];
+/**
+ * Results of the per-node tuple batch: direct, wildcard, userset.
+ * A slot the relation config rules out is filled with the same
+ * empty value the store would have returned, so consumers never
+ * distinguish "not read" from "read, found nothing".
+ */
+type NodeReads = readonly [Tuple | null, Tuple | null, readonly Tuple[]];
 
 /**
  * Internal result of resolving one node.
@@ -405,19 +415,27 @@ async function resolveNode(
   visited: ReadonlySet<string>,
   memo: NodeMemo,
 ): Promise<CheckResult> {
-  // Speculatively start the tuple batch so it overlaps the config
-  // fetch: one round-trip wave per node instead of two. Some paths
-  // never await it (config error, or an intersection without a
-  // direct operand); the derived catch keeps such a rejection from
-  // going unhandled while awaiting callers still see the error.
-  const reads = readNodeTuples(store, request);
-  reads.catch(() => {});
-
-  // Fetch relation config once for use across all steps
+  // Fetch relation config once for use across all steps — and
+  // before the tuple reads, which are gated on it.
+  //
+  // The reads used to be started speculatively alongside this
+  // fetch, to keep a node to one round-trip wave. Ordering them
+  // costs far less than it looks: configs are cached for the whole
+  // request and the cache coalesces concurrent misses, so a real
+  // round-trip happens once per relation, not once per node. Every
+  // node after the first for a given relation still issues one
+  // wave, now a smaller one.
   const config = await store.findRelationConfig(
     request.objectType,
     request.relation,
   );
+
+  // Some paths never await the batch (config error, or an
+  // intersection without a direct operand); the derived catch
+  // keeps such a rejection from going unhandled while awaiting
+  // callers still see the error.
+  const reads = readNodeTuples(store, request, config);
+  reads.catch(() => {});
 
   // Base resolution: intersection replaces steps 1-5 when present
   const resolveBase = (): Promise<CheckResult> =>
@@ -504,36 +522,65 @@ async function resolveNode(
 }
 
 /**
- * Issue the three per-node tuple reads (direct probe, wildcard
- * probe, userset scan) as one batch. Started at node entry so
- * they overlap the relation-config fetch.
+ * Issue the per-node tuple reads (direct probe, wildcard probe,
+ * userset scan) as one batch, skipping any the relation config
+ * says cannot match.
+ *
+ * A read is skipped only when the config *positively excludes* it.
+ * No config, or a config that declines to narrow the relation
+ * (`directlyAssignableTypes: null`), reads everything. The gate is
+ * the same predicate the write path applies, imported from
+ * `tuple-validation.ts` rather than restated, so a tuple that can
+ * be written is always a tuple that can be found.
+ *
+ * This mirrors upstream, which builds `checkDirect`'s three
+ * handlers behind `shouldCheckDirectTuple`,
+ * `shouldCheckPublicAssignable` and a non-empty
+ * `DirectlyRelatedUsersets` (`internal/graph/check.go`). It is
+ * narrower than upstream in one way, noted in the README: a
+ * purely computed relation issues no reads at all there, whereas
+ * tsfga encodes "purely computed" as the same `null` that means
+ * "unrestricted", so it cannot tell the two apart.
  */
 function readNodeTuples(
   store: TupleStore,
   request: CheckRequest,
+  config: RelationConfig | null,
 ): Promise<NodeReads> {
+  const subjectRef = directSubjectRef(request.subjectType, request.subjectId);
+  const wildcardRef = `${request.subjectType}:*`;
+
   return Promise.all([
-    store.findDirectTuple(
-      request.objectType,
-      request.objectId,
-      request.relation,
-      request.subjectType,
-      request.subjectId,
-    ),
-    store.findDirectTuple(
-      request.objectType,
-      request.objectId,
-      request.relation,
-      request.subjectType,
-      "*",
-    ),
-    store.findUsersetTuples(
-      request.objectType,
-      request.objectId,
-      request.relation,
-    ),
+    admitsDirectSubject(config, subjectRef)
+      ? store.findDirectTuple(
+          request.objectType,
+          request.objectId,
+          request.relation,
+          request.subjectType,
+          request.subjectId,
+        )
+      : null,
+    admitsDirectSubject(config, wildcardRef)
+      ? store.findDirectTuple(
+          request.objectType,
+          request.objectId,
+          request.relation,
+          request.subjectType,
+          "*",
+        )
+      : null,
+    admitsUsersetSubjects(config)
+      ? store.findUsersetTuples(
+          request.objectType,
+          request.objectId,
+          request.relation,
+        )
+      : NO_TUPLES,
   ]);
 }
+
+/** Stand-in for a userset scan the config rules out. Never mutated. */
+const NO_TUPLES: readonly Tuple[] = [];
 
 /**
  * A tuple's condition as a union branch. Condition evaluation can

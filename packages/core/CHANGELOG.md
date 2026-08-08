@@ -71,6 +71,36 @@ releases may contain breaking changes).
   reports the same error on every run. As before, any error fails
   the whole call rather than dropping the offending object.
 
+- **A check no longer issues tuple reads the relation config
+  rules out.** Each node used to probe for a direct tuple, a
+  wildcard tuple and userset rows regardless of what the relation
+  admits. Each read is now gated on the config — the same
+  predicate `addTuple` applies, so a writable tuple is always a
+  findable one — cutting a wide-union benchmark from 3005 store
+  reads to 1004, a TTU fanout from 306 to 104, and the
+  200-candidate `listObjects` shape from 852 to 436.
+
+  **Behavior-visible.** A tuple the model does not admit — one
+  written straight to the database bypassing `addTuple`, or left
+  behind by a relation that has since narrowed its type list — is
+  no longer found, where before it granted access. Relation
+  configs are now load-bearing for the read path rather than
+  advisory. OpenFGA behaves the same way and rejects such a tuple
+  at write time; the change fails closed.
+
+  A read is skipped only on a positive exclusion: no config, or
+  `directlyAssignableTypes: null`, still reads everything. tsfga
+  therefore skips less than OpenFGA, which issues no reads at all
+  for a purely computed relation — tsfga encodes that as the same
+  `null` that means "unrestricted" and cannot tell the two apart.
+  Closing that gap would change what `null` means for writes too,
+  so it is left for its own change.
+
+  Ordering the config read before the tuple reads gives up the
+  single overlapping read wave, also unreleased. The cost is one
+  round-trip per relation per request, not per node, because
+  configs are cached for the request.
+
 ## 0.3.1 — 2026-08
 
 Maintenance release. No changes to the published code — the

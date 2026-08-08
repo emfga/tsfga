@@ -134,16 +134,24 @@ class SlowConfigStore extends MockTupleStore {
   }
 }
 
-describe("single-wave node reads", () => {
-  test("config fetch and tuple reads are issued concurrently", async () => {
+describe("node read waves", () => {
+  /** A relation that admits all three reads, so none is gated out. */
+  function wideOpenConfig(relation: string): RelationConfig {
+    return makeConfig({
+      objectType: "doc",
+      relation,
+      directlyAssignableTypes: ["user", "user:*"],
+      allowsUsersetSubjects: true,
+    });
+  }
+
+  test("the admitted tuple reads are issued as one wave", async () => {
+    // The config read no longer overlaps them: the reads are
+    // gated on what the config admits, so it has to land first.
+    // What is still asserted is that the reads it does admit go
+    // out together rather than one at a time.
     const store = new GatedStore();
-    store.relationConfigs.push(
-      makeConfig({
-        objectType: "doc",
-        relation: "viewer",
-        directlyAssignableTypes: ["user"],
-      }),
-    );
+    store.relationConfigs.push(wideOpenConfig("viewer"));
 
     const result = await check(store, {
       objectType: "doc",
@@ -154,12 +162,86 @@ describe("single-wave node reads", () => {
     });
 
     expect(result).toBe(false);
-    // One node issues 4 reads (config, direct, wildcard, userset)
-    // in a single overlapping wave.
-    expect(store.highWater).toBe(4);
+    expect(store.highWater).toBe(3);
   });
 
-  test("config-read error surfaces after tuple reads resolve", async () => {
+  test("a second node of the same relation pays no config read", async () => {
+    // The cost of ordering the config before the reads is one
+    // round-trip per relation per request, not per node — this is
+    // what makes that trade cheap enough to take. `outer` implies
+    // `inner`, so two nodes resolve but `doc.inner` is read once.
+    const store = new MockTupleStore();
+    store.relationConfigs.push(
+      makeConfig({
+        objectType: "doc",
+        relation: "outer",
+        impliedBy: ["inner", "inner2"],
+      }),
+      makeConfig({
+        objectType: "doc",
+        relation: "inner",
+        directlyAssignableTypes: ["user"],
+      }),
+    );
+    store.tuples.push(
+      makeTuple({
+        objectType: "doc",
+        objectId: "1",
+        relation: "inner",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    );
+    store.resetCounts();
+
+    // Two objects, so `doc.inner` is resolved as a node twice.
+    for (const objectId of ["1", "2"]) {
+      await check(
+        store,
+        {
+          objectType: "doc",
+          objectId,
+          relation: "inner",
+          subjectType: "user",
+          subjectId: "alice",
+        },
+        { maxBreadth: 1 },
+      );
+    }
+    // Two separate requests, so two config reads — not four.
+    expect(store.callsWith("findRelationConfig", "doc", "inner")).toBe(2);
+  });
+
+  test("skipped reads do not stall the wave", async () => {
+    // A gated-out slot is filled synchronously. If it were left
+    // as a pending promise the batch would never settle.
+    const store = new GatedStore();
+    store.relationConfigs.push(
+      makeConfig({
+        objectType: "doc",
+        relation: "viewer",
+        directlyAssignableTypes: ["user"],
+      }),
+    );
+
+    expect(
+      await check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    ).toBe(false);
+    // Only the subject's direct probe survives the gate: no
+    // `user:*` in the type list, and no userset subjects.
+    expect(store.highWater).toBe(1);
+  });
+
+  test("a config-read error fails the node", async () => {
+    // The reads are gated on the config, so a failed config read
+    // means they are never issued at all — but the error the
+    // caller sees is the same one as when they raced it.
     const store = new DelayedConfigErrorStore();
     store.tuples.push(
       makeTuple({
@@ -229,9 +311,10 @@ describe("single-wave node reads", () => {
     });
 
     expect(result).toBe(true);
-    // Only the root node's probes; the 3 userset branches would
-    // each have added 2 more findDirectTuple calls.
-    expect(store.counts.findDirectTuple).toBe(2);
+    // Only the root node's subject probe; the wildcard probe is
+    // gated out (no `user:*` in the type list) and the 3 userset
+    // branches would each have added one more.
+    expect(store.counts.findDirectTuple).toBe(1);
     expect(store.counts.findUsersetTuples).toBe(1);
   });
 
@@ -378,8 +461,10 @@ describe("single-wave node reads", () => {
     });
 
     expect(result).toBe(true);
-    // Root probes (2) plus 2 probes per launched userset branch.
-    expect(store.counts.findDirectTuple).toBe(8);
+    // One root probe plus one per launched userset branch. Was 8
+    // before the read gating: every node also probed for a
+    // `user:*` tuple that neither type list admits.
+    expect(store.counts.findDirectTuple).toBe(4);
   });
 
   test("surfaced error follows completion order across branches", async () => {
@@ -424,15 +509,22 @@ describe("single-wave node reads", () => {
     ).rejects.toBeInstanceOf(StoreReadFailure);
   });
 
-  test("tuples sampled before a mid-request config swap deny", async () => {
-    // Accepted staleness: the tuple batch overlaps the config
-    // fetch, so a node can pair older tuples with a newer config
-    // and deny where strict config-then-tuples ordering granted.
-    // Fail-closed direction only — a grant read at time t implies
-    // the store granted at time t. OpenFGA cannot express this
-    // scenario at all: a request resolves against one immutable
-    // model snapshot, which mutable relation configs approximate
-    // via the request-scoped config cache.
+  test("a mid-request config swap is read before its tuples", async () => {
+    // This used to deny. While the tuple batch overlapped the
+    // config fetch, a node could pair pre-migration tuples with a
+    // post-migration config; that was accepted as fail-closed
+    // staleness. Gating the reads on the config restores strict
+    // config-then-tuples ordering, so the node now sees both
+    // halves of the migration and grants — which is also the
+    // better answer, since every instantaneous snapshot of the
+    // store grants alice.
+    //
+    // Still not a guarantee, just a narrower window: the config is
+    // sampled once per relation per request, so a swap between two
+    // relations' samplings is unchanged. OpenFGA cannot express
+    // the scenario at all — a request resolves against one
+    // immutable model snapshot, which mutable relation configs
+    // approximate via the request-scoped config cache.
     class MigratingStore extends MockTupleStore {
       override async findRelationConfig(
         objectType: string,
@@ -484,10 +576,6 @@ describe("single-wave node reads", () => {
       }),
     );
 
-    // Every instantaneous snapshot grants alice, and the old
-    // config-then-tuples order returned true; the overlapping
-    // waves pair pre-migration tuples with the post-migration
-    // config and deny.
     expect(
       await check(store, {
         objectType: "doc",
@@ -496,7 +584,7 @@ describe("single-wave node reads", () => {
         subjectType: "user",
         subjectId: "alice",
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 
