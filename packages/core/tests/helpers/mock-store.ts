@@ -19,13 +19,30 @@ export class MockTupleStore implements TupleStore {
   /** Store-call counts per method name, for round-trip assertions. */
   counts: Record<string, number> = {};
 
-  /** Reset all call counts (data is untouched). */
+  /**
+   * Ordered log of every store call with its arguments. `counts`
+   * is per-method only, so it cannot say *which* node was read —
+   * assertions about memoization need the identity, not the total.
+   */
+  calls: Array<{ method: string; args: unknown[] }> = [];
+
+  /** Reset all call counts and the call log (data is untouched). */
   resetCounts(): void {
     this.counts = {};
+    this.calls = [];
   }
 
-  private tally(method: string): void {
+  /** Count calls to `method` whose arguments start with `args`. */
+  callsWith(method: string, ...args: unknown[]): number {
+    return this.calls.filter(
+      (call) =>
+        call.method === method && args.every((arg, i) => call.args[i] === arg),
+    ).length;
+  }
+
+  private tally(method: string, ...args: unknown[]): void {
     this.counts[method] = (this.counts[method] ?? 0) + 1;
+    this.calls.push({ method, args });
   }
 
   async findDirectTuple(
@@ -35,7 +52,14 @@ export class MockTupleStore implements TupleStore {
     subjectType: string,
     subjectId: string,
   ): Promise<Tuple | null> {
-    this.tally("findDirectTuple");
+    this.tally(
+      "findDirectTuple",
+      objectType,
+      objectId,
+      relation,
+      subjectType,
+      subjectId,
+    );
     return (
       this.tuples.find(
         (t) =>
@@ -54,7 +78,7 @@ export class MockTupleStore implements TupleStore {
     objectId: string,
     relation: string,
   ): Promise<Tuple[]> {
-    this.tally("findUsersetTuples");
+    this.tally("findUsersetTuples", objectType, objectId, relation);
     return this.tuples.filter(
       (t) =>
         t.objectType === objectType &&
@@ -69,7 +93,7 @@ export class MockTupleStore implements TupleStore {
     objectId: string,
     relation: string,
   ): Promise<Tuple[]> {
-    this.tally("findTuplesByRelation");
+    this.tally("findTuplesByRelation", objectType, objectId, relation);
     return this.tuples.filter(
       (t) =>
         t.objectType === objectType &&
@@ -82,7 +106,7 @@ export class MockTupleStore implements TupleStore {
     objectType: string,
     relation: string,
   ): Promise<RelationConfig | null> {
-    this.tally("findRelationConfig");
+    this.tally("findRelationConfig", objectType, relation);
     return (
       this.relationConfigs.find(
         (c) => c.objectType === objectType && c.relation === relation,
@@ -93,7 +117,7 @@ export class MockTupleStore implements TupleStore {
   async findConditionDefinition(
     name: string,
   ): Promise<ConditionDefinition | null> {
-    this.tally("findConditionDefinition");
+    this.tally("findConditionDefinition", name);
     return this.conditionDefinitions.find((c) => c.name === name) ?? null;
   }
 
@@ -144,7 +168,7 @@ export class MockTupleStore implements TupleStore {
   }
 
   async listCandidateObjectIds(objectType: string): Promise<string[]> {
-    this.tally("listCandidateObjectIds");
+    this.tally("listCandidateObjectIds", objectType);
     const ids = new Set<string>();
     for (const t of this.tuples) {
       if (t.objectType === objectType) {
@@ -165,7 +189,7 @@ export class MockTupleStore implements TupleStore {
       subjectRelation: string | null;
     }>
   > {
-    this.tally("listDirectSubjects");
+    this.tally("listDirectSubjects", objectType, objectId, relation);
     return this.tuples
       .filter(
         (t) =>
@@ -197,7 +221,7 @@ export class MockTupleStore implements TupleStore {
     objectType: string,
     relation: string,
   ): Promise<boolean> {
-    this.tally("deleteRelationConfig");
+    this.tally("deleteRelationConfig", objectType, relation);
     const idx = this.relationConfigs.findIndex(
       (c) => c.objectType === objectType && c.relation === relation,
     );
@@ -223,7 +247,7 @@ export class MockTupleStore implements TupleStore {
   }
 
   async deleteConditionDefinition(name: string): Promise<boolean> {
-    this.tally("deleteConditionDefinition");
+    this.tally("deleteConditionDefinition", name);
     const idx = this.conditionDefinitions.findIndex((c) => c.name === name);
     if (idx >= 0) {
       this.conditionDefinitions.splice(idx, 1);

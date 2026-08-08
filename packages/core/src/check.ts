@@ -81,6 +81,64 @@ export const INTERSECTION_REDUCER: Reducer = {
   accumulate: (acc) => acc,
 };
 
+/** A settled node result, plus the depth it was resolved at. */
+interface MemoEntry {
+  result: CheckResult;
+  depth: number;
+}
+
+/**
+ * Request-scoped memo of settled node results, so a node reached
+ * by several routes is resolved once instead of once per route.
+ * The check graph is a DAG; without this it is explored as a tree.
+ *
+ * Nested rather than keyed on a joined string: ids are not
+ * charset-restricted, so `:` and `#` can occur inside one and a
+ * flat key could collide across different nodes
+ * (`caching-store.ts` sets the precedent). Note that the *path*
+ * key a few lines below does join — two guards in the same
+ * function keyed differently is a trap, so: the path key
+ * deliberately omits the subject, because the subject is constant
+ * for a whole request.
+ *
+ * The memo includes the subject anyway. It is redundant today for
+ * the same reason, but nothing in the types enforces it, and a
+ * future code path that varied the subject would make the path
+ * key merely over-eager while making the memo *wrong*.
+ */
+type MemoMap<V> = Map<string, V>;
+type NodeMemo = MemoMap<MemoMap<MemoMap<MemoMap<MemoMap<MemoEntry>>>>>;
+
+function memoGet(memo: NodeMemo, request: CheckRequest): MemoEntry | undefined {
+  return memo
+    .get(request.subjectType)
+    ?.get(request.subjectId)
+    ?.get(request.objectType)
+    ?.get(request.objectId)
+    ?.get(request.relation);
+}
+
+function memoLevel<V>(map: MemoMap<MemoMap<V>>, key: string): MemoMap<V> {
+  let level = map.get(key);
+  if (!level) {
+    level = new Map();
+    map.set(key, level);
+  }
+  return level;
+}
+
+function memoSet(
+  memo: NodeMemo,
+  request: CheckRequest,
+  entry: MemoEntry,
+): void {
+  const bySubjectId = memoLevel(memo, request.subjectType);
+  const byObjectType = memoLevel(bySubjectId, request.subjectId);
+  const byObjectId = memoLevel(byObjectType, request.objectType);
+  const byRelation = memoLevel(byObjectId, request.objectId);
+  byRelation.set(request.relation, entry);
+}
+
 /**
  * Recursive check algorithm with support for:
  * - Direct tuple check + wildcard
@@ -192,6 +250,7 @@ export async function check(
     maxBreadth,
     0,
     new Set(),
+    new Map(),
   );
   // The indeterminacy flag is internal; a cycle at the root is an
   // ordinary deny to the caller, as it is on OpenFGA's wire.
@@ -199,10 +258,11 @@ export async function check(
 }
 
 /**
- * Resolve one node of the check graph. Tracks the current
- * resolution path in `path` (keys of `objectType:objectId#relation`
- * — the subject is constant per request) so a revisit truncates
- * the subtree instead of recursing forever.
+ * Resolve one node of the check graph, with cycle detection and
+ * memoization. Tracks the current resolution path in `path` (keys
+ * of `objectType:objectId#relation` — the subject is constant per
+ * request) so a revisit truncates the subtree instead of recursing
+ * forever.
  */
 async function checkNode(
   store: TupleStore,
@@ -211,6 +271,7 @@ async function checkNode(
   maxBreadth: number,
   depth: number,
   path: ReadonlySet<string>,
+  memo: NodeMemo,
 ): Promise<CheckResult> {
   // `depth` counts dispatches already made, so the budget is spent
   // once it reaches maxDepth — OpenFGA errors on
@@ -225,9 +286,77 @@ async function checkNode(
     // operators above interpret for themselves.
     return CYCLE;
   }
+
+  // Consulted *after* the cycle guard: a node already on this path
+  // is a cycle no matter what some other branch concluded about it.
+  //
+  // Reuse is gated on depth. An entry recorded at depth D resolved
+  // without exhausting the budget, so it needed at most
+  // `maxDepth - D` levels; at any depth <= D there is at least that
+  // much headroom left, so the same subtree resolves the same way.
+  // Deeper is not safe: reusing it there could answer where a fresh
+  // resolution would have thrown DepthExceededError. Recording the
+  // greatest depth seen therefore widens the range of reuse.
+  const memoized = memoGet(memo, request);
+  if (memoized && depth <= memoized.depth) {
+    return memoized.result;
+  }
+
   const visited = new Set(path);
   visited.add(key);
 
+  const result = await resolveNode(
+    store,
+    request,
+    maxDepth,
+    maxBreadth,
+    depth,
+    visited,
+    memo,
+  );
+
+  // Only path-independent results are publishable.
+  //
+  // An indeterminate result is exactly the path-dependent case: the
+  // subtree was truncated because it looped back onto *this* path,
+  // and a different route to the same node would not have been. So
+  // the flag, which every operator propagates for the branch it
+  // returned, is the whole test — nothing else has to be inspected.
+  //
+  // What survives is sound by induction. A grant is a proof found,
+  // and a proof does not stop existing on another route. A `false`
+  // with no flag means every branch was refuted with no branch
+  // truncated and none errored — errors reject rather than resolve,
+  // and the two operators that swallow a sibling error do so only
+  // behind a definitive deny (an intersection operand that is
+  // false, an exclusion base that is false), which is itself
+  // path-independent.
+  //
+  // A throw is simply never recorded, which is also how a
+  // depth-exhausted subtree stays out: nothing is written, so the
+  // same node resolves normally if it is reached again shallower.
+  // Nothing in-flight is ever published, so unlike the store cache
+  // there is no promise to evict and no rejection to swallow.
+  if (!result.cycleDetected && (!memoized || depth > memoized.depth)) {
+    memoSet(memo, request, { result, depth });
+  }
+  return result;
+}
+
+/**
+ * The body of one node's resolution: steps 1-5, intersection, and
+ * exclusion. Split out of `checkNode` so the cycle guard, the memo
+ * lookup and the memo write bracket a single call.
+ */
+async function resolveNode(
+  store: TupleStore,
+  request: CheckRequest,
+  maxDepth: number,
+  maxBreadth: number,
+  depth: number,
+  visited: ReadonlySet<string>,
+  memo: NodeMemo,
+): Promise<CheckResult> {
   // Speculatively start the tuple batch so it overlaps the config
   // fetch: one round-trip wave per node instead of two. Some paths
   // never await it (config error, or an intersection without a
@@ -254,6 +383,7 @@ async function checkNode(
           maxBreadth,
           depth,
           visited,
+          memo,
         )
       : checkBase(
           store,
@@ -264,6 +394,7 @@ async function checkNode(
           maxBreadth,
           depth,
           visited,
+          memo,
         );
 
   // Exclusion applies on top of the base result — including on top
@@ -294,6 +425,7 @@ async function checkNode(
         maxBreadth,
         depth,
         visited,
+        memo,
       ),
     ]);
     if (
@@ -382,6 +514,7 @@ async function checkBase(
   maxBreadth: number,
   depth: number,
   path: ReadonlySet<string>,
+  memo: NodeMemo,
 ): Promise<CheckResult> {
   const [directTuple, wildcardTuple, usersetTuples] = await reads;
 
@@ -433,6 +566,7 @@ async function checkBase(
         maxBreadth,
         depth + 1,
         path,
+        memo,
       );
     });
   }
@@ -450,6 +584,7 @@ async function checkBase(
           maxBreadth,
           depth,
           path,
+          memo,
         ),
       );
     }
@@ -466,6 +601,7 @@ async function checkBase(
         maxBreadth,
         depth,
         path,
+        memo,
       ),
     );
   }
@@ -506,6 +642,7 @@ async function checkBase(
               maxBreadth,
               depth + 1,
               path,
+              memo,
             ),
           );
         }
@@ -530,6 +667,7 @@ async function checkIntersection(
   maxBreadth: number,
   depth: number,
   path: ReadonlySet<string>,
+  memo: NodeMemo,
 ): Promise<CheckResult> {
   const operands = config.intersection;
   // An intersection with no operands would resolve vacuously true,
@@ -557,6 +695,7 @@ async function checkIntersection(
           maxBreadth,
           depth,
           path,
+          memo,
         ),
       );
     } else if (operand.type === "computedUserset") {
@@ -569,6 +708,7 @@ async function checkIntersection(
           maxBreadth,
           depth,
           path,
+          memo,
         ),
       );
     } else {
@@ -596,6 +736,7 @@ async function checkIntersection(
               maxBreadth,
               depth + 1,
               path,
+              memo,
             ),
           );
         }
