@@ -57,7 +57,7 @@ const allowed = await fga.check({
 | `check(request)` | Check if a subject has a relation on an object |
 | `addTuple(request)` | Insert or update a relationship tuple |
 | `removeTuple(request)` | Delete a relationship tuple |
-| `listObjects(objectType, relation, subjectType, subjectId, context?)` | List object IDs the subject can access; `context` is forwarded to each check |
+| `listObjects(objectType, relation, subjectType, subjectId, context?)` | List object IDs the subject can access, in candidate order; `context` is forwarded to each check |
 | `listSubjects(objectType, objectId, relation)` | List direct subjects for an object + relation (no expansion) |
 | `writeRelationConfig(config)` | Insert or update a relation configuration |
 | `deleteRelationConfig(objectType, relation)` | Delete a relation configuration |
@@ -164,6 +164,32 @@ depends on completion order — the same nondeterminism OpenFGA
 has. Branches still queued when a node settles are never
 started. `maxBreadth` must be an integer >= 1 or `Infinity`;
 anything else throws `TsfgaError`.
+
+`maxBreadth` also bounds how many `listObjects` candidates are
+checked at once — the same knob deliberately, following
+upstream, whose ListObjects worker pool is sized at
+`1 + resolveNodeBreadthLimit`.
+
+## listObjects
+
+Candidates come from `listCandidateObjectIds`, which is only a
+pre-filter: every candidate still goes through a full `check`.
+All of those checks share one relation-config cache and one node
+memo for the whole call, so a subtree common to many objects —
+the folder behind a thousand documents — is resolved once rather
+than once per object, and each relation config is read once
+rather than once per object.
+
+The returned array is in candidate order, not completion order.
+That is a tsfga determinism choice rather than parity; upstream
+streams objects in whatever order its pool finishes them.
+
+An error in any candidate fails the whole call, `check`'s errors
+included — `DepthExceededError` in one object does not silently
+drop that object from the list, matching upstream. Which error
+surfaces is deterministic: it is the first failing candidate in
+*candidate* order, not the first to fail in wall-clock order. No
+candidate after a failure is started.
 
 ## Contextual tuples
 

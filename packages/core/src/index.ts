@@ -1,4 +1,5 @@
 import { check } from "./check.ts";
+import { listObjects } from "./list-objects.ts";
 import type { TupleStore } from "./store-interface.ts";
 import { validateTupleWrite } from "./tuple-validation.ts";
 import type {
@@ -31,6 +32,15 @@ export interface TsfgaClient {
    * check. Candidates come from `listCandidateObjectIds`
    * (pre-filter); the optional `context` is forwarded to each
    * per-object check for CEL condition evaluation.
+   *
+   * Candidates are checked concurrently, bounded by `maxBreadth`,
+   * and share one relation-config cache and one node memo for the
+   * whole call. The result is in candidate order.
+   *
+   * @throws whatever `check` throws for the first failing
+   *   candidate in candidate order — including
+   *   `DepthExceededError`, which aborts the whole call rather
+   *   than dropping that one object.
    */
   listObjects(
     objectType: string,
@@ -75,26 +85,22 @@ export function createTsfga(
       return store.deleteTuple(request);
     },
 
-    async listObjects(
+    listObjects(
       objectType: string,
       relation: string,
       subjectType: string,
       subjectId: string,
       context?: Record<string, unknown>,
     ): Promise<string[]> {
-      const candidateIds = await store.listCandidateObjectIds(objectType);
-      const results: string[] = [];
-      for (const objectId of candidateIds) {
-        const allowed = await check(
-          store,
-          { objectType, objectId, relation, subjectType, subjectId, context },
-          options,
-        );
-        if (allowed) {
-          results.push(objectId);
-        }
-      }
-      return results;
+      return listObjects(
+        store,
+        objectType,
+        relation,
+        subjectType,
+        subjectId,
+        context,
+        options,
+      );
     },
 
     listSubjects(

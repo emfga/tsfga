@@ -57,8 +57,11 @@ tsfga/
 │   │   ├── src/
 │   │   │   ├── index.ts             barrel: createTsfga() + re-exports
 │   │   │   ├── check.ts             5-step recursive check algorithm
+│   │   │   ├── list-objects.ts      listObjects candidate pool
 │   │   │   ├── conditions.ts        CEL condition evaluation
+│   │   │   ├── caching-store.ts     request-scoped config cache
 │   │   │   ├── contextual-store.ts  ContextualTupleStore wrapper
+│   │   │   ├── tuple-validation.ts  shared write/contextual checks
 │   │   │   ├── types.ts             All shared types
 │   │   │   ├── errors.ts            Error hierarchy
 │   │   │   └── store-interface.ts   TupleStore interface definition

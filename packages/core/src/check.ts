@@ -196,12 +196,45 @@ function memoSet(
  * branch's error surfaces depends on completion order — the same
  * nondeterminism OpenFGA has.
  */
+// `async` is load-bearing: `createCheckScope` validates
+// `maxBreadth` and throws, and an option error must reach the
+// caller as a rejection like every other check failure, not as a
+// synchronous throw past their `.catch`.
 export async function check(
   store: TupleStore,
   request: CheckRequest,
   options: CheckOptions = {},
 ): Promise<boolean> {
-  const maxDepth = options.maxDepth ?? 25;
+  return runCheck(createCheckScope(store, options), request);
+}
+
+/**
+ * The state one or more checks share: resolved limits, a caching
+ * store, and the node memo. A single check owns a scope of its
+ * own; `listObjects` builds one and runs every candidate in it,
+ * which is what makes the config cache and the memo span the whole
+ * call instead of being rebuilt per candidate.
+ *
+ * A scope is only sound across requests that resolve over the same
+ * graph. The memo keys on subject and node but *not* on the CEL
+ * `context`, and the caching store keys on nothing at all, so
+ * every request sharing a scope must carry the same `context`.
+ * Contextual tuples are the other half of that constraint and
+ * `runCheck` handles them itself, below.
+ *
+ * Internal. Not re-exported from `index.ts`.
+ */
+export interface CheckScope {
+  readonly store: TupleStore;
+  readonly maxDepth: number;
+  readonly maxBreadth: number;
+  readonly memo: NodeMemo;
+}
+
+export function createCheckScope(
+  store: TupleStore,
+  options: CheckOptions = {},
+): CheckScope {
   const maxBreadth = options.maxBreadth ?? 10;
   // The negated comparison also rejects NaN, which `< 1` misses.
   // Fractional values would admit one more branch than stated
@@ -216,20 +249,33 @@ export async function check(
     );
   }
 
-  // Request-scoped cache for relation configs and condition
-  // definitions: static per model, but read at every node.
-  const cachingStore = new CachingTupleStore(store);
+  return {
+    // Cache for relation configs and condition definitions: static
+    // per model, but read at every node.
+    store: new CachingTupleStore(store),
+    maxDepth: options.maxDepth ?? 25,
+    maxBreadth,
+    memo: new Map(),
+  };
+}
+
+/** Run one check in a scope. Internal; see `CheckScope`. */
+export async function runCheck(
+  scope: CheckScope,
+  request: CheckRequest,
+): Promise<boolean> {
+  let store = scope.store;
+  let memo = scope.memo;
 
   // Wrap store with contextual tuples for the whole request.
   // Contextual tuples must pass the same validation as addTuple.
-  let effectiveStore: TupleStore = cachingStore;
   if (request.contextualTuples?.length) {
     // Validate all contextual tuples concurrently; surface the
     // first failure in tuple order (not completion order) so the
     // thrown error is deterministic.
     const validations = await Promise.allSettled(
       request.contextualTuples.map((tuple) =>
-        validateTupleWrite(cachingStore, tuple),
+        validateTupleWrite(scope.store, tuple),
       ),
     );
     for (const validation of validations) {
@@ -237,20 +283,22 @@ export async function check(
         throw validation.reason;
       }
     }
-    effectiveStore = new ContextualTupleStore(
-      cachingStore,
-      request.contextualTuples,
-    );
+    store = new ContextualTupleStore(scope.store, request.contextualTuples);
+    // These tuples exist for this request only, so results resolved
+    // over them are not shareable — and results already in the
+    // scope's memo were resolved over a graph missing them. Neither
+    // direction is safe, so this request memoizes on its own.
+    memo = new Map();
   }
 
   const result = await checkNode(
-    effectiveStore,
+    store,
     request,
-    maxDepth,
-    maxBreadth,
+    scope.maxDepth,
+    scope.maxBreadth,
     0,
     new Set(),
-    new Map(),
+    memo,
   );
   // The indeterminacy flag is internal; a cycle at the root is an
   // ordinary deny to the caller, as it is on OpenFGA's wire.

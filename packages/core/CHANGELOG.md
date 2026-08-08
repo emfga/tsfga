@@ -52,6 +52,25 @@ releases may contain breaking changes).
   resolved. Long rewrite ladders are still bounded — by cycle
   detection, since one object has a finite set of relations.
 
+- **`listObjects` checks its candidates concurrently and shares
+  one request scope across them.** Each candidate used to get its
+  own relation-config cache and its own node memo, so N documents
+  behind one folder re-read every config N times and re-resolved
+  the shared subtree N times; they now span the whole call. The
+  serial loop is also gone — candidates run with at most
+  `maxBreadth` in flight, the same bound upstream uses for its
+  ListObjects pool. On a 200-candidate benchmark where 195 share
+  a three-node subtree this is 2361 store reads down to 852, and
+  395 config reads down to 2.
+
+  Two behaviors are now specified rather than incidental. The
+  returned array is in candidate order, which concurrency would
+  otherwise have scrambled. And when several candidates fail, the
+  error raised is the first failing candidate in *candidate*
+  order, not the first to fail in time — so a broken model
+  reports the same error on every run. As before, any error fails
+  the whole call rather than dropping the offending object.
+
 ## 0.3.1 — 2026-08
 
 Maintenance release. No changes to the published code — the
