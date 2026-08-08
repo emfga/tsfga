@@ -447,6 +447,15 @@ export async function check(
   cost none, matching OpenFGA, which increments resolution depth only
   in `dispatch`. Unbounded rewrite recursion is prevented by the cycle
   path, not by the depth budget
+- **A cycle is not an error.** Revisiting a node on the resolution path
+  resolves `false`; only depth exhaustion throws. Internally the node
+  result is `{allowed, cycleDetected}`, because the set operators read
+  a cycle-truncated `false` differently from a plain one — on the
+  subtract side of `excludedBy` a cycle *denies*, so collapsing it to
+  `false` would fail open. The flag is internal, exactly as OpenFGA's
+  `CycleDetected` is absent from the wire response. See
+  `packages/core/README.md` for the table and for the one known
+  divergence (OpenFGA's recursive-relation resolvers)
 
 ## CEL Conditions (`packages/core/src/conditions.ts`)
 

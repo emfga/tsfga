@@ -62,6 +62,9 @@ bun run turbo:test:conformance
 - `deep-rewrite` — a rewrite ladder deeper than the
   default depth limit of 25; pins that rewrites of the
   same object cost no resolution depth
+- `cycles` — loops in the tuple graph; pins that a cycle
+  denies rather than erroring, and that it denies on the
+  subtract side of a `but not`
 - `condition-error-siblings` — how a condition error on
   one branch interacts with its siblings
 

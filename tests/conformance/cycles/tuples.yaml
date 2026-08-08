@@ -1,0 +1,55 @@
+# The cycle lives in the tuples, not the model: OpenFGA's
+# typesystem rejects a relation whose rewrite is self-referencing
+# through computed usersets ("an authorization model cannot
+# contain a cycle"), so a model-level cycle can never be written
+# to a real store.
+#
+# The loop alternates member/owner on purpose. A loop on a single
+# self-referencing relation (`member: [user, group#member]`) is
+# served by OpenFGA's recursive-relation resolver, which walks the
+# reachable set iteratively and reports a definitive `false` with
+# no cycle flag. Alternating two relations is not a recognized
+# recursive shape, so it falls through to the ordinary resolver
+# and the cycle flag is actually set.
+#
+# document:1#cyclic -> group:loopa#member -> group:loopb#owner
+#                   -> group:loopa#member  (loop)
+- user: group:loopa#member
+  relation: cyclic
+  object: document:1
+- user: group:loopb#owner
+  relation: member
+  object: group:loopa
+- user: group:loopa#member
+  relation: owner
+  object: group:loopb
+
+# The recursive-shape loop, kept for the cases where both engines
+# agree regardless of whether the flag is set.
+- user: recursive_group:ra#member
+  relation: recursive_cyclic
+  object: document:1
+- user: recursive_group:rb#member
+  relation: member
+  object: recursive_group:ra
+- user: recursive_group:ra#member
+  relation: member
+  object: recursive_group:rb
+
+# anne sits outside every loop, so resolving `cyclic` for her
+# walks the whole loop and comes back indeterminate.
+- user: user:anne
+  relation: granted
+  object: document:1
+- user: user:anne
+  relation: base
+  object: document:1
+
+# carl is a real member of a looping group, so `cyclic` resolves
+# true for him despite the loop.
+- user: user:carl
+  relation: member
+  object: group:loopa
+- user: user:carl
+  relation: base
+  object: document:1

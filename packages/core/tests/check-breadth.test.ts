@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { check, resolveShortCircuit } from "../src/check.ts";
+import {
+  type CheckResult,
+  check,
+  INTERSECTION_REDUCER,
+  resolveShortCircuit,
+  UNION_REDUCER,
+} from "../src/check.ts";
 import { ConditionNotFoundError, TsfgaError } from "../src/errors.ts";
 import type {
   ConditionDefinition,
@@ -516,49 +522,105 @@ describe("resolveShortCircuit hardening", () => {
 
   class SyncBoom extends Error {}
 
+  const grant = async (): Promise<CheckResult> => ({
+    allowed: true,
+    cycleDetected: false,
+  });
+  const deny = async (): Promise<CheckResult> => ({
+    allowed: false,
+    cycleDetected: false,
+  });
+  const thrower = (): Promise<CheckResult> => {
+    throw new SyncBoom("sync boom");
+  };
+
   test("array holes cannot stall the combinator", async () => {
     // Before hardening, a hole consumed on the refill path could
     // exhaust the array with nothing in flight and never settle.
-    const handlers: Array<() => Promise<boolean>> = [];
-    handlers[0] = async () => false;
-    handlers[2] = async () => false;
-    expect(await resolveShortCircuit(handlers, 1, true)).toBe(false);
+    const handlers: Array<() => Promise<CheckResult>> = [];
+    handlers[0] = deny;
+    handlers[2] = deny;
+    expect(
+      (await resolveShortCircuit(handlers, 1, UNION_REDUCER)).allowed,
+    ).toBe(false);
 
-    const onlyHoles: Array<() => Promise<boolean>> = [];
+    const onlyHoles: Array<() => Promise<CheckResult>> = [];
     onlyHoles.length = 3;
-    expect(await resolveShortCircuit(onlyHoles, 2, true)).toBe(false);
-    expect(await resolveShortCircuit([], 1, false)).toBe(true);
+    expect(
+      (await resolveShortCircuit(onlyHoles, 2, UNION_REDUCER)).allowed,
+    ).toBe(false);
+    expect(
+      (await resolveShortCircuit([], 1, INTERSECTION_REDUCER)).allowed,
+    ).toBe(true);
   });
 
   test("synchronously-throwing handler counts as a rejected branch", async () => {
     // Before hardening, a sync throw launched from the refill path
     // leaked its slot (permanent active over-count -> stall) and
     // escaped as an unhandled rejection.
-    const thrower = (): Promise<boolean> => {
-      throw new SyncBoom("sync boom");
-    };
-
     const laterTrueWins = await resolveShortCircuit(
-      [async () => false, thrower, async () => true],
+      [deny, thrower, grant],
       1,
-      true,
+      UNION_REDUCER,
     );
-    expect(laterTrueWins).toBe(true);
+    expect(laterTrueWins.allowed).toBe(true);
 
     await expect(
-      resolveShortCircuit([async () => false, thrower], 1, true),
+      resolveShortCircuit([deny, thrower], 1, UNION_REDUCER),
     ).rejects.toBeInstanceOf(SyncBoom);
 
     // Intersection dual: a sync throw with no definitive false
     // rejects; a definitive false still beats it.
     await expect(
-      resolveShortCircuit([async () => true, thrower], 1, false),
+      resolveShortCircuit([grant, thrower], 1, INTERSECTION_REDUCER),
     ).rejects.toBeInstanceOf(SyncBoom);
     const falseBeatsThrow = await resolveShortCircuit(
-      [thrower, async () => false],
+      [thrower, deny],
       1,
-      false,
+      INTERSECTION_REDUCER,
     );
-    expect(falseBeatsThrow).toBe(false);
+    expect(falseBeatsThrow.allowed).toBe(false);
+  });
+
+  test("cycle flag folds per the reducer, not as a plain false", async () => {
+    // The two reducers differ exactly here, so pin it directly on
+    // the combinator rather than only through check().
+    const cycle = async (): Promise<CheckResult> => ({
+      allowed: false,
+      cycleDetected: true,
+    });
+
+    // Union: a cycle among all-false branches makes the false
+    // indeterminate; a grant anywhere clears it again.
+    const unionCycled = await resolveShortCircuit(
+      [deny, cycle],
+      1,
+      UNION_REDUCER,
+    );
+    expect(unionCycled.allowed).toBe(false);
+    expect(unionCycled.cycleDetected).toBe(true);
+
+    const unionGranted = await resolveShortCircuit(
+      [cycle, grant],
+      1,
+      UNION_REDUCER,
+    );
+    expect(unionGranted.allowed).toBe(true);
+    expect(unionGranted.cycleDetected).toBe(false);
+
+    // Intersection: a cycle decides the whole operand set, and
+    // carries its flag out.
+    const intersected = await resolveShortCircuit(
+      [grant, cycle, grant],
+      1,
+      INTERSECTION_REDUCER,
+    );
+    expect(intersected.allowed).toBe(false);
+    expect(intersected.cycleDetected).toBe(true);
+
+    // An error still outranks a cycle-flagged false in a union.
+    await expect(
+      resolveShortCircuit([cycle, thrower], 1, UNION_REDUCER),
+    ).rejects.toBeInstanceOf(SyncBoom);
   });
 });

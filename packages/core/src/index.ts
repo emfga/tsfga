@@ -15,9 +15,10 @@ export interface TsfgaClient {
    * Check whether a subject has a relation on an object.
    *
    * @throws DepthExceededError when the recursion budget
-   *   (`maxDepth`, default 25) is exhausted or a cycle is detected
-   *   in the resolution path. Exhaustion never resolves to `false`
-   *   — a truncated exclusion branch must not grant access.
+   *   (`maxDepth`, default 25) is exhausted. Exhaustion never
+   *   resolves to `false` — a truncated exclusion branch must not
+   *   grant access. A cycle in the resolution path is not an
+   *   error: it resolves `false`, matching OpenFGA.
    * @throws RelationConfigNotFoundError, InvalidSubjectTypeError,
    *   or UsersetNotAllowedError when a contextual tuple fails the
    *   same validation `addTuple` applies.

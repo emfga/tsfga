@@ -15,6 +15,73 @@ import type {
 type NodeReads = readonly [Tuple | null, Tuple | null, Tuple[]];
 
 /**
+ * Internal result of resolving one node.
+ *
+ * `cycleDetected` marks a `false` that is an *absence of an
+ * answer* rather than a denial: the resolution path looped back
+ * on itself and the subtree was truncated. It matters because the
+ * set operators treat it differently from a plain `false` — most
+ * sharply on the subtract side of an exclusion, where a cycle
+ * denies rather than failing to exclude.
+ *
+ * It stays internal. Upstream's equivalent lives in
+ * `ResolveCheckResponseMetadata`, reaches the command layer's
+ * `CheckResult`, and is not a field of the wire `CheckResponse` —
+ * so it is not exposed on tsfga's `check()` return either.
+ *
+ * Never mutated; the shared constants below are safe to alias.
+ */
+export interface CheckResult {
+  allowed: boolean;
+  cycleDetected: boolean;
+}
+
+const DENIED: CheckResult = { allowed: false, cycleDetected: false };
+const GRANTED: CheckResult = { allowed: true, cycleDetected: false };
+const CYCLE: CheckResult = { allowed: false, cycleDetected: true };
+
+/**
+ * How a set operator folds its branches. Union and intersection
+ * are not quite duals once cycles are in play, so each supplies
+ * its own rule rather than sharing a `shortCircuitOn` flag.
+ */
+export interface Reducer {
+  /** Seed, and the result if every branch ran without deciding. */
+  readonly initial: CheckResult;
+  /** Non-null ends the node immediately with that result. */
+  decide(result: CheckResult): CheckResult | null;
+  /** Fold a non-deciding branch into the running result. */
+  accumulate(acc: CheckResult, result: CheckResult): CheckResult;
+}
+
+/**
+ * Union: the first grant wins and is returned verbatim, so a
+ * truncated sibling is forgotten. Otherwise a cycle anywhere makes
+ * the whole `false` indeterminate. An errored branch neither
+ * decides nor contributes a flag, but does beat a cycle-`false` on
+ * exhaustion — `true` > error > cycle > `false`.
+ */
+export const UNION_REDUCER: Reducer = {
+  initial: DENIED,
+  decide: (result) => (result.allowed ? result : null),
+  accumulate: (acc, result) => (result.cycleDetected ? CYCLE : acc),
+};
+
+/**
+ * Intersection: a cycle is as fatal as a plain `false`, since an
+ * operand that could not be resolved cannot be shown to hold. The
+ * deciding operand's flag rides out with the denial.
+ */
+export const INTERSECTION_REDUCER: Reducer = {
+  initial: GRANTED,
+  decide: (result) =>
+    result.cycleDetected || !result.allowed
+      ? { allowed: false, cycleDetected: result.cycleDetected }
+      : null,
+  accumulate: (acc) => acc,
+};
+
+/**
  * Recursive check algorithm with support for:
  * - Direct tuple check + wildcard
  * - Userset expansion
@@ -26,10 +93,30 @@ type NodeReads = readonly [Tuple | null, Tuple | null, Tuple[]];
  *
  * Error semantics:
  * - Throws DepthExceededError when the recursion budget
- *   (`options.maxDepth`, default 25) is exhausted or a cycle is
- *   detected in the resolution path. Exhaustion is never converted
- *   to `false`: inside an exclusion or intersection branch that
- *   would fail open.
+ *   (`options.maxDepth`, default 25) is exhausted. Exhaustion is
+ *   never converted to `false`: inside an exclusion or
+ *   intersection branch that would fail open.
+ * - A cycle in the resolution path is *not* an error. The looping
+ *   subtree resolves `false` carrying an internal indeterminacy
+ *   flag, matching OpenFGA, which errors only on depth exhaustion
+ *   and returns `Allowed:false` with `CycleDetected:true` for a
+ *   cycle. The flag is not merely a `false`: on the subtract side
+ *   of an exclusion it denies, so `base:true butnot sub:cycle` is
+ *   `false` rather than a grant.
+ * - Within union-style resolution (steps 1-5), a branch that
+ *   resolves `true` wins even if a sibling branch threw
+ *   DepthExceededError or was truncated by a cycle. If no branch
+ *   resolves `true` and at least one errored, the error
+ *   propagates.
+ * - Exclusion and intersection fail closed — an errored branch
+ *   never counts as satisfied or as not-excluded — but a
+ *   definitive deny short-circuits past a sibling error, matching
+ *   OpenFGA: an intersection operand resolving `false`, or an
+ *   exclusion branch resolving `true`, denies even when the other
+ *   branch errored.
+ * - Contextual tuples are validated against relation configs
+ *   exactly like `addTuple` (RelationConfigNotFoundError,
+ *   InvalidSubjectTypeError, UsersetNotAllowedError).
  *
  * Depth accounting: only steps that move to a *different object*
  * — userset expansion and tuple-to-userset expansion — cost
@@ -41,19 +128,6 @@ type NodeReads = readonly [Tuple | null, Tuple | null, Tuple[]];
  * that "we don't want to increase resolution depth". Rewrite
  * recursion is bounded by the cycle path instead: the relation
  * set of one object is finite, so it always terminates.
- * - Within union-style resolution (steps 1-5), a branch that
- *   resolves `true` wins even if a sibling branch threw
- *   DepthExceededError. If no branch resolves `true` and at least
- *   one errored, the error propagates.
- * - Exclusion and intersection fail closed — an errored branch
- *   never counts as satisfied or as not-excluded — but a
- *   definitive deny short-circuits past a sibling error, matching
- *   OpenFGA: an intersection operand resolving `false`, or an
- *   exclusion branch resolving `true`, denies even when the other
- *   branch errored.
- * - Contextual tuples are validated against relation configs
- *   exactly like `addTuple` (RelationConfigNotFoundError,
- *   InvalidSubjectTypeError, UsersetNotAllowedError).
  *
  * Concurrency: branches of one resolution node run concurrently,
  * bounded by `options.maxBreadth` (default 10, matching OpenFGA's
@@ -111,14 +185,24 @@ export async function check(
     );
   }
 
-  return checkNode(effectiveStore, request, maxDepth, maxBreadth, 0, new Set());
+  const result = await checkNode(
+    effectiveStore,
+    request,
+    maxDepth,
+    maxBreadth,
+    0,
+    new Set(),
+  );
+  // The indeterminacy flag is internal; a cycle at the root is an
+  // ordinary deny to the caller, as it is on OpenFGA's wire.
+  return result.allowed;
 }
 
 /**
  * Resolve one node of the check graph. Tracks the current
  * resolution path in `path` (keys of `objectType:objectId#relation`
- * — the subject is constant per request) so cycles throw
- * DepthExceededError instead of silently resolving.
+ * — the subject is constant per request) so a revisit truncates
+ * the subtree instead of recursing forever.
  */
 async function checkNode(
   store: TupleStore,
@@ -127,7 +211,7 @@ async function checkNode(
   maxBreadth: number,
   depth: number,
   path: ReadonlySet<string>,
-): Promise<boolean> {
+): Promise<CheckResult> {
   // `depth` counts dispatches already made, so the budget is spent
   // once it reaches maxDepth — OpenFGA errors on
   // `Depth == maxResolutionDepth`, before resolving the node.
@@ -137,7 +221,9 @@ async function checkNode(
 
   const key = `${request.objectType}:${request.objectId}#${request.relation}`;
   if (path.has(key)) {
-    throw new DepthExceededError(`cycle detected at ${key}`);
+    // Not an error: an indeterminate `false` that the set
+    // operators above interpret for themselves.
+    return CYCLE;
   }
   const visited = new Set(path);
   visited.add(key);
@@ -157,7 +243,7 @@ async function checkNode(
   );
 
   // Base resolution: intersection replaces steps 1-5 when present
-  const resolveBase = (): Promise<boolean> =>
+  const resolveBase = (): Promise<CheckResult> =>
     config?.intersection
       ? checkIntersection(
           store,
@@ -187,6 +273,14 @@ async function checkNode(
   // branch denies even when the base errored. Errors otherwise
   // fail closed: a base grant with an errored exclusion branch
   // propagates the error rather than granting.
+  //
+  // The two sides read a cycle differently, and the asymmetry is
+  // the whole reason indeterminacy is tracked rather than folded
+  // into `false`. On the base side a cycle behaves like `false` —
+  // nothing was established, so nothing is granted. On the
+  // subtract side it behaves like `true` — the exclusion could not
+  // be ruled out, so access is denied. Treating a cycle as a plain
+  // `false` would grant `base:true butnot sub:cycle`, a fail-open.
   if (config?.excludedBy) {
     const excludedBy = config.excludedBy;
     const [baseResult, exclusionResult] = await Promise.allSettled([
@@ -202,19 +296,28 @@ async function checkNode(
         visited,
       ),
     ]);
-    if (exclusionResult.status === "fulfilled" && exclusionResult.value) {
-      return false;
+    if (
+      exclusionResult.status === "fulfilled" &&
+      (exclusionResult.value.cycleDetected || exclusionResult.value.allowed)
+    ) {
+      return {
+        allowed: false,
+        cycleDetected: exclusionResult.value.cycleDetected,
+      };
+    }
+    if (
+      baseResult.status === "fulfilled" &&
+      (baseResult.value.cycleDetected || !baseResult.value.allowed)
+    ) {
+      return { allowed: false, cycleDetected: baseResult.value.cycleDetected };
     }
     if (baseResult.status === "rejected") {
       throw baseResult.reason;
     }
-    if (!baseResult.value) {
-      return false;
-    }
     if (exclusionResult.status === "rejected") {
       throw exclusionResult.reason;
     }
-    return true;
+    return GRANTED;
   }
 
   return resolveBase();
@@ -253,6 +356,21 @@ function readNodeTuples(
 }
 
 /**
+ * A tuple's condition as a union branch. Condition evaluation can
+ * only grant or deny — it never reaches another node, so it can
+ * never be indeterminate.
+ */
+async function evaluateCondition(
+  store: TupleStore,
+  tuple: Tuple,
+  context: Record<string, unknown> | undefined,
+): Promise<CheckResult> {
+  return (await evaluateTupleCondition(store, tuple, context))
+    ? GRANTED
+    : DENIED;
+}
+
+/**
  * Base check: steps 1-5 without exclusion or intersection handling.
  */
 async function checkBase(
@@ -264,33 +382,31 @@ async function checkBase(
   maxBreadth: number,
   depth: number,
   path: ReadonlySet<string>,
-): Promise<boolean> {
+): Promise<CheckResult> {
   const [directTuple, wildcardTuple, usersetTuples] = await reads;
 
   // Steps 1/1b: an unconditioned direct or wildcard hit answers
   // immediately, before any sub-check is launched
   if (directTuple && !directTuple.conditionName) {
-    return true;
+    return GRANTED;
   }
   if (wildcardTuple && !wildcardTuple.conditionName) {
-    return true;
+    return GRANTED;
   }
 
   // Collect all sub-check handlers for concurrent resolution
-  const handlers: Array<() => Promise<boolean>> = [];
+  const handlers: Array<() => Promise<CheckResult>> = [];
 
   // Conditioned direct/wildcard hits race as union branches so
   // their condition evaluation (a possible condition-definition
   // fetch) does not block the fanout below. Union semantics
   // apply: a sibling `true` beats a condition error.
   if (directTuple) {
-    handlers.push(() =>
-      evaluateTupleCondition(store, directTuple, request.context),
-    );
+    handlers.push(() => evaluateCondition(store, directTuple, request.context));
   }
   if (wildcardTuple) {
     handlers.push(() =>
-      evaluateTupleCondition(store, wildcardTuple, request.context),
+      evaluateCondition(store, wildcardTuple, request.context),
     );
   }
 
@@ -301,7 +417,7 @@ async function checkBase(
     const relation = userset.subjectRelation;
     handlers.push(async () => {
       if (!(await evaluateTupleCondition(store, userset, request.context))) {
-        return false;
+        return DENIED;
       }
       return checkNode(
         store,
@@ -371,7 +487,7 @@ async function checkBase(
       );
 
       // Collect all linked-tuple check handlers
-      const ttuHandlers: Array<() => Promise<boolean>> = [];
+      const ttuHandlers: Array<() => Promise<CheckResult>> = [];
       for (const [i, { computedUserset }] of ttuEntries.entries()) {
         const linkedTuples = linkedResults[i] ?? [];
         for (const linked of linkedTuples) {
@@ -414,7 +530,7 @@ async function checkIntersection(
   maxBreadth: number,
   depth: number,
   path: ReadonlySet<string>,
-): Promise<boolean> {
+): Promise<CheckResult> {
   const operands = config.intersection;
   // An intersection with no operands would resolve vacuously true,
   // granting access to every subject on a malformed config.
@@ -427,7 +543,7 @@ async function checkIntersection(
     );
   }
 
-  const handlers: Array<() => Promise<boolean>> = [];
+  const handlers: Array<() => Promise<CheckResult>> = [];
 
   for (const operand of operands) {
     if (operand.type === "direct") {
@@ -463,7 +579,7 @@ async function checkIntersection(
           request.objectId,
           operand.tupleset,
         );
-        const ttuHandlers: Array<() => Promise<boolean>> = [];
+        const ttuHandlers: Array<() => Promise<CheckResult>> = [];
         for (const linked of linkedTuples) {
           ttuHandlers.push(() =>
             checkNode(
@@ -493,41 +609,46 @@ async function checkIntersection(
 
 /**
  * Run handlers with at most `maxBreadth` in flight, short-circuit
- * on first true. A `true` result wins even when sibling branches
- * rejected (e.g. with DepthExceededError). When no handler resolves
- * true, rejects with the first error if any handler rejected;
- * resolves false otherwise. Handlers still queued when the union
- * settles are never started.
+ * on the first grant. A grant wins even when sibling branches
+ * rejected (e.g. with DepthExceededError) or were truncated by a
+ * cycle. When no handler grants, rejects with the first error if
+ * any handler rejected; otherwise resolves `false`, flagged
+ * indeterminate if any branch hit a cycle. Handlers still queued
+ * when the union settles are never started.
  */
 function resolveUnion(
-  handlers: Array<() => Promise<boolean>>,
+  handlers: Array<() => Promise<CheckResult>>,
   maxBreadth: number,
-): Promise<boolean> {
-  return resolveShortCircuit(handlers, maxBreadth, true);
+): Promise<CheckResult> {
+  return resolveShortCircuit(handlers, maxBreadth, UNION_REDUCER);
 }
 
 /**
  * Run handlers with at most `maxBreadth` in flight, short-circuit
- * on first false — a definitive false wins even when a sibling
- * operand errored, matching OpenFGA's intersection. Resolves true
- * when all return true. When no operand resolves false and at
- * least one errored, rejects with the first error (fail closed:
- * an errored operand never counts as satisfied). Handlers still
- * queued when the intersection settles are never started.
+ * on the first operand that fails to hold — a definitive false, or
+ * a cycle-truncated operand, wins even when a sibling operand
+ * errored, matching OpenFGA's intersection. Resolves true when all
+ * operands hold. When none fails and at least one errored, rejects
+ * with the first error (fail closed: an errored operand never
+ * counts as satisfied). Handlers still queued when the
+ * intersection settles are never started.
  */
 function resolveIntersection(
-  handlers: Array<() => Promise<boolean>>,
+  handlers: Array<() => Promise<CheckResult>>,
   maxBreadth: number,
-): Promise<boolean> {
-  return resolveShortCircuit(handlers, maxBreadth, false);
+): Promise<CheckResult> {
+  return resolveShortCircuit(handlers, maxBreadth, INTERSECTION_REDUCER);
 }
 
 /**
- * Bounded pull-model combinator shared by union and intersection —
- * duals of each other: union short-circuits on `true` and resolves
- * `false` on exhaustion; intersection short-circuits on `false`
- * and resolves `true` on exhaustion. Mirrors OpenFGA's reducers,
- * which take the breadth limit as their concurrency bound.
+ * Bounded pull-model combinator shared by union and intersection.
+ * They are near-duals — union short-circuits on a grant and
+ * resolves `false` on exhaustion, intersection short-circuits on a
+ * non-grant and resolves `true` — but not exactly, because a
+ * cycle-truncated branch decides an intersection and does not
+ * decide a union. The `reducer` supplies that difference. Mirrors
+ * OpenFGA's reducers, which take the breadth limit as their
+ * concurrency bound.
  *
  * Handlers launch in array order while fewer than `maxBreadth` are
  * in flight; each settlement pulls the next queued handler. Once
@@ -535,32 +656,34 @@ function resolveIntersection(
  * ignored on completion, and their rejections are consumed by the
  * callbacks attached at launch — no unhandled rejections. On
  * exhaustion with no decisive result, one recorded error (the
- * first by completion order) propagates; otherwise the
- * non-short-circuit value resolves. Which branch's error surfaces
- * when several fail is scheduling-dependent, as it is in OpenFGA
- * (whose union keeps the last-completed error instead).
+ * first by completion order) propagates — errors outrank the
+ * accumulated value, so a cycle-flagged `false` never masks a
+ * failure. Which branch's error surfaces when several fail is
+ * scheduling-dependent, as it is in OpenFGA (whose union keeps the
+ * last-completed error instead).
  *
  * Exported for direct unit tests only; not part of the public
  * package API (not re-exported from index.ts).
  */
 export function resolveShortCircuit(
-  handlers: Array<() => Promise<boolean>>,
+  handlers: Array<() => Promise<CheckResult>>,
   maxBreadth: number,
-  shortCircuitOn: boolean,
-): Promise<boolean> {
+  reducer: Reducer,
+): Promise<CheckResult> {
   return new Promise((resolve, reject) => {
     let next = 0;
     let active = 0;
     let settled = false;
     let firstError: unknown;
     let hasError = false;
+    let accumulated = reducer.initial;
 
     const settleExhausted = () => {
       settled = true;
       if (hasError) {
         reject(firstError);
       } else {
-        resolve(!shortCircuitOn);
+        resolve(accumulated);
       }
     };
 
@@ -579,7 +702,7 @@ export function resolveShortCircuit(
         next++;
         if (!handler) continue;
         active++;
-        let branch: Promise<boolean>;
+        let branch: Promise<CheckResult>;
         try {
           branch = handler();
         } catch (error) {
@@ -596,11 +719,13 @@ export function resolveShortCircuit(
         branch.then(
           (result) => {
             if (settled) return;
-            if (result === shortCircuitOn) {
+            const decided = reducer.decide(result);
+            if (decided) {
               settled = true;
-              resolve(shortCircuitOn);
+              resolve(decided);
               return;
             }
+            accumulated = reducer.accumulate(accumulated, result);
             onHandlerDone();
           },
           (error) => {

@@ -972,27 +972,143 @@ describe("check algorithm", () => {
   });
 
   describe("Cycle detection", () => {
-    test("throws DepthExceededError on cyclic implied_by", async () => {
+    const aRequest = {
+      objectType: "doc",
+      objectId: "1",
+      relation: "a",
+      subjectType: "user",
+      subjectId: "alice",
+    };
+
+    test("cyclic implied_by denies instead of erroring", async () => {
+      // OpenFGA returns Allowed:false with an internal
+      // CycleDetected flag; only depth exhaustion is an error.
       store.relationConfigs.push(
         makeConfig({ objectType: "doc", relation: "a", impliedBy: ["b"] }),
         makeConfig({ objectType: "doc", relation: "b", impliedBy: ["a"] }),
       );
 
-      await expect(
-        check(store, {
+      expect(await check(store, aRequest)).toBe(false);
+    });
+
+    test("a granting sibling beats a cyclic union branch", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "a",
+          impliedBy: ["b", "admin"],
+        }),
+        makeConfig({ objectType: "doc", relation: "b", impliedBy: ["a"] }),
+        makeConfig({
+          objectType: "doc",
+          relation: "admin",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "admin",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+
+      expect(await check(store, aRequest)).toBe(true);
+    });
+
+    test("a cycle in an intersection operand denies", async () => {
+      // The operand could not be resolved, so it cannot be shown
+      // to hold: fail closed, even though the other operand grants.
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "a",
+          intersection: [
+            { type: "computedUserset", relation: "member" },
+            { type: "computedUserset", relation: "b" },
+          ],
+        }),
+        makeConfig({ objectType: "doc", relation: "b", impliedBy: ["a"] }),
+        makeConfig({
+          objectType: "doc",
+          relation: "member",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "member",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+
+      expect(await check(store, aRequest)).toBe(false);
+    });
+
+    test("a cycle on the base side of an exclusion denies", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "a",
+          impliedBy: ["b"],
+          excludedBy: "banned",
+        }),
+        makeConfig({ objectType: "doc", relation: "b", impliedBy: ["a"] }),
+        makeConfig({
+          objectType: "doc",
+          relation: "banned",
+          directlyAssignableTypes: ["user"],
+        }),
+      );
+
+      expect(await check(store, aRequest)).toBe(false);
+    });
+
+    test("a cycle on the subtract side of an exclusion denies", async () => {
+      // The case that makes indeterminacy worth tracking. The base
+      // grants outright; treating the cycled subtract branch as a
+      // plain `false` would read as "not excluded" and grant —
+      // fail-open. OpenFGA short-circuits to deny instead.
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "a",
+          directlyAssignableTypes: ["user"],
+          excludedBy: "banned",
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "banned",
+          impliedBy: ["banned_loop"],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "banned_loop",
+          impliedBy: ["banned"],
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
           objectType: "doc",
           objectId: "1",
           relation: "a",
           subjectType: "user",
           subjectId: "alice",
         }),
-      ).rejects.toBeInstanceOf(DepthExceededError);
+      );
+
+      expect(await check(store, aRequest)).toBe(false);
     });
 
     test("long rewrite cycle terminates without the depth guard", async () => {
       // 40 rewrite hops on doc:1 closing back on lvl0 — longer than
       // the default budget of 25, but rewrites cost no depth, so
-      // only the resolution path can stop it. It must reject, not
+      // only the resolution path can stop it. It must settle, not
       // hang. This is the safety argument for charging no depth on
       // rewrites: one object has a finite set of relations, so the
       // path Set always closes the loop.
@@ -1007,14 +1123,123 @@ describe("check algorithm", () => {
         );
       }
 
-      await expect(
-        check(store, {
+      expect(
+        await check(store, {
           objectType: "doc",
           objectId: "1",
           relation: "lvl0",
           subjectType: "user",
           subjectId: "alice",
         }),
+      ).toBe(false);
+    });
+
+    test("recursive-shape loop is indeterminate (known divergence)", async () => {
+      // group:a#member -> group:b#member -> group:a#member, on a
+      // single self-referencing relation. OpenFGA routes this
+      // shape to a recursive resolver that walks the reachable
+      // set iteratively and returns a definitive `false`, so on
+      // the subtract side of a but-not it GRANTS. tsfga has one
+      // resolver, sees a path cycle, and denies.
+      //
+      // Pinned deliberately: it is the only position where the
+      // two engines disagree about cycles, it fails closed, and
+      // it is documented in the package README. Verified against
+      // OpenFGA v1.18.2 — see tests/conformance/cycles.test.ts,
+      // which covers every position where they do agree.
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "a",
+          directlyAssignableTypes: ["user"],
+          excludedBy: "cyclic",
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "cyclic",
+          directlyAssignableTypes: ["group"],
+          allowsUsersetSubjects: true,
+        }),
+        makeConfig({
+          objectType: "group",
+          relation: "member",
+          directlyAssignableTypes: ["user", "group"],
+          allowsUsersetSubjects: true,
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "a",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "cyclic",
+          subjectType: "group",
+          subjectId: "a",
+          subjectRelation: "member",
+        }),
+        makeTuple({
+          objectType: "group",
+          objectId: "a",
+          relation: "member",
+          subjectType: "group",
+          subjectId: "b",
+          subjectRelation: "member",
+        }),
+        makeTuple({
+          objectType: "group",
+          objectId: "b",
+          relation: "member",
+          subjectType: "group",
+          subjectId: "a",
+          subjectRelation: "member",
+        }),
+      );
+
+      // OpenFGA answers true here; tsfga denies.
+      expect(await check(store, aRequest)).toBe(false);
+    });
+
+    test("depth exhaustion still errors, unlike a cycle", async () => {
+      // The two used to be one code path; they are now distinct and
+      // must stay so — converting exhaustion to `false` would fail
+      // open inside an exclusion.
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "group",
+          relation: "member",
+          directlyAssignableTypes: ["user"],
+          allowsUsersetSubjects: true,
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "group",
+          objectId: "0",
+          relation: "member",
+          subjectType: "group",
+          subjectId: "1",
+          subjectRelation: "member",
+        }),
+      );
+
+      await expect(
+        check(
+          store,
+          {
+            objectType: "group",
+            objectId: "0",
+            relation: "member",
+            subjectType: "user",
+            subjectId: "alice",
+          },
+          { maxDepth: 1 },
+        ),
       ).rejects.toBeInstanceOf(DepthExceededError);
     });
   });

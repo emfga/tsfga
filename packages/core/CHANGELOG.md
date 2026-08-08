@@ -7,6 +7,33 @@ releases may contain breaking changes).
 
 ## Unreleased
 
+### Breaking changes
+
+- **A cycle in the resolution path no longer throws.** Revisiting
+  a node used to raise `DepthExceededError`, the same error as
+  depth exhaustion. It now resolves `false`, and `check()` returns
+  `false` to the caller. OpenFGA errors only on depth exhaustion;
+  a cycle is `Allowed:false` with an internal `CycleDetected`
+  flag. Callers that catch `DepthExceededError` to detect a cyclic
+  model will no longer see it — depth exhaustion still throws, and
+  is now the only thing that does.
+
+  Internally the flag is tracked rather than collapsed into a
+  plain `false`, because the set operators read the two
+  differently. Most sharply: on the subtract side of `but not` a
+  cycle *denies*, so `base:true but not subtract:cycle` is
+  `false`. Treating a cycle as an ordinary `false` there would
+  grant — a fail-open. Like OpenFGA, the flag is not exposed on
+  the public result.
+
+  Known divergence, documented in the README: OpenFGA has
+  dedicated resolvers for recursive relation shapes
+  (`define member: [user, group#member]`, or a TTU recursing on
+  its own relation), which resolve a data loop to a definitive
+  `false` with no flag. tsfga reports indeterminacy there. The
+  only case where that is observable is the subtract side of a
+  `but not`, where OpenFGA grants and tsfga denies.
+
 ### Changed
 
 - **Only dispatches to another object spend the depth budget.**
