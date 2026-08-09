@@ -28,17 +28,47 @@ releases may contain breaking changes).
   on a 10-connection pool; relations admitting exactly one part
   emit identical SQL and are unchanged.
 
-  The plan varies with the model shape: PostgreSQL uses an
-  `idx_tuples_check` prefix scan plus a filter in the general
-  case, and collapses to the full five-column index condition when
-  the disjuncts differ only in `subject_id` (the `[user, user:*]`
-  shape). One narrow window is worth knowing about: a relation
-  admitting both a direct type and usersets, on an object with
-  roughly 20–150 subjects, scans and discards rows the old direct
-  probe would have looked up exactly. Measured at 0.17 ms against
-  0.13 ms — still net faster, since the round-trip it removes
-  costs more than the difference — and above ~150 rows the planner
-  switches to a `BitmapOr` that closes the gap.
+  The plan varies with the model shape. When the disjuncts differ
+  only in `subject_id` — the `[user, user:*]` shape — they
+  collapse to the full five-column index condition. When a probe
+  is mixed with the userset scan, the two disjuncts share nothing
+  past `relation`, and PostgreSQL either combines the probe index
+  with the partial `idx_tuples_userset` under a `BitmapOr` or
+  descends the three-column prefix and filters. The filter plan
+  reads rows it discards, so a relation admitting both a direct
+  type and usersets can examine rows the old direct probe would
+  have looked up exactly — measured at 0.17 ms against 0.13 ms,
+  still net faster, since the round-trip it removes costs more
+  than the difference.
+
+### Changed
+
+- **Migration `003-drop-unused-indexes` removes three indexes from
+  `tsfga.tuples`.** None of them can serve a query the adapter
+  issues, and the largest was 10 MB on a 90k-row table. Existing
+  deployments pick this up through the normal migration path;
+  `down` recreates all three with their original definitions.
+
+  - `idx_tuples_check` — its five columns are exactly the leading
+    five of `idx_tuples_unique`, so every plan that used it now
+    uses that index instead, at the same buffer count. Verified
+    across every adapter query shape: direct probe, probe plus
+    wildcard, probe plus usersets, and `deleteTuple`.
+  - `idx_tuples_metadata` — a GIN index on a column the adapter
+    never writes or reads.
+  - `idx_tuples_condition` — `condition_name` is written and
+    projected, but never appears in a predicate.
+
+  `idx_tuples_object` and `idx_tuples_userset` are prefixes of
+  `idx_tuples_unique` too, and were evaluated for the same
+  treatment, but both are kept: they are roughly a tenth its size,
+  so they hold more entries per page. Dropping `idx_tuples_object`
+  costs `findTuplesByRelation` and `listDirectSubjects` 4 buffers
+  against 7 on a small object and 9 against 16 on a large one, and
+  dropping `idx_tuples_userset` costs the userset scan 4 buffers
+  against 16, with 400 rows filtered out that the partial index
+  excludes outright. Prefix redundancy alone does not make an
+  index free to drop.
 
 ## 0.3.1 — 2026-08
 

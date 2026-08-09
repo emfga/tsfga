@@ -78,6 +78,21 @@ Migrations create a `tsfga` schema with three tables:
 | `tsfga.relation_configs` | Relation definitions (implied_by, computed_userset, etc.) |
 | `tsfga.condition_definitions` | Named CEL condition expressions |
 
+`tsfga.tuples` carries four indexes, each earning its place on a
+query the adapter actually issues:
+
+| Index | Columns | Serves |
+|---|---|---|
+| `idx_tuples_unique` | `(object_type, object_id, relation, subject_type, subject_id, COALESCE(subject_relation, ''))`, unique | The upsert's conflict target; also every probe, via its leading columns |
+| `idx_tuples_object` | `(object_type, object_id)` | `findTuplesByRelation`, `listDirectSubjects` |
+| `idx_tuples_userset` | `(object_type, object_id, relation)` where `subject_relation IS NOT NULL`, partial | The userset scan |
+| `idx_tuples_subject` | `(subject_type, subject_id)` | Reverse lookups by subject |
+
+`idx_tuples_object` and `idx_tuples_userset` are prefixes of
+`idx_tuples_unique` and could in principle be dropped, but both
+are far narrower than it — a tenth of its size — so they fit more
+entries per page and measurably win the scans they serve.
+
 ## How a check reads
 
 Every node of a check calls `findCheckTuples` once. The adapter
@@ -95,17 +110,24 @@ the pool for three times as many connections as it has branches.
 Which plan PostgreSQL picks depends on the disjuncts. Asking for
 one part gives the same plan as before this was merged. Asking
 for a direct probe and a wildcard probe collapses to the full
-five-column `idx_tuples_check` condition, since they differ only
-in `subject_id`. Mixing a probe with the userset scan generally
-gives an `idx_tuples_check` prefix scan plus a filter, which
-reads a few rows it discards — cheaper than the round-trip it
-saves, but not free on objects with many subjects on one
-relation.
+five-column condition on `idx_tuples_unique`, since the two
+differ only in `subject_id`.
+
+Mixing a probe with the userset scan is the interesting case, and
+the plan is not fixed: the two disjuncts share nothing past
+`relation`, so PostgreSQL either combines `idx_tuples_unique`
+with the partial `idx_tuples_userset` under a `BitmapOr`, or
+descends the three-column prefix and filters. Which one it picks
+turns on how many subjects sit on the relation and on the
+relative selectivity of the two disjuncts, so both plans are
+reachable on ordinary data. The filter plan reads rows it then
+discards — still cheaper than the round-trip it saves, but not
+free on objects with many subjects on one relation.
 
 Parts the caller excludes are omitted from the SQL, so they cost
-nothing to skip. Note this narrows the `Filter`, not the
-`Index Cond`, in the prefix-scan plan — the saving is in rows
-examined, not in index descent.
+nothing to skip. In the filter plan this narrows the `Filter`,
+not the `Index Cond` — the saving is in rows examined, not in
+index descent.
 
 ## License
 

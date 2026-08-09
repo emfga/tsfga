@@ -1,6 +1,7 @@
 import type { Migration, MigrationProvider } from "kysely/migration";
 import * as initial from "./001-initial.ts";
 import * as addOperators from "./002-add-operators.ts";
+import * as dropUnusedIndexes from "./003-drop-unused-indexes.ts";
 
 /**
  * All tsfga schema migrations, keyed by name in execution order.
@@ -10,6 +11,7 @@ import * as addOperators from "./002-add-operators.ts";
 export const migrations: Record<string, Migration> = {
   "001-initial": initial,
   "002-add-operators": addOperators,
+  "003-drop-unused-indexes": dropUnusedIndexes,
 };
 
 /**
