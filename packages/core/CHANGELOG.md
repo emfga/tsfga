@@ -5,7 +5,7 @@ Notable changes to `@tsfga/core`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
-## Unreleased
+## 0.4.0 — 2026-08
 
 ### Breaking changes
 
@@ -98,7 +98,100 @@ releases may contain breaking changes).
   only case where that is observable is the subtract side of a
   `but not`, where OpenFGA grants and tsfga denies.
 
+- **A condition evaluated with missing declared parameters is now
+  an error, not an unmet condition.** A tuple whose condition
+  declares a parameter that neither the tuple context nor the
+  request context supplies used to resolve `false`; it now throws
+  `ConditionEvaluationError` naming the absent keys, matching
+  OpenFGA's check path. The difference is not cosmetic: a
+  silently-unmet condition fails open through an exclusion
+  branch, where "not excluded" grants. Callers that relied on a
+  missing parameter reading as a denial must supply the
+  parameter, or catch the error.
+
+- **A definitive denial now outranks a sibling error in
+  intersection and exclusion.** Unions already let a branch
+  resolving `true` beat an errored sibling; the other two
+  operators rejected as soon as any branch did. As in OpenFGA,
+  an intersection operand resolving `false` now denies even
+  though another operand errored, and an exclusion whose
+  subtracted branch resolves `true` denies even though the base
+  errored — only a base that *granted* alongside an errored
+  exclusion branch still propagates. Checks that used to reject
+  now resolve `false`; the theopenlane fixtures hit exactly this
+  through `member and access`, where a conditioned tuple with
+  missing parameters inside one operand poisoned a check OpenFGA
+  resolves. The fail-closed invariant holds throughout: an error
+  never becomes a grant, only definitive denials win past one.
+
+  When several branches do fail, which error surfaces follows
+  completion order, so it is not deterministic under concurrency
+  — the same nondeterminism OpenFGA's union reducer has.
+
+### Added
+
+- **`CheckOptions.maxBreadth`** bounds how many branches of one
+  resolution node are evaluated concurrently, mirroring
+  OpenFGA's `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT`. It **defaults
+  to 10**, that option's upstream default; before this release
+  fanout was unbounded, so a union over 1k userset tuples issued
+  1k concurrent sub-checks and ran every one to completion even
+  after a branch had granted. Pass `maxBreadth: Infinity` to
+  restore the old behavior.
+
+  Bounding changes scheduling, not answers: the boolean result
+  and whether a check errors are unaffected, and the core,
+  adapter, and conformance suites pass unchanged at the new
+  default. On a 1k-branch union that grants, the bound cuts the
+  benchmark from ~270 ms/3005 store calls to ~108 ms/1166; a
+  100-branch TTU hit goes from ~41 ms/306 to ~17 ms/192. The one
+  measured regression is all-miss wide unions under concurrent
+  load (~20% slower batch wall time for four parallel 1k-branch
+  misses), where unbounded fanout kept the pool queue full —
+  `Infinity` restores it for miss-heavy workloads.
+
+  Exclusion keeps a fixed breadth of 2, as upstream does. Values
+  other than an integer >= 1 or `Infinity` throw `TsfgaError`;
+  a fractional bound would admit one more branch than stated.
+
+  `maxBreadth` also bounds how many `listObjects` candidates are
+  checked at once, following upstream, whose ListObjects worker
+  pool is sized from the same limit.
+
 ### Changed
+
+- **`maxDepth` now defaults to 25 instead of 10**, matching
+  OpenFGA's `OPENFGA_RESOLVE_NODE_LIMIT`. The old default threw
+  `DepthExceededError` on models a stock OpenFGA server resolves,
+  so deep models needed an explicit override to conform. Callers
+  who passed `maxDepth: 25` for that reason can drop it.
+
+- **Relation configs and condition definitions are read once per
+  check request.** Both are static per authorization model, but
+  every resolution node re-fetched them — on a 1000-branch
+  userset fanout, ~1000 redundant round-trips, a quarter of all
+  store calls. An internal request-scoped cache now memoizes
+  both, including negative results, and coalesces concurrent
+  branches asking the same key onto one in-flight query; a
+  failed read is evicted rather than pinned, so a later branch
+  retries. The cache lives for one `check` call, so a config
+  written between two checks is always observed; a write racing
+  a check in flight may not be. Measured against PostgreSQL, a
+  1000-branch fanout dropped from 4004 to 3005 store calls and
+  365 ms to 260 ms.
+
+- **A node reached by two routes in one request resolves once.**
+  The check graph is a DAG explored as a tree, so a shared
+  subtree was re-resolved per route. A request-scoped memo now
+  publishes settled node results only — never in-flight promises,
+  which deadlock on a cross-branch cycle — and only results that
+  are not cycle-truncated, since a truncated `false` is
+  path-dependent. Reuse is gated on the depth an entry was proved
+  at, so a memo hit can never answer where a fresh resolution
+  would have thrown `DepthExceededError`. At the default breadth
+  a whole level is in flight before any of it settles, so the
+  memo mostly pays inside `listObjects`, where it spans every
+  candidate.
 
 - **Only dispatches to another object spend the depth budget.**
   Userset expansion and tuple-to-userset expansion cost one depth
@@ -164,6 +257,16 @@ releases may contain breaking changes).
   single overlapping read wave, also unreleased. The cost is one
   round-trip per relation per request, not per node, because
   configs are cached for the request.
+
+### Fixed
+
+- **An intersection with zero operands no longer grants.** A
+  malformed config with an empty `intersection` array resolved
+  vacuously `true`, granting the relation to every subject. It
+  now throws `TsfgaError`; OpenFGA's typesystem rejects a set
+  operation with too few children as an invalid model.
+  Single-operand intersections stay valid — tsfga's decomposed
+  configs use them legitimately.
 
 ## 0.3.1 — 2026-08
 

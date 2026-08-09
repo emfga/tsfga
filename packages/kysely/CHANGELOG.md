@@ -5,9 +5,14 @@ Notable changes to `@tsfga/kysely`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
-## Unreleased
+## 0.4.0 — 2026-08
 
 ### Breaking changes
+
+- **Requires `@tsfga/core` 0.4.0 or later.** The adapter
+  implements the reshaped `TupleStore` interface below, so a
+  0.3.x core cannot drive it; the peer range is bumped
+  accordingly.
 
 - **`KyselyTupleStore.findDirectTuple` and `findUsersetTuples` are
   replaced by `findCheckTuples`**, following the same change to

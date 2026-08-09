@@ -659,7 +659,7 @@ export interface TsfgaClient {
   check(request: CheckRequest): Promise<boolean>;
   addTuple(request: AddTupleRequest): Promise<void>;
   removeTuple(request: RemoveTupleRequest): Promise<boolean>;
-  listObjects(objectType: string, relation: string, subjectType: string, subjectId: string): Promise<string[]>;
+  listObjects(objectType: string, relation: string, subjectType: string, subjectId: string, context?: Record<string, unknown>): Promise<string[]>;
   listSubjects(objectType: string, objectId: string, relation: string): Promise<Array<{ subjectType: string; subjectId: string; subjectRelation?: string }>>;
   writeRelationConfig(config: RelationConfig): Promise<void>;
   deleteRelationConfig(objectType: string, relation: string): Promise<boolean>;
