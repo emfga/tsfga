@@ -57,7 +57,13 @@ releases may contain breaking changes).
   - `idx_tuples_metadata` — a GIN index on a column the adapter
     never writes or reads.
   - `idx_tuples_condition` — `condition_name` is written and
-    projected, but never appears in a predicate.
+    projected, but never appears in a predicate in any adapter
+    query. OpenFGA does filter on condition name, via
+    `COALESCE(condition_name, '') IN (...)`, yet indexes the
+    column in no dialect and on neither its tuple nor its
+    changelog table — the predicate always trails an equality on
+    the object columns. A bare-column index could not have served
+    that expression anyway.
 
   `idx_tuples_object` and `idx_tuples_userset` are prefixes of
   `idx_tuples_unique` too, and were evaluated for the same
@@ -69,6 +75,25 @@ releases may contain breaking changes).
   against 16, with 400 rows filtered out that the partial index
   excludes outright. Prefix redundancy alone does not make an
   index free to drop.
+
+- **Migration `004-drop-metadata-columns` removes the `metadata`
+  column from `tsfga.tuples` and `tsfga.relation_configs`**, and
+  the generated `DB` type no longer carries it.
+
+  Neither column was reachable through the library: `@tsfga/core`
+  has no metadata concept on `Tuple` or `RelationConfig`, and no
+  adapter method wrote, read, or filtered it. Nothing tsfga does
+  could put a value there. It came in from a predecessor schema
+  and was never wired to anything; OpenFGA has no analogue on its
+  tuple table in any dialect, so it was not anticipating a
+  feature either.
+
+  **Destructive, and `down` restores the columns but not their
+  contents.** This only matters for a consumer who wrote to them
+  out of band through their own `Kysely<DB>` handle — possible,
+  and type-visible, because the exported `DB` type declared the
+  columns even though no adapter method touched them. Copy any
+  such data out before migrating.
 
 ## 0.3.1 — 2026-08
 

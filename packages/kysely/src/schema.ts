@@ -40,7 +40,6 @@ export interface TsfgaRelationConfigs {
   id: Generated<Int8>;
   implied_by: string[] | null;
   intersection: Json | null;
-  metadata: Json | null;
   object_type: string;
   relation: string;
   tuple_to_userset: Json | null;
@@ -51,7 +50,6 @@ export interface TsfgaTuples {
   condition_name: string | null;
   created_at: Timestamp;
   id: Generated<Int8>;
-  metadata: Json | null;
   object_id: string;
   object_type: string;
   relation: string;

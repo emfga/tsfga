@@ -82,7 +82,8 @@ tsfga/
 │       │   └── migrations/
 │       │       ├── 001-initial.ts
 │       │       ├── 002-add-operators.ts
-│       │       └── 003-drop-unused-indexes.ts
+│       │       ├── 003-drop-unused-indexes.ts
+│       │       └── 004-drop-metadata-columns.ts
 │       ├── tests/
 │       │   ├── kysely-adapter.test.ts
 │       │   └── helpers/
@@ -566,9 +567,18 @@ export class ConditionEvaluationError extends TsfgaError {
 
 Creates the `tsfga` schema with 3 tables and 7 indexes on
 `tsfga.tuples`; migration `003-drop-unused-indexes` later removes
-three of them, leaving 4. Uses Kysely's DDL schema builder API
+three of them, leaving 4, and `004-drop-metadata-columns` removes
+the unreachable `metadata` column from `tsfga.tuples` and
+`tsfga.relation_configs`. Uses Kysely's DDL schema builder API
 where possible; raw `sql` only for indexes the builder cannot
 express.
+
+**Every column must be reachable through the library.** A column
+no `@tsfga/core` type carries and no adapter method reads or
+writes cannot be populated by anything tsfga does, and the
+exported `DB` type turns it into an accidental out-of-band API.
+That is what happened to `metadata`, ported in from a predecessor
+schema and never wired to anything.
 
 **Every index must earn its place on a query the adapter actually
 issues.** Prefix redundancy alone is not a reason to drop one — a
@@ -584,7 +594,9 @@ the DDL (expression indexes, GIN + WHERE combos).
 
 **What stays as raw SQL:**
 - `idx_tuples_unique` — uses `COALESCE(subject_relation, '')` expression
-- `idx_tuples_metadata` — uses `USING GIN` with a `WHERE` clause
+- `idx_tuples_metadata` in `001` and its `003` rollback — uses
+  `USING GIN` with a `WHERE` clause. Both are history: the index
+  is dropped in `003` and the column it covered in `004`.
 
 **Migration management** uses `kysely-ctl` with config in
 `packages/kysely/kysely.config.ts`:
