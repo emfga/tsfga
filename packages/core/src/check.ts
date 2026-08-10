@@ -111,10 +111,11 @@ interface MemoEntry {
  * key merely over-eager while making the memo *wrong*.
  */
 type MemoMap<V> = Map<string, V>;
-type NodeMemo = MemoMap<MemoMap<MemoMap<MemoMap<MemoMap<MemoEntry>>>>>;
+type NodeMap<V> = MemoMap<MemoMap<MemoMap<MemoMap<MemoMap<V>>>>>;
+type NodeMemo = NodeMap<MemoEntry>;
 
-function memoGet(memo: NodeMemo, request: CheckRequest): MemoEntry | undefined {
-  return memo
+function nodeGet<V>(map: NodeMap<V>, request: CheckRequest): V | undefined {
+  return map
     .get(request.subjectType)
     ?.get(request.subjectId)
     ?.get(request.objectType)
@@ -131,16 +132,107 @@ function memoLevel<V>(map: MemoMap<MemoMap<V>>, key: string): MemoMap<V> {
   return level;
 }
 
-function memoSet(
-  memo: NodeMemo,
-  request: CheckRequest,
-  entry: MemoEntry,
-): void {
-  const bySubjectId = memoLevel(memo, request.subjectType);
+function nodeSet<V>(map: NodeMap<V>, request: CheckRequest, value: V): void {
+  const bySubjectId = memoLevel(map, request.subjectType);
   const byObjectType = memoLevel(bySubjectId, request.subjectId);
   const byObjectId = memoLevel(byObjectType, request.objectType);
   const byRelation = memoLevel(byObjectId, request.objectId);
-  byRelation.set(request.relation, entry);
+  byRelation.set(request.relation, value);
+}
+
+/**
+ * Drop a node's entry, but only while it is still the stored one —
+ * a later resolution may already have replaced it
+ * (`caching-store.ts` evicts on the same rule).
+ */
+function nodeDelete<V>(map: NodeMap<V>, request: CheckRequest, value: V): void {
+  if (nodeGet(map, request) === value) {
+    map
+      .get(request.subjectType)
+      ?.get(request.subjectId)
+      ?.get(request.objectType)
+      ?.get(request.objectId)
+      ?.delete(request.relation);
+  }
+}
+
+/**
+ * A node whose resolution has started but not settled, and what
+ * its subtree is currently blocked on.
+ *
+ * The settled memo only helps a route that arrives *after* another
+ * route finished. At any breadth above 1 the routes overlap
+ * instead, so without this every concurrent route into a shared
+ * node re-resolves it and re-issues its reads: the DAG explored as
+ * a tree, with breadth as the duplication multiplier.
+ */
+interface InflightEntry {
+  readonly promise: Promise<CheckResult>;
+  /** The depth the resolution started at; gates reuse, as in the memo. */
+  readonly depth: number;
+  readonly waits: WaitNode;
+}
+
+/**
+ * One node's edge set in the wait graph: the in-flight entries its
+ * subtree is currently awaiting.
+ *
+ * Counted rather than a plain set, because two branches of the same
+ * node can await the same entry and the first to finish must not
+ * erase the second's edge — a missing edge is a missed deadlock,
+ * which is the one failure mode with no recovery.
+ */
+interface WaitNode {
+  readonly waitingOn: Map<InflightEntry, number>;
+}
+
+function addWait(node: WaitNode, entry: InflightEntry): void {
+  node.waitingOn.set(entry, (node.waitingOn.get(entry) ?? 0) + 1);
+}
+
+function removeWait(node: WaitNode, entry: InflightEntry): void {
+  const count = node.waitingOn.get(entry) ?? 0;
+  if (count > 1) {
+    node.waitingOn.set(entry, count - 1);
+  } else {
+    node.waitingOn.delete(entry);
+  }
+}
+
+/**
+ * Would awaiting `entry` close a cycle in the wait graph — i.e. is
+ * `waiter` already reachable from it?
+ *
+ * This is the whole reason coalescing is safe here when the obvious
+ * version is not. Two sibling branches resolving mutually recursive
+ * relations each reach the other's node: neither is on the other's
+ * *path*, so the cycle guard says nothing, and each would await an
+ * entry that can only settle once the other does. Adding an edge
+ * only when it keeps the graph acyclic makes that unreachable, and
+ * an acyclic wait graph cannot deadlock.
+ *
+ * The test and the edge insertion happen in one synchronous stretch
+ * — nothing awaits between them — so there is no interleaving in
+ * which two waiters each see the other's absence.
+ */
+function wouldDeadlock(entry: InflightEntry, waiter: WaitNode | null): boolean {
+  if (!waiter) {
+    // A root check registers no wait record: it is nobody's
+    // callee, so nothing can be blocked behind it.
+    return false;
+  }
+  const seen = new Set<WaitNode>();
+  const stack: WaitNode[] = [entry.waits];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node || seen.has(node)) continue;
+    if (node === waiter) return true;
+    seen.add(node);
+    for (const blocker of node.waitingOn.keys()) {
+      stack.push(blocker.waits);
+    }
+  }
+  return false;
 }
 
 /**
@@ -239,7 +331,32 @@ export interface CheckScope {
   readonly maxDepth: number;
   readonly maxBreadth: number;
   readonly memo: NodeMemo;
+  readonly inflight: NodeMap<InflightEntry>;
 }
+
+/**
+ * What one call inherits from the call that made it, as opposed to
+ * from the request (`CheckScope`) or from the node itself (request,
+ * depth, path).
+ *
+ * It is an object rather than a parameter so that adding a concern
+ * threaded through the whole recursion does not add a positional
+ * parameter to `checkNode`, `resolveNode`, `checkBase` and
+ * `checkIntersection` at once, plus one to every recursive call
+ * site.
+ */
+interface Frame {
+  /**
+   * The wait record of the nearest enclosing node — null at the
+   * root of a check. A blocked child records the block here,
+   * because the thing that is actually stuck is the enclosing
+   * node's resolution.
+   */
+  readonly waits: WaitNode | null;
+}
+
+/** The frame a check starts from: nothing is enclosing it. */
+const ROOT_FRAME: Frame = { waits: null };
 
 export function createCheckScope(
   store: TupleStore,
@@ -266,6 +383,7 @@ export function createCheckScope(
     maxDepth: options.maxDepth ?? 25,
     maxBreadth,
     memo: new Map(),
+    inflight: new Map(),
   };
 }
 
@@ -300,10 +418,11 @@ export async function runCheck(
       ...scope,
       store: new ContextualTupleStore(scope.store, request.contextualTuples),
       memo: new Map(),
+      inflight: new Map(),
     };
   }
 
-  const result = await checkNode(resolution, request, 0, new Set());
+  const result = await checkNode(resolution, request, 0, new Set(), ROOT_FRAME);
   // The indeterminacy flag is internal; a cycle at the root is an
   // ordinary deny to the caller, as it is on OpenFGA's wire.
   return result.allowed;
@@ -321,6 +440,7 @@ async function checkNode(
   request: CheckRequest,
   depth: number,
   path: ReadonlySet<string>,
+  frame: Frame,
 ): Promise<CheckResult> {
   const { maxDepth, memo } = scope;
   // `depth` counts dispatches already made, so the budget is spent
@@ -347,15 +467,109 @@ async function checkNode(
   // Deeper is not safe: reusing it there could answer where a fresh
   // resolution would have thrown DepthExceededError. Recording the
   // greatest depth seen therefore widens the range of reuse.
-  const memoized = memoGet(memo, request);
+  let memoized = nodeGet(memo, request);
   if (memoized && depth <= memoized.depth) {
     return memoized.result;
+  }
+
+  // Nothing settled: is this node already being resolved by another
+  // route? Coalescing onto it is what keeps the DAG from being
+  // walked as a tree at breadth > 1, and the same depth gate applies
+  // for the same reason.
+  //
+  // Three outcomes send this call on to resolve the node itself.
+  // Each duplicates work in a case that is rare, and none of them
+  // can be wrong:
+  //
+  // - `wouldDeadlock` refuses the wait. The fresh resolution runs
+  //   with *this* path, so the cycle guard truncates it and it
+  //   terminates; each such fallback resolves with a strictly larger
+  //   path, and the path is bounded by a finite relation set.
+  // - The entry rejected. An error is not path-independent — a
+  //   sibling truncated by a cycle can hide an error on one route
+  //   and not on another, and the combinator drops the cycle flag
+  //   when it rejects — so an error is no more adoptable than it is
+  //   memoizable. It also covers depth exhaustion, where a shallower
+  //   waiter must be free to succeed where the entry failed.
+  // - The entry settled cycle-flagged, which is path-dependent by
+  //   definition. The memo refuses to publish those; this refuses to
+  //   consume them, which is the same rule from the other side.
+  //   (Upstream's cached resolver draws the same line:
+  //   "when the response indicates cycle detected ... we don't save
+  //   the result", `internal/graph/cached_resolver.go`.)
+  const pending = nodeGet(scope.inflight, request);
+  if (
+    pending &&
+    depth <= pending.depth &&
+    !wouldDeadlock(pending, frame.waits)
+  ) {
+    const waiter = frame.waits;
+    if (waiter) addWait(waiter, pending);
+    let coalesced: CheckResult | null = null;
+    try {
+      coalesced = await pending.promise;
+    } catch {
+      // Resolve it ourselves; see above.
+    } finally {
+      if (waiter) removeWait(waiter, pending);
+    }
+    if (coalesced && !coalesced.cycleDetected) {
+      return coalesced;
+    }
+    // Time passed while waiting, and a third route may have settled
+    // the node in it. Re-reading also keeps the "greatest depth
+    // wins" comparison below honest.
+    memoized = nodeGet(memo, request);
+    if (memoized && depth <= memoized.depth) {
+      return memoized.result;
+    }
   }
 
   const visited = new Set(path);
   visited.add(key);
 
-  const result = await resolveNode(scope, request, depth, visited);
+  // Publish only the first resolution of a node. A later one is a
+  // fallback from the list above, so it is running with a path that
+  // already truncated something; its answer is this route's answer
+  // and nobody else should coalesce onto it.
+  //
+  // An unpublished resolution is also *transparent* in the wait
+  // graph: it keeps the caller's wait record instead of opening one
+  // of its own, so a block inside it is attributed to the nearest
+  // enclosing published node. Give it its own record and that node
+  // looks idle while its subtree is blocked, which is exactly the
+  // edge a deadlock hides behind.
+  const waits: WaitNode | null = nodeGet(scope.inflight, request)
+    ? null
+    : { waitingOn: new Map() };
+  const resolution = resolveNode(
+    scope,
+    request,
+    depth,
+    visited,
+    waits ? { waits } : frame,
+  );
+
+  if (waits) {
+    const entry: InflightEntry = { promise: resolution, depth, waits };
+    nodeSet(scope.inflight, request, entry);
+    // A node is blocked on the children it resolves itself exactly
+    // as much as on the ones it coalesced onto, so both kinds of
+    // dependency are edges. Recording only the coalesced ones would
+    // leave a node looking idle while it awaits its own subtree,
+    // and a later waiter would happily close the loop through it.
+    const caller = frame.waits;
+    if (caller) addWait(caller, entry);
+    const retire = () => {
+      nodeDelete(scope.inflight, request, entry);
+      if (caller) removeWait(caller, entry);
+    };
+    // The derived promise consumes the rejection on its own copy;
+    // the `await` below still sees it.
+    resolution.then(retire, retire);
+  }
+
+  const result = await resolution;
 
   // Only path-independent results are publishable.
   //
@@ -377,10 +591,8 @@ async function checkNode(
   // A throw is simply never recorded, which is also how a
   // depth-exhausted subtree stays out: nothing is written, so the
   // same node resolves normally if it is reached again shallower.
-  // Nothing in-flight is ever published, so unlike the store cache
-  // there is no promise to evict and no rejection to swallow.
   if (!result.cycleDetected && (!memoized || depth > memoized.depth)) {
-    memoSet(memo, request, { result, depth });
+    nodeSet(memo, request, { result, depth });
   }
   return result;
 }
@@ -395,6 +607,7 @@ async function resolveNode(
   request: CheckRequest,
   depth: number,
   visited: ReadonlySet<string>,
+  frame: Frame,
 ): Promise<CheckResult> {
   const store = scope.store;
   // Fetch relation config once for use across all steps — and
@@ -422,8 +635,8 @@ async function resolveNode(
   // Base resolution: intersection replaces steps 1-5 when present
   const resolveBase = (): Promise<CheckResult> =>
     config?.intersection
-      ? checkIntersection(scope, request, config, reads, depth, visited)
-      : checkBase(scope, request, config, reads, depth, visited);
+      ? checkIntersection(scope, request, config, reads, depth, visited, frame)
+      : checkBase(scope, request, config, reads, depth, visited, frame);
 
   // Exclusion applies on top of the base result — including on top
   // of intersection results. A definitive deny short-circuits past
@@ -446,7 +659,13 @@ async function resolveNode(
       resolveBase(),
       // Same object, a rewrite of it — no depth cost (upstream
       // builds the subtract branch on the unchanged request).
-      checkNode(scope, { ...request, relation: excludedBy }, depth, visited),
+      checkNode(
+        scope,
+        { ...request, relation: excludedBy },
+        depth,
+        visited,
+        frame,
+      ),
     ]);
     if (
       exclusionResult.status === "fulfilled" &&
@@ -646,6 +865,7 @@ async function checkBase(
   reads: Promise<CheckTuples>,
   depth: number,
   path: ReadonlySet<string>,
+  frame: Frame,
 ): Promise<CheckResult> {
   const { store, maxBreadth } = scope;
   const {
@@ -700,6 +920,7 @@ async function checkBase(
         },
         depth + 1,
         path,
+        frame,
       );
     });
   }
@@ -715,6 +936,7 @@ async function checkBase(
           { ...request, relation: impliedRelation },
           depth,
           path,
+          frame,
         ),
       );
     }
@@ -724,7 +946,13 @@ async function checkBase(
   if (config?.computedUserset) {
     const computedUserset = config.computedUserset;
     handlers.push(() =>
-      checkNode(scope, { ...request, relation: computedUserset }, depth, path),
+      checkNode(
+        scope,
+        { ...request, relation: computedUserset },
+        depth,
+        path,
+        frame,
+      ),
     );
   }
 
@@ -762,6 +990,7 @@ async function checkBase(
               },
               depth + 1,
               path,
+              frame,
             ),
           );
         }
@@ -784,6 +1013,7 @@ async function checkIntersection(
   reads: Promise<CheckTuples>,
   depth: number,
   path: ReadonlySet<string>,
+  frame: Frame,
 ): Promise<CheckResult> {
   const { store, maxBreadth } = scope;
   const operands = config.intersection;
@@ -803,7 +1033,7 @@ async function checkIntersection(
   for (const operand of operands) {
     if (operand.type === "direct") {
       handlers.push(() =>
-        checkBase(scope, request, config, reads, depth, path),
+        checkBase(scope, request, config, reads, depth, path, frame),
       );
     } else if (operand.type === "computedUserset") {
       // Same object, no depth cost — as with the other rewrites.
@@ -813,6 +1043,7 @@ async function checkIntersection(
           { ...request, relation: operand.relation },
           depth,
           path,
+          frame,
         ),
       );
     } else {
@@ -838,6 +1069,7 @@ async function checkIntersection(
               },
               depth + 1,
               path,
+              frame,
             ),
           );
         }
