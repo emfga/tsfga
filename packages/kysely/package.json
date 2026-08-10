@@ -1,6 +1,6 @@
 {
   "name": "@tsfga/kysely",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "author": "Lemuel Roberto Bonifacio <code@lemuelroberto.online>",
   "description": "Kysely/PostgreSQL adapter for @tsfga/core",
@@ -55,7 +55,7 @@
     "tsc": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@tsfga/core": "workspace:*",
+    "@tsfga/core": ">=0.4.0 <0.6.0",
     "kysely": ">=0.27.0 <0.30.0",
     "pg": ">=8.0.0"
   },

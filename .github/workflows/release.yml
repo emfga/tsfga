@@ -169,12 +169,26 @@ jobs:
       - name: Run tests (Deno)
         run: bun run turbo:test:deno
 
+      # The last gate before anything reaches npm. CI already
+      # runs this on every PR; repeating it here means a
+      # dispatch from a branch that never opened a PR cannot
+      # publish an adapter whose peer range excludes the
+      # current core.
+      - name: Check peer range
+        run: bun run check:peer-range
+
       # Runs before the packaging checks, and regardless of
       # whether this dispatch publishes, so publint / attw /
       # npm pack inspect the manifest that actually ships. When
-      # this ran afterwards, peerDependencies still read
+      # this ran afterwards, devDependencies still read
       # "workspace:*" at validation time and the substituted
       # string was never linted at all.
+      #
+      # devDependencies only. peerDependencies is hand-written
+      # in package.json and ships verbatim: deriving it from the
+      # core version wrote "^0.4.0", which below 1.0.0 excludes
+      # every later minor, so publishing core 0.5.0 left the
+      # published adapter uninstallable beside it.
       - name: Resolve workspace protocol
         if: inputs.package == '@tsfga/kysely'
         run: |
@@ -182,9 +196,8 @@ jobs:
           core_ver=$(
             jq -r .version packages/core/package.json
           )
-          jq --arg v "^$core_ver" \
-            '.peerDependencies["@tsfga/core"] = $v
-             | .devDependencies["@tsfga/core"] = $v' \
+          jq --arg v "$core_ver" \
+            '.devDependencies["@tsfga/core"] = $v' \
             "${dir}/package.json" > "${dir}/package.tmp"
           mv "${dir}/package.tmp" "${dir}/package.json"
 

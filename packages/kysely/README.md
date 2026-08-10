@@ -13,6 +13,14 @@ the `TupleStore` interface from `@tsfga/core` using
 npm install @tsfga/kysely @tsfga/core kysely pg
 ```
 
+`@tsfga/core`, `kysely` and `pg` are peer dependencies. This
+version accepts `@tsfga/core` `>=0.4.0 <0.6.0` — the adapter
+implements the `TupleStore` interface as those releases shape
+it. The range carries an explicit ceiling rather than a caret:
+below 1.0.0 a core minor may change that interface, so each
+minor is admitted only once the adapter has been tested
+against it.
+
 ## Quick start
 
 ```typescript

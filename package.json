@@ -6,6 +6,7 @@
   "workspaces": ["packages/*", "tests/*"],
   "scripts": {
     "biome:check": "biome check .",
+    "check:peer-range": "scripts/check-peer-range.sh",
     "biome:format": "biome format --write .",
     "biome:lint": "biome lint .",
     "db:generate": "turbo run db:generate",

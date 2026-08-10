@@ -53,3 +53,13 @@ if [ -f "$lockfile" ]; then
 fi
 
 echo "${current} → ${next}"
+
+# Bumping core past the adapter's declared peer ceiling is the
+# mistake this catches at the moment it is made, rather than in
+# CI or -- as it once did -- on npm. Advisory here: reshaping the
+# range is a judgement call, and the bump itself is already done.
+if ! "$(dirname "$0")/check-peer-range.sh"; then
+  echo
+  echo "warning: @tsfga/kysely's peer range no longer matches" \
+    "@tsfga/core. Fix it in this same change."
+fi

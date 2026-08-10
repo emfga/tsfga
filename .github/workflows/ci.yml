@@ -31,6 +31,11 @@ jobs:
 
       - run: bun run biome:check
 
+      # Cheap, needs no build, and gates the one thing a green
+      # test suite cannot see: whether the adapter's declared
+      # peer range still admits the core it was tested against.
+      - run: bun run check:peer-range
+
   commitlint:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -288,13 +293,17 @@ jobs:
 
       # Mirrors release.yml: resolve workspace:* before the
       # checks, so they inspect the manifest that ships.
+      #
+      # devDependencies only. peerDependencies is hand-written
+      # and published verbatim -- see scripts/check-peer-range.sh
+      # for why deriving it from the core version silently
+      # orphaned the adapter on every core minor.
       - name: Resolve workspace protocol
         run: |
           core_ver=$(jq -r .version packages/core/package.json)
           dir=packages/kysely
-          jq --arg v "^$core_ver" \
-            '.peerDependencies["@tsfga/core"] = $v
-             | .devDependencies["@tsfga/core"] = $v' \
+          jq --arg v "$core_ver" \
+            '.devDependencies["@tsfga/core"] = $v' \
             "${dir}/package.json" > "${dir}/package.tmp"
           mv "${dir}/package.tmp" "${dir}/package.json"
 

@@ -5,6 +5,35 @@ Notable changes to `@tsfga/kysely`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
+## 0.4.1 — 2026-08
+
+### Fixed
+
+- **The peer range on `@tsfga/core` admits 0.5.x.** 0.4.0
+  published `"@tsfga/core": "^0.4.0"`, which below 1.0.0 means
+  `>=0.4.0 <0.5.0` — so installing core 0.5.0 alongside it
+  raised a peer conflict even though nothing in the adapter
+  changed. The range is now `>=0.4.0 <0.6.0`.
+
+  The adapter needs no change to work with core 0.5.0: that
+  release added `checkMany` and shared one resolution scope
+  across a batch, but did not touch the `TupleStore` interface.
+  A batch reaches the adapter as the same `findCheckTuples`,
+  `findTuplesByRelation` and `findRelationConfig` calls a
+  sequence of `check` calls would make — fewer of them, because
+  the memo and the config cache now span the batch.
+
+  One consequence worth knowing if you instrument the store:
+  core 0.5.0 stops abandoned branches from querying, but a read
+  already handed to the adapter still completes. Drain your
+  counters before reading them.
+
+  The range is now hand-written in `package.json` instead of
+  derived from the core version at publish time, and
+  `scripts/check-peer-range.sh` fails CI when a core bump leaves
+  it behind. It required no `@tsfga/kysely` API change, hence a
+  patch release.
+
 ## 0.4.0 — 2026-08
 
 ### Breaking changes

@@ -1020,6 +1020,47 @@ See `RELEASING.md` for the full step-by-step process.
 **Version bumps** happen in PRs before release:
 - `scripts/bump.sh <package-dir> [patch|minor|major]`
 
+### Cross-package peer ranges
+
+**`@tsfga/kysely`'s peer range on `@tsfga/core` is hand-written
+in `packages/kysely/package.json` and ships verbatim. Never
+derive it from the core version.**
+
+It must be spelled `>=A.B.C <D.E.F`. Caret and tilde are
+rejected by `scripts/check-peer-range.sh`, because their
+meaning changes at 1.0.0: below it, `^0.4.0` admits only the
+0.4.x line. That is how `@tsfga/kysely@0.4.0` shipped a peer
+range excluding `@tsfga/core@0.5.0` — the release workflow
+substituted `^$core_ver` for `workspace:*` at publish time, so
+no human ever read the range, and no step failed. Only the
+`devDependency` is substituted now; it stays `workspace:*` in
+the repo so the adapter builds against the core beside it.
+
+**Bumping `@tsfga/core`'s minor is not done until the adapter's
+range has been reconsidered in the same PR.** `bump.sh` warns
+and CI fails while the two disagree. Widening is not automatic —
+decide which it is:
+
+- The `TupleStore` interface, its semantics, and the guarantees
+  the adapter relies on are all unchanged (core 0.5.0 → added
+  `checkMany`, touched no store method): raise the ceiling to
+  the next minor, bump `@tsfga/kysely`'s **patch**, and say in
+  its `CHANGELOG.md` why the adapter needs no change.
+- The interface or its semantics changed: update the adapter,
+  raise the **floor** to the new core, and bump
+  `@tsfga/kysely`'s **minor** with the breaking change written
+  out.
+
+Either way the peer range, `packages/kysely/README.md`'s
+installation section, and `CHANGELOG.md` move together — the
+range alone is what consumers hit, but only the README and
+changelog tell them why.
+
+**A core release and the adapter release that follows it are
+two dispatches.** Publish core first, then `@tsfga/kysely`;
+otherwise the adapter's peer range points at a core version npm
+cannot resolve.
+
 **Changelogs** are hand-written. A version-bump PR updates
 the affected package's `CHANGELOG.md` in the same commit as
 the bump. Bot PRs, tooling changes, and docs-only changes do
