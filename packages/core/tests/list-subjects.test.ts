@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { createTsfga } from "../src/index.ts";
+import {
+  admitsSubjectRef,
+  createTsfga,
+  directSubjectRef,
+} from "../src/index.ts";
 import type { RelationConfig, Tuple } from "../src/types.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
 
@@ -154,4 +158,110 @@ describe("listSubjects applies the relation's type restrictions", () => {
       [{ subjectType: "service", subjectId: "bot", subjectRelation: null }],
     );
   });
+});
+
+/**
+ * The exported predicate exists so a consumer can narrow their own
+ * query the way tsfga narrows its reads. That is only worth
+ * anything while the two agree, so the agreement is pinned rather
+ * than assumed: a "safer" divergent variant would reintroduce
+ * exactly the drift the export is meant to remove.
+ */
+describe("the exported gate agrees with check()", () => {
+  const cases: Array<{
+    label: string;
+    admits: string[];
+    tuple: Partial<Tuple>;
+  }> = [
+    { label: "admitted type", admits: ["user"], tuple: {} },
+    {
+      label: "unadmitted type",
+      admits: ["user"],
+      tuple: { subjectType: "svc" },
+    },
+    {
+      label: "wildcard admitted",
+      admits: ["user:*"],
+      tuple: { subjectId: "*" },
+    },
+    {
+      label: "wildcard not admitted",
+      admits: ["user"],
+      tuple: { subjectId: "*" },
+    },
+    {
+      label: "userset admitted",
+      admits: ["team#member"],
+      tuple: {
+        subjectType: "team",
+        subjectId: "eng",
+        subjectRelation: "member",
+      },
+    },
+    {
+      label: "userset relation not admitted",
+      admits: ["team#member"],
+      tuple: {
+        subjectType: "team",
+        subjectId: "eng",
+        subjectRelation: "owner",
+      },
+    },
+    { label: "admits nothing", admits: [], tuple: {} },
+  ];
+
+  for (const { label, admits, tuple } of cases) {
+    test(label, async () => {
+      const row = makeTuple(tuple);
+      const store = new MockTupleStore();
+      store.relationConfigs.push(makeConfig({ directlyAssignable: admits }));
+      store.tuples.push(row);
+      // A userset row only grants if the referenced relation holds,
+      // so give it a member for the cases that admit one.
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "team",
+          relation: row.subjectRelation ?? "member",
+          directlyAssignable: ["user"],
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "team",
+          objectId: "eng",
+          relation: row.subjectRelation ?? "member",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+
+      const config = await store.findRelationConfig("doc", "viewer");
+      const admitted = admitsSubjectRef(
+        config,
+        directSubjectRef(row.subjectType, row.subjectId, row.subjectRelation),
+      );
+
+      const granted = await createTsfga(store).check({
+        objectType: "doc",
+        objectId: "1",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+      });
+
+      // The predicate is the necessary condition, not the
+      // sufficient one: a row it rejects can never grant.
+      if (!admitted) {
+        expect(granted).toBe(false);
+      }
+      expect(
+        (await createTsfga(store).listSubjects("doc", "1", "viewer")).some(
+          (s) =>
+            s.subjectType === row.subjectType &&
+            s.subjectId === row.subjectId &&
+            s.subjectRelation === row.subjectRelation,
+        ),
+      ).toBe(admitted);
+    });
+  }
 });

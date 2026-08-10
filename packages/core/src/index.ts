@@ -223,7 +223,11 @@ export {
   TsfgaError,
 } from "./errors.ts";
 export type { TupleStore } from "./store-interface.ts";
-export { validateTupleWrite } from "./tuple-validation.ts";
+export {
+  admitsSubjectRef,
+  directSubjectRef,
+  validateTupleWrite,
+} from "./tuple-validation.ts";
 export type {
   AddTupleRequest,
   CheckOptions,
