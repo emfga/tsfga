@@ -140,20 +140,6 @@ export class ContextualTupleStore implements TupleStore {
     return this.inner.listCandidateObjectIds(objectType);
   }
 
-  listDirectSubjects(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<
-    Array<{
-      subjectType: string;
-      subjectId: string;
-      subjectRelation: string | null;
-    }>
-  > {
-    return this.inner.listDirectSubjects(objectType, objectId, relation);
-  }
-
   upsertRelationConfig(config: RelationConfig): Promise<void> {
     return this.inner.upsertRelationConfig(config);
   }

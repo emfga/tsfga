@@ -75,19 +75,6 @@ export interface TupleStore {
    */
   listCandidateObjectIds(objectType: string): Promise<string[]>;
 
-  /** List direct subjects for an object + relation */
-  listDirectSubjects(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<
-    Array<{
-      subjectType: string;
-      subjectId: string;
-      subjectRelation: string | null;
-    }>
-  >;
-
   // === Config management ===
 
   /** Insert or update a relation config */

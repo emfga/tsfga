@@ -115,20 +115,6 @@ export class CachingTupleStore implements TupleStore {
     return this.inner.listCandidateObjectIds(objectType);
   }
 
-  listDirectSubjects(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<
-    Array<{
-      subjectType: string;
-      subjectId: string;
-      subjectRelation: string | null;
-    }>
-  > {
-    return this.inner.listDirectSubjects(objectType, objectId, relation);
-  }
-
   upsertRelationConfig(config: RelationConfig): Promise<void> {
     this.configCache.get(config.objectType)?.delete(config.relation);
     return this.inner.upsertRelationConfig(config);

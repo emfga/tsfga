@@ -301,32 +301,6 @@ export class KyselyTupleStore implements TupleStore {
     return rows.map((r) => r.object_id);
   }
 
-  async listDirectSubjects(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<
-    Array<{
-      subjectType: string;
-      subjectId: string;
-      subjectRelation: string | null;
-    }>
-  > {
-    const rows = await this.db
-      .selectFrom("tsfga.tuples")
-      .select(["subject_type", "subject_id", "subject_relation"])
-      .where("object_type", "=", objectType)
-      .where("object_id", "=", objectId)
-      .where("relation", "=", relation)
-      .execute();
-
-    return rows.map((r) => ({
-      subjectType: r.subject_type,
-      subjectId: r.subject_id === WILDCARD_SENTINEL ? "*" : r.subject_id,
-      subjectRelation: r.subject_relation,
-    }));
-  }
-
   async upsertRelationConfig(config: RelationConfig): Promise<void> {
     const ttuJson = config.tupleToUserset
       ? JSON.stringify(config.tupleToUserset)

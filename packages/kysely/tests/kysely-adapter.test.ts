@@ -613,7 +613,7 @@ describe("KyselyTupleStore", () => {
       expect(tuples[0]?.subjectId).toBe("*");
     });
 
-    test("listDirectSubjects maps the sentinel back to *", async () => {
+    test("findTuplesByRelation maps the sentinel back to *", async () => {
       await store.insertTuple({
         objectType: "doc",
         objectId: uuid1,
@@ -629,10 +629,10 @@ describe("KyselyTupleStore", () => {
         subjectId: uuid2,
       });
 
-      const subjects = await store.listDirectSubjects("doc", uuid1, "viewer");
+      const subjects = await store.findTuplesByRelation("doc", uuid1, "viewer");
       expect(subjects).toHaveLength(2);
-      expect(subjects.find((s) => s.subjectId === "*")).toBeTruthy();
-      expect(subjects.find((s) => s.subjectId === sentinel)).toBe(undefined);
+      expect(subjects.find((t) => t.subjectId === "*")).toBeTruthy();
+      expect(subjects.find((t) => t.subjectId === sentinel)).toBe(undefined);
     });
 
     test("deleteTuple removes a wildcard tuple by *", async () => {
@@ -868,7 +868,7 @@ describe("KyselyTupleStore", () => {
       expect(ids.sort()).toEqual([uuid1, uuid3].sort());
     });
 
-    test("listDirectSubjects", async () => {
+    test("findTuplesByRelation returns direct and userset rows", async () => {
       await store.insertTuple({
         objectType: "channel",
         objectId: uuid1,
@@ -885,14 +885,14 @@ describe("KyselyTupleStore", () => {
         subjectRelation: "member",
       });
 
-      const subjects = await store.listDirectSubjects(
+      const subjects = await store.findTuplesByRelation(
         "channel",
         uuid1,
         "writer",
       );
       expect(subjects).toHaveLength(2);
-      expect(subjects.find((s) => s.subjectId === uuid2)).toBeTruthy();
-      expect(subjects.find((s) => s.subjectRelation === "member")).toBeTruthy();
+      expect(subjects.find((t) => t.subjectId === uuid2)).toBeTruthy();
+      expect(subjects.find((t) => t.subjectRelation === "member")).toBeTruthy();
     });
   });
 
@@ -1064,12 +1064,17 @@ describe("KyselyTupleStore", () => {
         uuid1,
       ]);
       expect(
-        await camelStore.listDirectSubjects("channel", uuid1, "writer"),
+        await camelStore.findTuplesByRelation("channel", uuid1, "writer"),
       ).toEqual([
         {
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
           subjectType: "workspace",
           subjectId: uuid3,
           subjectRelation: "member",
+          conditionName: null,
+          conditionContext: null,
         },
       ]);
     });

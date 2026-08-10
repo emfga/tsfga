@@ -164,21 +164,27 @@ export function createTsfga(
       // security boundary. `clampToQuery` already refused that
       // trade for the check reads; this is the same call.
       const config = await store.findRelationConfig(objectType, relation);
-      const subjects = await store.listDirectSubjects(
+      const tuples = await store.findTuplesByRelation(
         objectType,
         objectId,
         relation,
       );
-      return subjects.filter((subject) =>
-        admitsSubjectRef(
-          config,
-          directSubjectRef(
-            subject.subjectType,
-            subject.subjectId,
-            subject.subjectRelation,
+      return tuples
+        .filter((tuple) =>
+          admitsSubjectRef(
+            config,
+            directSubjectRef(
+              tuple.subjectType,
+              tuple.subjectId,
+              tuple.subjectRelation,
+            ),
           ),
-        ),
-      );
+        )
+        .map((tuple) => ({
+          subjectType: tuple.subjectType,
+          subjectId: tuple.subjectId,
+          subjectRelation: tuple.subjectRelation,
+        }));
     },
 
     writeRelationConfig(config: RelationConfig): Promise<void> {

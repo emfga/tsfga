@@ -205,32 +205,6 @@ export class MockTupleStore implements TupleStore {
     return [...ids];
   }
 
-  async listDirectSubjects(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<
-    Array<{
-      subjectType: string;
-      subjectId: string;
-      subjectRelation: string | null;
-    }>
-  > {
-    this.tally("listDirectSubjects", objectType, objectId, relation);
-    return this.tuples
-      .filter(
-        (t) =>
-          t.objectType === objectType &&
-          t.objectId === objectId &&
-          t.relation === relation,
-      )
-      .map((t) => ({
-        subjectType: t.subjectType,
-        subjectId: t.subjectId,
-        subjectRelation: t.subjectRelation,
-      }));
-  }
-
   async upsertRelationConfig(config: RelationConfig): Promise<void> {
     this.tally("upsertRelationConfig");
     const idx = this.relationConfigs.findIndex(
