@@ -1,4 +1,5 @@
 import { check } from "./check.ts";
+import { type CheckOutcome, checkMany } from "./check-many.ts";
 import { listObjects } from "./list-objects.ts";
 import type { TupleStore } from "./store-interface.ts";
 import { validateTupleWrite } from "./tuple-validation.ts";
@@ -25,6 +26,26 @@ export interface TsfgaClient {
    *   same validation `addTuple` applies.
    */
   check(request: CheckRequest): Promise<boolean>;
+  /**
+   * Check several requests against one shared resolution scope, so
+   * a node reached by more than one of them is resolved once for
+   * the whole batch rather than once per call. Use it wherever a
+   * request answers several permission questions at a time: the
+   * saving is the shared part of the graph, which is usually most
+   * of it.
+   *
+   * Answers come back in request order, one per request. A check
+   * that fails reports its error in its own outcome instead of
+   * failing the batch, matching OpenFGA's BatchCheck; only invalid
+   * options throw.
+   *
+   * The scope is bounded by the call, so it can be used inside a
+   * transaction: a tuple written earlier in the same transaction is
+   * visible to it, which is why this is a scope and not a cache.
+   * Requests sharing a `context` object share the memo — pass one
+   * object rather than rebuilding an equal one per request.
+   */
+  checkMany(requests: readonly CheckRequest[]): Promise<CheckOutcome[]>;
   addTuple(request: AddTupleRequest): Promise<void>;
   removeTuple(request: RemoveTupleRequest): Promise<boolean>;
   /**
@@ -74,6 +95,10 @@ export function createTsfga(
   return {
     check(request: CheckRequest): Promise<boolean> {
       return check(store, request, options);
+    },
+
+    checkMany(requests: readonly CheckRequest[]): Promise<CheckOutcome[]> {
+      return checkMany(store, requests, options);
     },
 
     async addTuple(request: AddTupleRequest): Promise<void> {
@@ -140,6 +165,7 @@ export function createTsfga(
 
 // Re-exports
 export { check } from "./check.ts";
+export { type CheckOutcome, checkMany } from "./check-many.ts";
 export { evaluateTupleCondition } from "./conditions.ts";
 export { ContextualTupleStore } from "./contextual-store.ts";
 export {

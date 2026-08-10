@@ -447,8 +447,12 @@ export function createCheckScope(
 
   return {
     // Cache for relation configs and condition definitions: static
-    // per model, but read at every node.
-    store: new CachingTupleStore(store),
+    // per model, but read at every node. A store that already
+    // caches is passed through: `checkMany` builds a scope per
+    // context group and they share one config cache, which a second
+    // wrapper would silently split in two.
+    store:
+      store instanceof CachingTupleStore ? store : new CachingTupleStore(store),
     maxDepth: options.maxDepth ?? 25,
     maxBreadth,
     memo: new Map(),

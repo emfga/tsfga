@@ -127,6 +127,15 @@ export interface CheckOptions {
    * integer >= 1, or Infinity.
    */
   maxBreadth?: number;
+  /**
+   * Maximum number of whole checks of one `checkMany` batch
+   * resolved concurrently (default: 50, matching OpenFGA's
+   * `OPENFGA_MAX_CONCURRENT_CHECKS_PER_BATCH_CHECK`). A separate
+   * knob from `maxBreadth`, which bounds the branches within one
+   * check. Ignored by `check` and `listObjects`. Must be an
+   * integer >= 1, or Infinity.
+   */
+  maxConcurrentChecks?: number;
 }
 
 /** Parameters for adding a tuple */
