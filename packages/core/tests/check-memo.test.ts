@@ -355,13 +355,21 @@ describe("request-scoped node memoization", () => {
           relation: "top",
           impliedBy: ["left", "right"],
         }),
-        makeConfig({ objectType: "doc", relation: "left", impliedBy: ["deep"] }),
+        makeConfig({
+          objectType: "doc",
+          relation: "left",
+          impliedBy: ["deep"],
+        }),
         makeConfig({
           objectType: "doc",
           relation: "right",
           impliedBy: ["deep"],
         }),
-        makeConfig({ objectType: "doc", relation: "deep", impliedBy: ["leaf"] }),
+        makeConfig({
+          objectType: "doc",
+          relation: "deep",
+          impliedBy: ["leaf"],
+        }),
         makeConfig({
           objectType: "doc",
           relation: "leaf",

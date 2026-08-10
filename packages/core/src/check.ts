@@ -353,10 +353,79 @@ interface Frame {
    * node's resolution.
    */
   readonly waits: WaitNode | null;
+  /** Whether anyone is still interested in this call's answer. */
+  readonly branch: Branch;
 }
 
 /** The frame a check starts from: nothing is enclosing it. */
-const ROOT_FRAME: Frame = { waits: null };
+function rootFrame(): Frame {
+  return { waits: null, branch: new Branch(null) };
+}
+
+/**
+ * One branch of a set operator, and whether its answer is still
+ * wanted.
+ *
+ * A union that has found its grant stops *launching* queued
+ * branches, but the branches already in flight used to keep
+ * walking: a subtree resolving reads nobody will ever look at,
+ * against a store the caller believes it has finished with. On a
+ * pooled connection that also holds the connection past the end of
+ * the request that borrowed it.
+ *
+ * Abandonment is cooperative rather than an `AbortSignal` threaded
+ * into `TupleStore`. It costs no change to the store contract and
+ * no work for adapter authors; what it cannot do is call back a
+ * read already handed to the store. So the read in flight when a
+ * branch is abandoned still completes — everything after it does
+ * not.
+ *
+ * Nesting is by parent link: abandoning a branch abandons every
+ * branch opened underneath it, without having to find them.
+ */
+class Branch {
+  private flag = false;
+
+  constructor(private readonly parent: Branch | null) {}
+
+  abandon(): void {
+    this.flag = true;
+  }
+
+  get abandoned(): boolean {
+    for (let branch: Branch | null = this; branch; branch = branch.parent) {
+      if (branch.flag) return true;
+    }
+    return false;
+  }
+}
+
+/**
+ * Thrown by an abandoned branch instead of an answer.
+ *
+ * It is never seen by a caller: a branch is abandoned only by a
+ * combinator that has already settled and therefore ignores what
+ * its branches do next, and the root branch of a check is never
+ * abandoned at all. The one other reader is a coalesced waiter,
+ * whose fallback treats every rejection alike.
+ *
+ * Deliberately not a `TsfgaError`: it is not part of the error
+ * surface and must never be mistaken for one.
+ */
+class BranchAbandoned extends Error {
+  constructor() {
+    super("check branch abandoned after the result was decided");
+    this.name = "BranchAbandoned";
+  }
+}
+
+/**
+ * One branch of a set operator, as handed to the combinator. It
+ * receives the branch it runs in so that anything it dispatches can
+ * be abandoned with it; handlers that reach no further than a
+ * condition evaluation ignore the argument.
+ */
+type Handler = (branch: Branch) => Promise<CheckResult>;
 
 export function createCheckScope(
   store: TupleStore,
@@ -422,7 +491,13 @@ export async function runCheck(
     };
   }
 
-  const result = await checkNode(resolution, request, 0, new Set(), ROOT_FRAME);
+  const result = await checkNode(
+    resolution,
+    request,
+    0,
+    new Set(),
+    rootFrame(),
+  );
   // The indeterminacy flag is internal; a cycle at the root is an
   // ordinary deny to the caller, as it is on OpenFGA's wire.
   return result.allowed;
@@ -547,7 +622,7 @@ async function checkNode(
     request,
     depth,
     visited,
-    waits ? { waits } : frame,
+    waits ? { waits, branch: frame.branch } : frame,
   );
 
   if (waits) {
@@ -610,6 +685,12 @@ async function resolveNode(
   frame: Frame,
 ): Promise<CheckResult> {
   const store = scope.store;
+  // Nothing below this line is worth a round trip if the answer
+  // this branch was going to contribute is already discarded.
+  if (frame.branch.abandoned) {
+    throw new BranchAbandoned();
+  }
+
   // Fetch relation config once for use across all steps — and
   // before the tuple reads, which are gated on it.
   //
@@ -884,7 +965,7 @@ async function checkBase(
   }
 
   // Collect all sub-check handlers for concurrent resolution
-  const handlers: Array<() => Promise<CheckResult>> = [];
+  const handlers: Handler[] = [];
 
   // Conditioned direct/wildcard hits race as union branches so
   // their condition evaluation (a possible condition-definition
@@ -904,7 +985,10 @@ async function checkBase(
   for (const userset of usersetTuples) {
     if (!userset.subjectRelation) continue;
     const relation = userset.subjectRelation;
-    handlers.push(async () => {
+    handlers.push(async (branch) => {
+      // The condition can cost a condition-definition fetch, so it
+      // is behind the same gate as a node read.
+      if (branch.abandoned) throw new BranchAbandoned();
       if (!(await evaluateTupleCondition(store, userset, request.context))) {
         return DENIED;
       }
@@ -920,7 +1004,7 @@ async function checkBase(
         },
         depth + 1,
         path,
-        frame,
+        { waits: frame.waits, branch },
       );
     });
   }
@@ -930,13 +1014,16 @@ async function checkBase(
   // on `check`.
   if (config?.impliedBy) {
     for (const impliedRelation of config.impliedBy) {
-      handlers.push(() =>
+      handlers.push((branch) =>
         checkNode(
           scope,
           { ...request, relation: impliedRelation },
           depth,
           path,
-          frame,
+          {
+            waits: frame.waits,
+            branch,
+          },
         ),
       );
     }
@@ -945,14 +1032,11 @@ async function checkBase(
   // Step 4: Computed userset handler. Same object, no depth cost.
   if (config?.computedUserset) {
     const computedUserset = config.computedUserset;
-    handlers.push(() =>
-      checkNode(
-        scope,
-        { ...request, relation: computedUserset },
-        depth,
-        path,
-        frame,
-      ),
+    handlers.push((branch) =>
+      checkNode(scope, { ...request, relation: computedUserset }, depth, path, {
+        waits: frame.waits,
+        branch,
+      }),
     );
   }
 
@@ -960,7 +1044,8 @@ async function checkBase(
   // moves to another object, so each child costs one depth.
   if (config?.tupleToUserset) {
     const ttuEntries = config.tupleToUserset;
-    handlers.push(async () => {
+    handlers.push(async (branch) => {
+      if (branch.abandoned) throw new BranchAbandoned();
       // Batch all tupleset lookups
       const linkedResults = await Promise.all(
         ttuEntries.map(({ tupleset }) =>
@@ -973,11 +1058,11 @@ async function checkBase(
       );
 
       // Collect all linked-tuple check handlers
-      const ttuHandlers: Array<() => Promise<CheckResult>> = [];
+      const ttuHandlers: Handler[] = [];
       for (const [i, { computedUserset }] of ttuEntries.entries()) {
         const linkedTuples = linkedResults[i] ?? [];
         for (const linked of linkedTuples) {
-          ttuHandlers.push(() =>
+          ttuHandlers.push((child) =>
             checkNode(
               scope,
               {
@@ -990,17 +1075,17 @@ async function checkBase(
               },
               depth + 1,
               path,
-              frame,
+              { waits: frame.waits, branch: child },
             ),
           );
         }
       }
 
-      return resolveUnion(ttuHandlers, maxBreadth);
+      return resolveUnion(ttuHandlers, maxBreadth, branch);
     });
   }
 
-  return resolveUnion(handlers, maxBreadth);
+  return resolveUnion(handlers, maxBreadth, frame.branch);
 }
 
 /**
@@ -1028,35 +1113,42 @@ async function checkIntersection(
     );
   }
 
-  const handlers: Array<() => Promise<CheckResult>> = [];
+  const handlers: Handler[] = [];
 
   for (const operand of operands) {
     if (operand.type === "direct") {
-      handlers.push(() =>
-        checkBase(scope, request, config, reads, depth, path, frame),
+      handlers.push((branch) =>
+        checkBase(scope, request, config, reads, depth, path, {
+          waits: frame.waits,
+          branch,
+        }),
       );
     } else if (operand.type === "computedUserset") {
       // Same object, no depth cost — as with the other rewrites.
-      handlers.push(() =>
+      handlers.push((branch) =>
         checkNode(
           scope,
           { ...request, relation: operand.relation },
           depth,
           path,
-          frame,
+          {
+            waits: frame.waits,
+            branch,
+          },
         ),
       );
     } else {
       // tupleToUserset operand
-      handlers.push(async () => {
+      handlers.push(async (branch) => {
+        if (branch.abandoned) throw new BranchAbandoned();
         const linkedTuples = await store.findTuplesByRelation(
           request.objectType,
           request.objectId,
           operand.tupleset,
         );
-        const ttuHandlers: Array<() => Promise<CheckResult>> = [];
+        const ttuHandlers: Handler[] = [];
         for (const linked of linkedTuples) {
-          ttuHandlers.push(() =>
+          ttuHandlers.push((child) =>
             checkNode(
               scope,
               {
@@ -1069,16 +1161,16 @@ async function checkIntersection(
               },
               depth + 1,
               path,
-              frame,
+              { waits: frame.waits, branch: child },
             ),
           );
         }
-        return resolveUnion(ttuHandlers, maxBreadth);
+        return resolveUnion(ttuHandlers, maxBreadth, branch);
       });
     }
   }
 
-  return resolveIntersection(handlers, maxBreadth);
+  return resolveIntersection(handlers, maxBreadth, frame.branch);
 }
 
 /**
@@ -1091,10 +1183,11 @@ async function checkIntersection(
  * when the union settles are never started.
  */
 function resolveUnion(
-  handlers: Array<() => Promise<CheckResult>>,
+  handlers: Handler[],
   maxBreadth: number,
+  parent: Branch,
 ): Promise<CheckResult> {
-  return resolveShortCircuit(handlers, maxBreadth, UNION_REDUCER);
+  return resolveShortCircuit(handlers, maxBreadth, UNION_REDUCER, parent);
 }
 
 /**
@@ -1108,10 +1201,16 @@ function resolveUnion(
  * intersection settles are never started.
  */
 function resolveIntersection(
-  handlers: Array<() => Promise<CheckResult>>,
+  handlers: Handler[],
   maxBreadth: number,
+  parent: Branch,
 ): Promise<CheckResult> {
-  return resolveShortCircuit(handlers, maxBreadth, INTERSECTION_REDUCER);
+  return resolveShortCircuit(
+    handlers,
+    maxBreadth,
+    INTERSECTION_REDUCER,
+    parent,
+  );
 }
 
 /**
@@ -1136,13 +1235,21 @@ function resolveIntersection(
  * scheduling-dependent, as it is in OpenFGA (whose union keeps the
  * last-completed error instead).
  *
+ * Every launched handler gets a branch of its own, and settling
+ * abandons all of them: a branch whose answer is no longer wanted
+ * stops at its next checkpoint instead of walking its subtree and
+ * reading a store the caller has already finished with. Abandoning
+ * on exhaustion is a no-op — nothing is still running — so the one
+ * call covers both exits.
+ *
  * Exported for direct unit tests only; not part of the public
  * package API (not re-exported from index.ts).
  */
 export function resolveShortCircuit(
-  handlers: Array<() => Promise<CheckResult>>,
+  handlers: Handler[],
   maxBreadth: number,
   reducer: Reducer,
+  parent: Branch = new Branch(null),
 ): Promise<CheckResult> {
   return new Promise((resolve, reject) => {
     let next = 0;
@@ -1151,9 +1258,17 @@ export function resolveShortCircuit(
     let firstError: unknown;
     let hasError = false;
     let accumulated = reducer.initial;
+    const launched: Branch[] = [];
+
+    const abandonLosers = () => {
+      for (const branch of launched) {
+        branch.abandon();
+      }
+    };
 
     const settleExhausted = () => {
       settled = true;
+      abandonLosers();
       if (hasError) {
         reject(firstError);
       } else {
@@ -1176,9 +1291,11 @@ export function resolveShortCircuit(
         next++;
         if (!handler) continue;
         active++;
-        let branch: Promise<CheckResult>;
+        const branch = new Branch(parent);
+        launched.push(branch);
+        let outcome: Promise<CheckResult>;
         try {
-          branch = handler();
+          outcome = handler(branch);
         } catch (error) {
           // A synchronously-throwing handler counts as a rejected
           // branch; without this its slot would leak and the
@@ -1190,12 +1307,13 @@ export function resolveShortCircuit(
           }
           continue;
         }
-        branch.then(
+        outcome.then(
           (result) => {
             if (settled) return;
             const decided = reducer.decide(result);
             if (decided) {
               settled = true;
+              abandonLosers();
               resolve(decided);
               return;
             }
