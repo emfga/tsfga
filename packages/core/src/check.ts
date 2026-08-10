@@ -226,6 +226,12 @@ export async function check(
  * Contextual tuples are the other half of that constraint and
  * `runCheck` handles them itself, below.
  *
+ * It doubles as the resolution context every node is handed, which
+ * is why it is threaded down instead of being unpacked into
+ * positional parameters: `checkNode` would otherwise carry a
+ * parameter per shared field, and every recursive call site would
+ * have to repeat them in the right order.
+ *
  * Internal. Not re-exported from `index.ts`.
  */
 export interface CheckScope {
@@ -268,8 +274,7 @@ export async function runCheck(
   scope: CheckScope,
   request: CheckRequest,
 ): Promise<boolean> {
-  let store = scope.store;
-  let memo = scope.memo;
+  let resolution = scope;
 
   // Wrap store with contextual tuples for the whole request.
   // Contextual tuples must pass the same validation as addTuple.
@@ -287,23 +292,18 @@ export async function runCheck(
         throw validation.reason;
       }
     }
-    store = new ContextualTupleStore(scope.store, request.contextualTuples);
     // These tuples exist for this request only, so results resolved
     // over them are not shareable — and results already in the
     // scope's memo were resolved over a graph missing them. Neither
     // direction is safe, so this request memoizes on its own.
-    memo = new Map();
+    resolution = {
+      ...scope,
+      store: new ContextualTupleStore(scope.store, request.contextualTuples),
+      memo: new Map(),
+    };
   }
 
-  const result = await checkNode(
-    store,
-    request,
-    scope.maxDepth,
-    scope.maxBreadth,
-    0,
-    new Set(),
-    memo,
-  );
+  const result = await checkNode(resolution, request, 0, new Set());
   // The indeterminacy flag is internal; a cycle at the root is an
   // ordinary deny to the caller, as it is on OpenFGA's wire.
   return result.allowed;
@@ -317,14 +317,12 @@ export async function runCheck(
  * forever.
  */
 async function checkNode(
-  store: TupleStore,
+  scope: CheckScope,
   request: CheckRequest,
-  maxDepth: number,
-  maxBreadth: number,
   depth: number,
   path: ReadonlySet<string>,
-  memo: NodeMemo,
 ): Promise<CheckResult> {
+  const { maxDepth, memo } = scope;
   // `depth` counts dispatches already made, so the budget is spent
   // once it reaches maxDepth — OpenFGA errors on
   // `Depth == maxResolutionDepth`, before resolving the node.
@@ -357,15 +355,7 @@ async function checkNode(
   const visited = new Set(path);
   visited.add(key);
 
-  const result = await resolveNode(
-    store,
-    request,
-    maxDepth,
-    maxBreadth,
-    depth,
-    visited,
-    memo,
-  );
+  const result = await resolveNode(scope, request, depth, visited);
 
   // Only path-independent results are publishable.
   //
@@ -401,14 +391,12 @@ async function checkNode(
  * lookup and the memo write bracket a single call.
  */
 async function resolveNode(
-  store: TupleStore,
+  scope: CheckScope,
   request: CheckRequest,
-  maxDepth: number,
-  maxBreadth: number,
   depth: number,
   visited: ReadonlySet<string>,
-  memo: NodeMemo,
 ): Promise<CheckResult> {
+  const store = scope.store;
   // Fetch relation config once for use across all steps — and
   // before the tuple reads, which are gated on it.
   //
@@ -434,28 +422,8 @@ async function resolveNode(
   // Base resolution: intersection replaces steps 1-5 when present
   const resolveBase = (): Promise<CheckResult> =>
     config?.intersection
-      ? checkIntersection(
-          store,
-          request,
-          config,
-          reads,
-          maxDepth,
-          maxBreadth,
-          depth,
-          visited,
-          memo,
-        )
-      : checkBase(
-          store,
-          request,
-          config,
-          reads,
-          maxDepth,
-          maxBreadth,
-          depth,
-          visited,
-          memo,
-        );
+      ? checkIntersection(scope, request, config, reads, depth, visited)
+      : checkBase(scope, request, config, reads, depth, visited);
 
   // Exclusion applies on top of the base result — including on top
   // of intersection results. A definitive deny short-circuits past
@@ -478,15 +446,7 @@ async function resolveNode(
       resolveBase(),
       // Same object, a rewrite of it — no depth cost (upstream
       // builds the subtract branch on the unchanged request).
-      checkNode(
-        store,
-        { ...request, relation: excludedBy },
-        maxDepth,
-        maxBreadth,
-        depth,
-        visited,
-        memo,
-      ),
+      checkNode(scope, { ...request, relation: excludedBy }, depth, visited),
     ]);
     if (
       exclusionResult.status === "fulfilled" &&
@@ -680,16 +640,14 @@ async function evaluateCondition(
  * Base check: steps 1-5 without exclusion or intersection handling.
  */
 async function checkBase(
-  store: TupleStore,
+  scope: CheckScope,
   request: CheckRequest,
   config: RelationConfig | null,
   reads: Promise<CheckTuples>,
-  maxDepth: number,
-  maxBreadth: number,
   depth: number,
   path: ReadonlySet<string>,
-  memo: NodeMemo,
 ): Promise<CheckResult> {
+  const { store, maxBreadth } = scope;
   const {
     direct: directTuple,
     wildcard: wildcardTuple,
@@ -731,7 +689,7 @@ async function checkBase(
         return DENIED;
       }
       return checkNode(
-        store,
+        scope,
         {
           objectType: userset.subjectType,
           objectId: userset.subjectId,
@@ -740,11 +698,8 @@ async function checkBase(
           subjectId: request.subjectId,
           context: request.context,
         },
-        maxDepth,
-        maxBreadth,
         depth + 1,
         path,
-        memo,
       );
     });
   }
@@ -756,13 +711,10 @@ async function checkBase(
     for (const impliedRelation of config.impliedBy) {
       handlers.push(() =>
         checkNode(
-          store,
+          scope,
           { ...request, relation: impliedRelation },
-          maxDepth,
-          maxBreadth,
           depth,
           path,
-          memo,
         ),
       );
     }
@@ -772,15 +724,7 @@ async function checkBase(
   if (config?.computedUserset) {
     const computedUserset = config.computedUserset;
     handlers.push(() =>
-      checkNode(
-        store,
-        { ...request, relation: computedUserset },
-        maxDepth,
-        maxBreadth,
-        depth,
-        path,
-        memo,
-      ),
+      checkNode(scope, { ...request, relation: computedUserset }, depth, path),
     );
   }
 
@@ -807,7 +751,7 @@ async function checkBase(
         for (const linked of linkedTuples) {
           ttuHandlers.push(() =>
             checkNode(
-              store,
+              scope,
               {
                 objectType: linked.subjectType,
                 objectId: linked.subjectId,
@@ -816,11 +760,8 @@ async function checkBase(
                 subjectId: request.subjectId,
                 context: request.context,
               },
-              maxDepth,
-              maxBreadth,
               depth + 1,
               path,
-              memo,
             ),
           );
         }
@@ -837,16 +778,14 @@ async function checkBase(
  * Intersection check: ALL operands must be true.
  */
 async function checkIntersection(
-  store: TupleStore,
+  scope: CheckScope,
   request: CheckRequest,
   config: RelationConfig,
   reads: Promise<CheckTuples>,
-  maxDepth: number,
-  maxBreadth: number,
   depth: number,
   path: ReadonlySet<string>,
-  memo: NodeMemo,
 ): Promise<CheckResult> {
+  const { store, maxBreadth } = scope;
   const operands = config.intersection;
   // An intersection with no operands would resolve vacuously true,
   // granting access to every subject on a malformed config.
@@ -864,29 +803,16 @@ async function checkIntersection(
   for (const operand of operands) {
     if (operand.type === "direct") {
       handlers.push(() =>
-        checkBase(
-          store,
-          request,
-          config,
-          reads,
-          maxDepth,
-          maxBreadth,
-          depth,
-          path,
-          memo,
-        ),
+        checkBase(scope, request, config, reads, depth, path),
       );
     } else if (operand.type === "computedUserset") {
       // Same object, no depth cost — as with the other rewrites.
       handlers.push(() =>
         checkNode(
-          store,
+          scope,
           { ...request, relation: operand.relation },
-          maxDepth,
-          maxBreadth,
           depth,
           path,
-          memo,
         ),
       );
     } else {
@@ -901,7 +827,7 @@ async function checkIntersection(
         for (const linked of linkedTuples) {
           ttuHandlers.push(() =>
             checkNode(
-              store,
+              scope,
               {
                 objectType: linked.subjectType,
                 objectId: linked.subjectId,
@@ -910,11 +836,8 @@ async function checkIntersection(
                 subjectId: request.subjectId,
                 context: request.context,
               },
-              maxDepth,
-              maxBreadth,
               depth + 1,
               path,
-              memo,
             ),
           );
         }
