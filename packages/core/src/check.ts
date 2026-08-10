@@ -75,6 +75,31 @@ export const UNION_REDUCER: Reducer = {
  * Intersection: a cycle is as fatal as a plain `false`, since an
  * operand that could not be resolved cannot be shown to hold. The
  * deciding operand's flag rides out with the denial.
+ *
+ * **The first failing operand decides, whichever kind it is.** The
+ * two kinds are not interchangeable — the flag reaches an
+ * enclosing exclusion, where a cycle denies and a plain `false`
+ * does not — so which operand wins the race is visible in the
+ * final answer. That is upstream's behaviour
+ * (`internal/graph/check.go`, `intersection`: the outcome loop
+ * short-circuits on `CycleDetected || !Allowed` and propagates
+ * that outcome's flag), and matching it means racing as it races.
+ *
+ * Preferring the definitive `false` looks better and is wrong.
+ * Upstream's answer tracks which operand is cheaper to resolve: a
+ * cheap definitive operand and a cheap cycle give different
+ * results, both reproducible. Always choosing the definitive one
+ * matches upstream only when it happens to be the cheap one, and
+ * diverges — fail-open, granting where OpenFGA denies — when it is
+ * not. That was tried, and
+ * `tests/conformance/intersection-cycle-precedence.test.ts` is the
+ * fixture that caught it against the running container.
+ *
+ * The cost is that `maxBreadth` can change the boolean answer on a
+ * model where a cycle reaches an intersection operand, since
+ * breadth is what decides whether the operands race at all.
+ * Upstream has the same exposure through its own concurrency
+ * limit. Documented in the README rather than smoothed over.
  */
 export const INTERSECTION_REDUCER: Reducer = {
   initial: GRANTED,

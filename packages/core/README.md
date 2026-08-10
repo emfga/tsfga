@@ -157,16 +157,35 @@ bounded by `maxBreadth` (default 10, via the same options
 object as `maxDepth`). The default matches OpenFGA's default
 `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT` (10); pass
 `maxBreadth: Infinity` to restore unbounded fanout. Bounding
-breadth never changes the boolean result or whether a check
-errors — it caps how many concurrent store reads a single wide
-node can issue (useful to avoid saturating a connection pool).
-(Before 0.5.0 that invariant had one exception, on a model with a
-cycle running through an intersection; see the changelog.)
+breadth caps how many concurrent store reads a single wide node
+can issue, which is useful to avoid saturating a connection pool.
+It almost never changes the answer — see the exception below.
 When several branches fail, which branch's error surfaces
 depends on completion order — the same nondeterminism OpenFGA
 has. Branches still queued when a node settles are never
 started. `maxBreadth` must be an integer >= 1 or `Infinity`;
 anything else throws `TsfgaError`.
+
+**The exception: a cycle reaching an intersection operand.** An
+intersection denies as soon as one operand fails to hold, and two
+kinds of operand fail to hold — a definitive `false` and a branch
+truncated by a cycle. The first to arrive decides, and it carries
+its own indeterminacy out with the denial. One level up that
+matters: on the subtract side of a `but not`, a cycle denies and a
+plain `false` does not. So on a model where a cycle reaches an
+intersection operand, which operand wins the race can change the
+final answer, and breadth is what decides whether the operands
+race at all.
+
+This is upstream's behaviour, not a tsfga quirk: OpenFGA's
+intersection short-circuits on the first `CycleDetected ||
+!Allowed` outcome and propagates that outcome's flag, so its answer
+tracks which operand is cheaper to resolve and its own concurrency
+limit has the same exposure. Preferring the definitive `false`
+would be deterministic and would diverge from OpenFGA — granting
+where it denies. Matching upstream means racing as it races.
+`tests/conformance/intersection-cycle-precedence.test.ts` pins both
+directions against a live OpenFGA.
 
 `maxBreadth` also bounds how many `listObjects` candidates are
 checked at once — the same knob deliberately, following

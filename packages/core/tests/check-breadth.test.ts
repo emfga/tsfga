@@ -598,8 +598,12 @@ describe("resolveShortCircuit hardening", () => {
     expect(unionGranted.allowed).toBe(true);
     expect(unionGranted.cycleDetected).toBe(false);
 
-    // Intersection: a cycle decides the whole operand set, and
-    // carries its flag out.
+    // Intersection: the first failing operand decides and carries
+    // its flag out, whichever kind of failure it is. So the same
+    // operand set answers differently depending on which failure
+    // is reached first — deliberately, because that is what
+    // upstream does and the flag is visible one level up. See
+    // tests/conformance/intersection-cycle-precedence.test.ts.
     const intersected = await resolveShortCircuit(
       [grant, cycle, grant],
       1,
@@ -607,6 +611,22 @@ describe("resolveShortCircuit hardening", () => {
     );
     expect(intersected.allowed).toBe(false);
     expect(intersected.cycleDetected).toBe(true);
+
+    const cycleFirst = await resolveShortCircuit(
+      [cycle, deny],
+      1,
+      INTERSECTION_REDUCER,
+    );
+    expect(cycleFirst.allowed).toBe(false);
+    expect(cycleFirst.cycleDetected).toBe(true);
+
+    const denyFirst = await resolveShortCircuit(
+      [deny, cycle],
+      1,
+      INTERSECTION_REDUCER,
+    );
+    expect(denyFirst.allowed).toBe(false);
+    expect(denyFirst.cycleDetected).toBe(false);
 
     // An error still outranks a cycle-flagged false in a union.
     await expect(

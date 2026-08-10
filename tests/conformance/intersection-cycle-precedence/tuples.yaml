@@ -1,0 +1,74 @@
+# An intersection whose operands are one definitive `false` and
+# one cycle-truncated branch. Which of the two OpenFGA reports is
+# decided by which finishes first, and the difference is visible
+# one level up: `guarded` subtracts `blocked`, and on the subtract
+# side of a `but not` a cycle denies while a plain `false` does
+# not.
+#
+# The cycle is built from tuples because OpenFGA's typesystem
+# rejects a model-level one, and it alternates member/owner
+# because a single self-referencing relation is served by the
+# recursive resolver and never sets the flag. Both facts are the
+# same ones the `cycles` fixture rests on.
+#
+# document:1#cyclic -> group:loopa#member -> group:loopb#owner
+#                   -> group:loopa#member  (loop)
+- user: group:loopa#member
+  relation: cyclic
+  object: document:1
+- user: group:loopb#owner
+  relation: member
+  object: group:loopa
+- user: group:loopa#member
+  relation: owner
+  object: group:loopb
+
+# The other operand, `chain9`, is definitively false: nobody holds
+# `chain0` anywhere on the parent chain. It is also *slow* — nine
+# sequential tuple-to-userset dispatches against the cycle's three
+# reads — which is what makes the cycle win the race, on both
+# systems, reproducibly.
+- user: document:2
+  relation: parent
+  object: document:1
+- user: document:3
+  relation: parent
+  object: document:2
+- user: document:4
+  relation: parent
+  object: document:3
+- user: document:5
+  relation: parent
+  object: document:4
+- user: document:6
+  relation: parent
+  object: document:5
+- user: document:7
+  relation: parent
+  object: document:6
+- user: document:8
+  relation: parent
+  object: document:7
+- user: document:9
+  relation: parent
+  object: document:8
+- user: document:10
+  relation: parent
+  object: document:9
+- user: document:11
+  relation: parent
+  object: document:10
+
+# anne holds the base grant that `guarded` subtracts from.
+- user: user:anne
+  relation: base
+  object: document:1
+
+# ...and a conditioned grant with no stored context, so evaluating
+# it fails. That is the error operand of `errored_and_cycle`; the
+# `condition-error-siblings` fixture uses the same device.
+- user: user:anne
+  relation: conditioned
+  object: document:1
+  condition:
+    name: valid_ip
