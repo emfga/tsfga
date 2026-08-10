@@ -116,3 +116,43 @@ export async function fgaCheck(
     return null;
   }
 }
+
+/**
+ * Write one tuple and report whether OpenFGA accepted it.
+ *
+ * Distinct from `fgaWriteTuples`, which reads a fixture and lets a
+ * rejection throw. Here the rejection *is* the result under test,
+ * so it is reported rather than raised.
+ */
+export async function fgaWrite(
+  storeId: string,
+  authorizationModelId: string,
+  tuple: {
+    objectType: string;
+    objectId: string;
+    relation: string;
+    subjectType: string;
+    subjectId: string;
+    subjectRelation?: string;
+  },
+): Promise<"accepted" | "refused"> {
+  const client = createClient(storeId);
+  const user = tuple.subjectRelation
+    ? `${tuple.subjectType}:${tuple.subjectId}#${tuple.subjectRelation}`
+    : `${tuple.subjectType}:${tuple.subjectId}`;
+  try {
+    await client.writeTuples(
+      [
+        {
+          user,
+          relation: tuple.relation,
+          object: `${tuple.objectType}:${tuple.objectId}`,
+        },
+      ],
+      { authorizationModelId },
+    );
+    return "accepted";
+  } catch {
+    return "refused";
+  }
+}

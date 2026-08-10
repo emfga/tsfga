@@ -115,102 +115,99 @@ describe("Cycle Conformance", () => {
     tsfgaClient = createTsfga(store);
 
     // === Relation configs ===
-    for (const relation of ["member", "owner"]) {
+    // The two mutually reference each other, so each admits the
+    // *other's* userset — the model's cycle, and not symmetric.
+    for (const [relation, other] of [
+      ["member", "owner"],
+      ["owner", "member"],
+    ]) {
       await tsfgaClient.writeRelationConfig({
         objectType: "group",
         relation,
-        directlyAssignableTypes: ["user", "group"],
+        directlyAssignable: ["user", `group#${other}`],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,
         excludedBy: null,
         intersection: null,
-        allowsUsersetSubjects: true,
       });
     }
     await tsfgaClient.writeRelationConfig({
       objectType: "recursive_group",
       relation: "member",
-      directlyAssignableTypes: ["user", "recursive_group"],
+      directlyAssignable: ["user", "recursive_group#member"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "cyclic",
-      directlyAssignableTypes: ["group"],
+      directlyAssignable: ["group#member"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "recursive_cyclic",
-      directlyAssignableTypes: ["recursive_group"],
+      directlyAssignable: ["recursive_group#member"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     for (const relation of ["granted", "base", "blocked"]) {
       await tsfgaClient.writeRelationConfig({
         objectType: "document",
         relation,
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,
         excludedBy: null,
         intersection: null,
-        allowsUsersetSubjects: false,
       });
     }
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "union_with_cycle",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["cyclic", "granted"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "subtract_cycle",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["base"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: "cyclic",
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "cyclic_base",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["cyclic"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: "blocked",
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "intersect_cycle",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -219,12 +216,11 @@ describe("Cycle Conformance", () => {
         { type: "computedUserset", relation: "granted" },
         { type: "computedUserset", relation: "cyclic" },
       ],
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "intersect_recursive",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -233,7 +229,6 @@ describe("Cycle Conformance", () => {
         { type: "computedUserset", relation: "granted" },
         { type: "computedUserset", relation: "recursive_cyclic" },
       ],
-      allowsUsersetSubjects: false,
     });
 
     // === Tuples: the loops ===

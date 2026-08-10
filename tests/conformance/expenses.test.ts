@@ -52,46 +52,43 @@ describe("Expenses Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "employee",
       relation: "manager",
-      directlyAssignableTypes: ["employee"],
+      directlyAssignable: ["employee"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // employee.can_manage: manager or can_manage from manager
     await tsfgaClient.writeRelationConfig({
       objectType: "employee",
       relation: "can_manage",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["manager"],
       computedUserset: null,
       tupleToUserset: [{ tupleset: "manager", computedUserset: "can_manage" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // report.submitter: [employee]
     await tsfgaClient.writeRelationConfig({
       objectType: "report",
       relation: "submitter",
-      directlyAssignableTypes: ["employee"],
+      directlyAssignable: ["employee"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // report.can_approve: can_manage from submitter
     await tsfgaClient.writeRelationConfig({
       objectType: "report",
       relation: "can_approve",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [
@@ -99,7 +96,6 @@ describe("Expenses Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // === Tuples ===

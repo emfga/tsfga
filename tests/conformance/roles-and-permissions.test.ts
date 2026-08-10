@@ -47,46 +47,42 @@ describe("Roles and Permissions Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "trip",
       relation: "owner",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "trip",
       relation: "viewer",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "trip",
       relation: "booking_adder",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: "owner",
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "trip",
       relation: "booking_viewer",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["viewer", "owner"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // Write tuples

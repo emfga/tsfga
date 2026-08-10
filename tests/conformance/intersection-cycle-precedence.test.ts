@@ -122,13 +122,17 @@ describe("Intersection Cycle Precedence Conformance", () => {
     });
 
     // === group: the two-relation loop ===
-    for (const relation of ["member", "owner"]) {
+    // The two mutually reference each other, so each admits the
+    // *other's* userset — the model's cycle, and not symmetric.
+    for (const [relation, other] of [
+      ["member", "owner"],
+      ["owner", "member"],
+    ]) {
       await tsfgaClient.writeRelationConfig({
         ...base,
         objectType: "group",
         relation,
-        directlyAssignableTypes: ["user", "group"],
-        allowsUsersetSubjects: true,
+        directlyAssignable: ["user", `group#${other}`],
       });
     }
 
@@ -137,31 +141,27 @@ describe("Intersection Cycle Precedence Conformance", () => {
       ...base,
       objectType: "document",
       relation: "parent",
-      directlyAssignableTypes: ["document"],
-      allowsUsersetSubjects: false,
+      directlyAssignable: ["document"],
     });
     for (const relation of ["base", "chain0"]) {
       await tsfgaClient.writeRelationConfig({
         ...base,
         objectType: "document",
         relation,
-        directlyAssignableTypes: ["user"],
-        allowsUsersetSubjects: false,
+        directlyAssignable: ["user"],
       });
     }
     await tsfgaClient.writeRelationConfig({
       ...base,
       objectType: "document",
       relation: "conditioned",
-      directlyAssignableTypes: ["user"],
-      allowsUsersetSubjects: false,
+      directlyAssignable: ["user"],
     });
     await tsfgaClient.writeRelationConfig({
       ...base,
       objectType: "document",
       relation: "cyclic",
-      directlyAssignableTypes: ["group"],
-      allowsUsersetSubjects: true,
+      directlyAssignable: ["group#member"],
     });
     // The slow operand: nine sequential TTU hops that find nothing.
     for (let k = 1; k <= CHAIN_LENGTH; k++) {
@@ -169,51 +169,47 @@ describe("Intersection Cycle Precedence Conformance", () => {
         ...base,
         objectType: "document",
         relation: `chain${k}`,
-        directlyAssignableTypes: null,
+        // Purely computed above chain0; nothing direct to read.
+        directlyAssignable: [],
         tupleToUserset: [
           { tupleset: "parent", computedUserset: `chain${k - 1}` },
         ],
-        allowsUsersetSubjects: false,
       });
     }
     await tsfgaClient.writeRelationConfig({
       ...base,
       objectType: "document",
       relation: "slow_and_cycle",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       intersection: [
         { type: "computedUserset", relation: `chain${CHAIN_LENGTH}` },
         { type: "computedUserset", relation: "cyclic" },
       ],
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       ...base,
       objectType: "document",
       relation: "blocked",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["slow_and_cycle"],
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       ...base,
       objectType: "document",
       relation: "guarded",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["base"],
       excludedBy: "blocked",
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       ...base,
       objectType: "document",
       relation: "errored_and_cycle",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       intersection: [
         { type: "computedUserset", relation: "conditioned" },
         { type: "computedUserset", relation: "cyclic" },
       ],
-      allowsUsersetSubjects: false,
     });
 
     // === Tuples ===

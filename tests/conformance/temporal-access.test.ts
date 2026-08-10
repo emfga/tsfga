@@ -60,13 +60,12 @@ describe("Temporal Access Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "viewer",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // === Tuples ===

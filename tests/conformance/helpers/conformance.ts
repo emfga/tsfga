@@ -1,6 +1,6 @@
 import { expect } from "bun:test";
-import type { CheckRequest, TsfgaClient } from "@tsfga/core";
-import { fgaCheck } from "./openfga.ts";
+import type { AddTupleRequest, CheckRequest, TsfgaClient } from "@tsfga/core";
+import { fgaCheck, fgaWrite } from "./openfga.ts";
 
 /**
  * Assert that tsfga and OpenFGA return the same result for a permission check.
@@ -42,4 +42,37 @@ export async function expectConformance(
   expect(tsfgaResult).toBe(openFgaResult);
   // And match expected value
   expect(tsfgaResult).toBe(expected);
+}
+
+/**
+ * Assert that tsfga and OpenFGA agree on whether a tuple may be
+ * *written* at all.
+ *
+ * Type restrictions are enforced twice by OpenFGA — once when the
+ * tuple is written, once when a check reads it — and the two must
+ * be checked separately. A suite that only ever writes through the
+ * validating path cannot observe a read-gate divergence, because
+ * the rows that would expose it are the rows the write path
+ * refuses to create.
+ *
+ * `expected` is what both systems must do, so a test that asserts
+ * a *legal* write also fails if either side wrongly refuses it.
+ */
+export async function expectWriteConformance(
+  storeId: string,
+  authorizationModelId: string,
+  tsfgaClient: TsfgaClient,
+  tuple: AddTupleRequest,
+  expected: "accepted" | "refused",
+): Promise<void> {
+  const [tsfgaOutcome, openFgaOutcome] = await Promise.all([
+    tsfgaClient
+      .addTuple(tuple)
+      .then(() => "accepted" as const)
+      .catch(() => "refused" as const),
+    fgaWrite(storeId, authorizationModelId, tuple),
+  ]);
+
+  expect(tsfgaOutcome).toBe(openFgaOutcome);
+  expect(tsfgaOutcome).toBe(expected);
 }

@@ -63,24 +63,22 @@ describe("Wide Union Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "member",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "viewer",
-      directlyAssignableTypes: ["team"],
+      directlyAssignable: ["team#member"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // === Tuples: 12 userset branches on one node ===

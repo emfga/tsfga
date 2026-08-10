@@ -53,68 +53,62 @@ describe("Slack Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "workspace",
       relation: "legacy_admin",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "workspace",
       relation: "channels_admin",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: ["legacy_admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "workspace",
       relation: "member",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: ["channels_admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "workspace",
       relation: "guest",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "channel",
       relation: "writer",
-      directlyAssignableTypes: ["user", "workspace"],
+      directlyAssignable: ["user", "workspace#member"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "channel",
       relation: "commenter",
-      directlyAssignableTypes: ["user", "workspace"],
+      directlyAssignable: ["user", "workspace#member"],
       impliedBy: ["writer"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // Write tuples using UUIDs

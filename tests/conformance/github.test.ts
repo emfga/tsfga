@@ -56,72 +56,67 @@ describe("GitHub Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "member",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // organization.repo_admin
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "repo_admin",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // organization.repo_reader
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "repo_reader",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // team.member: [user, team#member]
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "member",
-      directlyAssignableTypes: ["user", "team"],
+      directlyAssignable: ["user", "team#member"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // repo.organization
     await tsfgaClient.writeRelationConfig({
       objectType: "repo",
       relation: "organization",
-      directlyAssignableTypes: ["organization"],
+      directlyAssignable: ["organization"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // repo.admin: [user, team#member] or repo_admin from organization
     await tsfgaClient.writeRelationConfig({
       objectType: "repo",
       relation: "admin",
-      directlyAssignableTypes: ["user", "team"],
+      directlyAssignable: ["user", "team#member"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [
@@ -129,53 +124,49 @@ describe("GitHub Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // repo.maintainer: [user, team#member] or admin
     await tsfgaClient.writeRelationConfig({
       objectType: "repo",
       relation: "maintainer",
-      directlyAssignableTypes: ["user", "team"],
+      directlyAssignable: ["user", "team#member"],
       impliedBy: ["admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // repo.writer: [user, team#member] or maintainer
     await tsfgaClient.writeRelationConfig({
       objectType: "repo",
       relation: "writer",
-      directlyAssignableTypes: ["user", "team"],
+      directlyAssignable: ["user", "team#member"],
       impliedBy: ["maintainer"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // repo.triager: [user, team#member] or writer
     await tsfgaClient.writeRelationConfig({
       objectType: "repo",
       relation: "triager",
-      directlyAssignableTypes: ["user", "team"],
+      directlyAssignable: ["user", "team#member"],
       impliedBy: ["writer"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // repo.reader: [user, team#member] or triager or repo_reader from organization
     await tsfgaClient.writeRelationConfig({
       objectType: "repo",
       relation: "reader",
-      directlyAssignableTypes: ["user", "team"],
+      directlyAssignable: ["user", "team#member"],
       impliedBy: ["triager"],
       computedUserset: null,
       tupleToUserset: [
@@ -183,7 +174,6 @@ describe("GitHub Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // === Tuples ===

@@ -48,51 +48,47 @@ describe("Multiple Restrictions Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "member",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "owner",
-      directlyAssignableTypes: ["organization"],
+      directlyAssignable: ["organization"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "writer",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "can_write",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: "writer",
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "can_delete",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -105,7 +101,6 @@ describe("Multiple Restrictions Conformance", () => {
           computedUserset: "member",
         },
       ],
-      allowsUsersetSubjects: false,
     });
 
     // Write tuples

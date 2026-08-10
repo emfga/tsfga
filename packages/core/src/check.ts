@@ -4,8 +4,8 @@ import { ContextualTupleStore } from "./contextual-store.ts";
 import { DepthExceededError, TsfgaError } from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
 import {
-  admitsDirectSubject,
-  admitsUsersetSubjects,
+  admitsSubjectRef,
+  admittedUsersetRefs,
   directSubjectRef,
   validateTupleWrite,
 } from "./tuple-validation.ts";
@@ -810,21 +810,19 @@ async function resolveNode(
  * relation config says cannot match.
  *
  * A part is excluded only when the config *positively rules it
- * out*. No config, or a config that declines to narrow the
- * relation (`directlyAssignableTypes: null`), asks for
- * everything. The gate is the same predicate the write path
- * applies, imported from `tuple-validation.ts` rather than
- * restated, so a tuple that can be written is always a tuple that
- * can be found.
+ * out*. With no config there is nothing to narrow against, so
+ * everything is asked for. The gate is the same predicate the
+ * write path applies, imported from `tuple-validation.ts` rather
+ * than restated, so a tuple that can be written is always a tuple
+ * that can be found.
  *
  * This mirrors upstream, which builds `checkDirect`'s three
  * handlers behind `shouldCheckDirectTuple`,
  * `shouldCheckPublicAssignable` and a non-empty
- * `DirectlyRelatedUsersets` (`internal/graph/check.go`). It is
- * narrower than upstream in one way, noted in the README: a
- * purely computed relation issues no reads at all there, whereas
- * tsfga encodes "purely computed" as the same `null` that means
- * "unrestricted", so it cannot tell the two apart.
+ * `DirectlyRelatedUsersets` (`internal/graph/check.go`) — the
+ * third of which is a list of `type#relation` references, not a
+ * flag, so a relation admitting `team#member` never expands a
+ * `team#owner` row.
  *
  * The gates are sent to the store so it can narrow its query, and
  * re-applied to its reply by `clampToQuery` so that narrowing
@@ -838,23 +836,24 @@ async function readNodeTuples(
   const subjectRef = directSubjectRef(request.subjectType, request.subjectId);
   const wildcardRef = `${request.subjectType}:*`;
 
-  const includeDirect = admitsDirectSubject(config, subjectRef);
+  const includeDirect = admitsSubjectRef(config, subjectRef);
   // Checking the wildcard subject itself makes the two probes the
   // same query, and `directSubjectRef` makes their gates agree
   // too. Ask once: `checkBase` reads the slots identically, so
   // folding it into `direct` loses nothing and saves a duplicate
   // condition evaluation.
   const includeWildcard =
-    request.subjectId === "*"
-      ? false
-      : admitsDirectSubject(config, wildcardRef);
-  const includeUsersets = admitsUsersetSubjects(config);
+    request.subjectId === "*" ? false : admitsSubjectRef(config, wildcardRef);
+  const usersetRefs = admittedUsersetRefs(config);
 
-  // A relation that admits none of the three — say one that is
-  // purely an intersection of rewrites — has nothing to ask for.
-  // Skip the round-trip rather than send a query that cannot
-  // match; the node still resolves through its rewrites.
-  if (!includeDirect && !includeWildcard && !includeUsersets) {
+  // A relation that admits none of the three — one that is purely
+  // computed, or purely an intersection of rewrites — has nothing
+  // to ask for. Skip the round-trip rather than send a query that
+  // cannot match; the node still resolves through its rewrites.
+  // Reachable now that `directlyAssignable` distinguishes "admits
+  // nothing" from "declines to narrow", which the old nullable
+  // type list could not.
+  if (!includeDirect && !includeWildcard && usersetRefs?.length === 0) {
     return NO_TUPLES;
   }
 
@@ -866,7 +865,7 @@ async function readNodeTuples(
     subjectId: request.subjectId,
     includeDirect,
     includeWildcard,
-    includeUsersets,
+    usersetRefs,
   };
   return clampToQuery(await store.findCheckTuples(query), query);
 }
@@ -887,7 +886,7 @@ const NO_TUPLES: CheckTuples = { direct: null, wildcard: null, usersets: [] };
  * for it. Merging moved that enforcement into a flag on a request,
  * and a flag is only as good as the store honouring it. That
  * would make every adapter, including third-party ones, part of
- * the security boundary: a store that ignored `includeUsersets`
+ * the security boundary: a store that ignored `usersetRefs`
  * would hand back a userset row on a relation that forbids
  * usersets, and `checkBase` would expand it and grant. Silently.
  *
@@ -923,13 +922,23 @@ function clampToQuery(
     tuple.subjectRelation === null;
 
   // Usersets carry their own subject type — `team:eng#member` on a
-  // `user` check — so only the node and the subject relation are
-  // checkable here.
-  const isUserset = (tuple: Tuple): boolean =>
-    onNode(tuple) && tuple.subjectRelation !== null;
+  // `user` check — so the subject type is not comparable to the
+  // query's. What *is* checkable, and is the whole point of
+  // carrying `usersetRefs`, is that `type#relation` is one the
+  // relation admits. This is the clamp that closes T6: a store
+  // that hands back a `team#owner` row on a relation admitting
+  // only `team#member` loses it here rather than having it
+  // expanded and granted.
+  const isUserset = (tuple: Tuple): boolean => {
+    if (!onNode(tuple) || tuple.subjectRelation === null) return false;
+    if (query.usersetRefs === null) return true;
+    return query.usersetRefs.includes(
+      `${tuple.subjectType}#${tuple.subjectRelation}`,
+    );
+  };
 
   let usersets: readonly Tuple[] = NO_TUPLES.usersets;
-  if (query.includeUsersets) {
+  if (query.usersetRefs === null || query.usersetRefs.length > 0) {
     // Reuse the reply's array when it is already clean, which is
     // every well-behaved store on every node.
     usersets = reply.usersets.every(isUserset)

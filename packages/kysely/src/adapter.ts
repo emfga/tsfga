@@ -83,12 +83,22 @@ export class KyselyTupleStore implements TupleStore {
    * afterwards.
    */
   async findCheckTuples(query: CheckTuplesQuery): Promise<CheckTuples> {
-    const { includeDirect, includeWildcard, includeUsersets } = query;
+    const { includeDirect, includeWildcard, usersetRefs } = query;
+    // `null` declines to narrow the userset scan; `[]` excludes it.
+    const includeUsersets = usersetRefs === null || usersetRefs.length > 0;
     // Every part excluded means no row could be used. Return the
     // empty result rather than a `WHERE false` round-trip.
     if (!includeDirect && !includeWildcard && !includeUsersets) {
       return { direct: null, wildcard: null, usersets: [] };
     }
+    // The admitted refs are `type#relation` pairs, so the scan
+    // narrows to exactly the (subject_type, subject_relation)
+    // combinations the model can use. Core re-clamps the reply
+    // against the same list, so this stays an optimization.
+    const usersetPairs = (usersetRefs ?? []).map((ref) => {
+      const hash = ref.indexOf("#");
+      return { type: ref.slice(0, hash), relation: ref.slice(hash + 1) };
+    });
 
     const dbSubjectId =
       query.subjectId === "*" ? WILDCARD_SENTINEL : query.subjectId;
@@ -119,7 +129,16 @@ export class KyselyTupleStore implements TupleStore {
                 ]),
               ]
             : []),
-          ...(includeUsersets ? [eb("subject_relation", "is not", null)] : []),
+          ...(includeUsersets
+            ? usersetRefs === null
+              ? [eb("subject_relation", "is not", null)]
+              : usersetPairs.map((pair) =>
+                  eb.and([
+                    eb("subject_type", "=", pair.type),
+                    eb("subject_relation", "=", pair.relation),
+                  ]),
+                )
+            : []),
         ]),
       )
       .execute();
@@ -184,13 +203,12 @@ export class KyselyTupleStore implements TupleStore {
     return {
       objectType: row.object_type,
       relation: row.relation,
-      directlyAssignableTypes: row.directly_assignable_types,
+      directlyAssignable: this.parseDirectlyAssignable(row.directly_assignable),
       impliedBy: row.implied_by,
       computedUserset: row.computed_userset,
       tupleToUserset: this.parseTupleToUserset(row.tuple_to_userset),
       excludedBy: row.excluded_by,
       intersection: this.parseIntersection(row.intersection),
-      allowsUsersetSubjects: row.allows_userset_subjects,
     };
   }
 
@@ -316,29 +334,28 @@ export class KyselyTupleStore implements TupleStore {
     const intersectionJson = config.intersection
       ? JSON.stringify(config.intersection)
       : null;
+    const directlyAssignable = JSON.stringify(config.directlyAssignable);
 
     await this.db
       .insertInto("tsfga.relation_configs")
       .values({
         object_type: config.objectType,
         relation: config.relation,
-        directly_assignable_types: config.directlyAssignableTypes ?? null,
+        directly_assignable: directlyAssignable,
         implied_by: config.impliedBy ?? null,
         computed_userset: config.computedUserset ?? null,
         tuple_to_userset: ttuJson,
         excluded_by: config.excludedBy ?? null,
         intersection: intersectionJson,
-        allows_userset_subjects: config.allowsUsersetSubjects,
       })
       .onConflict((oc) =>
         oc.columns(["object_type", "relation"]).doUpdateSet({
-          directly_assignable_types: config.directlyAssignableTypes ?? null,
+          directly_assignable: directlyAssignable,
           implied_by: config.impliedBy ?? null,
           computed_userset: config.computedUserset ?? null,
           tuple_to_userset: ttuJson,
           excluded_by: config.excludedBy ?? null,
           intersection: intersectionJson,
-          allows_userset_subjects: config.allowsUsersetSubjects,
         }),
       )
       .execute();
@@ -409,6 +426,35 @@ export class KyselyTupleStore implements TupleStore {
       conditionName: row.condition_name,
       conditionContext: this.parseConditionContext(row.condition_context),
     };
+  }
+
+  /**
+   * `directly_assignable` is NOT NULL and every entry is a type
+   * restriction string, so anything else in the column is a row no
+   * tsfga write could have produced. Validated rather than cast:
+   * the value gates both the write path and the check read gate,
+   * so a malformed one must stop the request, not widen it.
+   */
+  private parseDirectlyAssignable(value: Json): string[] {
+    if (!Array.isArray(value)) {
+      throw new InvalidStoredDataError(
+        "relation_configs",
+        "directly_assignable",
+        "expected array",
+      );
+    }
+    const result: string[] = [];
+    for (const item of value) {
+      if (typeof item !== "string") {
+        throw new InvalidStoredDataError(
+          "relation_configs",
+          "directly_assignable",
+          "each element must be a type restriction string",
+        );
+      }
+      result.push(item);
+    }
+    return result;
   }
 
   private parseTupleToUserset(

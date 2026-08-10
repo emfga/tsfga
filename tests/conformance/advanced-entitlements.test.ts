@@ -86,39 +86,36 @@ describe("Advanced Entitlements Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "member",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // plan.subscriber: [organization#member]
     await tsfgaClient.writeRelationConfig({
       objectType: "plan",
       relation: "subscriber",
-      directlyAssignableTypes: ["organization"],
+      directlyAssignable: ["organization#member"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // feature.has_feature: [plan#subscriber, plan#subscriber with conditions]
     await tsfgaClient.writeRelationConfig({
       objectType: "feature",
       relation: "has_feature",
-      directlyAssignableTypes: ["plan"],
+      directlyAssignable: ["plan#subscriber"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // === Tuples ===

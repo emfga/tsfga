@@ -21,9 +21,9 @@ export interface TsfgaClient {
    *   resolves to `false` — a truncated exclusion branch must not
    *   grant access. A cycle in the resolution path is not an
    *   error: it resolves `false`, matching OpenFGA.
-   * @throws RelationConfigNotFoundError, InvalidSubjectTypeError,
-   *   or UsersetNotAllowedError when a contextual tuple fails the
-   *   same validation `addTuple` applies.
+   * @throws RelationConfigNotFoundError or InvalidSubjectTypeError
+   *   when a contextual tuple fails the same validation `addTuple`
+   *   applies.
    */
   check(request: CheckRequest): Promise<boolean>;
   /**
@@ -176,7 +176,6 @@ export {
   InvalidSubjectTypeError,
   RelationConfigNotFoundError,
   TsfgaError,
-  UsersetNotAllowedError,
 } from "./errors.ts";
 export type { TupleStore } from "./store-interface.ts";
 export { validateTupleWrite } from "./tuple-validation.ts";

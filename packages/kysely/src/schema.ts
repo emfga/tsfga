@@ -33,9 +33,8 @@ export interface TsfgaConditionDefinitions {
 }
 
 export interface TsfgaRelationConfigs {
-  allows_userset_subjects: boolean;
   computed_userset: string | null;
-  directly_assignable_types: string[] | null;
+  directly_assignable: Json;
   excluded_by: string | null;
   id: Generated<Int8>;
   implied_by: string[] | null;

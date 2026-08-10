@@ -22,13 +22,12 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
   return {
     objectType: "",
     relation: "",
-    directlyAssignableTypes: null,
+    directlyAssignable: ["user", "user:*", "team", "team:*"],
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
     excludedBy: null,
     intersection: null,
-    allowsUsersetSubjects: false,
     ...overrides,
   };
 }
@@ -243,7 +242,7 @@ describe("CachingTupleStore", () => {
       subjectId: "alice",
       includeDirect: true,
       includeWildcard: true,
-      includeUsersets: true,
+      usersetRefs: null,
     };
     await caching.findCheckTuples(query);
     await caching.findCheckTuples(query);
@@ -264,13 +263,12 @@ describe("check() uses request-scoped config cache", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
-        allowsUsersetSubjects: true,
+        directlyAssignable: ["user", "team#member"],
       }),
       makeConfig({
         objectType: "team",
         relation: "member",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
     for (let i = 0; i < 5; i++) {
@@ -305,7 +303,7 @@ describe("check() uses request-scoped config cache", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
     store.resetCounts();
@@ -330,7 +328,7 @@ describe("check() uses request-scoped config cache", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
     store.resetCounts();
@@ -362,13 +360,12 @@ describe("check() uses request-scoped config cache", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
-        allowsUsersetSubjects: true,
+        directlyAssignable: ["user", "team#member"],
       }),
       makeConfig({
         objectType: "team",
         relation: "member",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
     store.conditionDefinitions.push({

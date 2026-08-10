@@ -35,13 +35,19 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
   return {
     objectType: "",
     relation: "",
-    directlyAssignableTypes: null,
+    directlyAssignable: [
+      "user",
+      "user:*",
+      "robot",
+      "robot:*",
+      "team",
+      "team:*",
+    ],
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
     excludedBy: null,
     intersection: null,
-    allowsUsersetSubjects: false,
     ...overrides,
   };
 }
@@ -122,8 +128,7 @@ describe("node reads", () => {
     return makeConfig({
       objectType: "doc",
       relation,
-      directlyAssignableTypes: ["user", "user:*"],
-      allowsUsersetSubjects: true,
+      directlyAssignable: ["user", "user:*", "team#member"],
     });
   }
 
@@ -163,7 +168,7 @@ describe("node reads", () => {
       makeConfig({
         objectType: "doc",
         relation: "inner",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
     store.tuples.push(
@@ -205,7 +210,7 @@ describe("node reads", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
 
@@ -228,7 +233,7 @@ describe("node reads", () => {
         subjectId: "alice",
         includeDirect: true,
         includeWildcard: false,
-        includeUsersets: false,
+        usersetRefs: [],
       },
     ]);
   });
@@ -241,13 +246,13 @@ describe("node reads", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignableTypes: [],
+        directlyAssignable: [],
         computedUserset: "owner",
       }),
       makeConfig({
         objectType: "doc",
         relation: "owner",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
     store.tuples.push(
@@ -281,7 +286,7 @@ describe("node reads", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
 
@@ -328,13 +333,12 @@ describe("node reads", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
-        allowsUsersetSubjects: true,
+        directlyAssignable: ["user", "team#member"],
       }),
       makeConfig({
         objectType: "team",
         relation: "member",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
     store.tuples.push(
@@ -380,13 +384,12 @@ describe("node reads", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
-        allowsUsersetSubjects: true,
+        directlyAssignable: ["user", "team#member"],
       }),
       makeConfig({
         objectType: "team",
         relation: "member",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
     store.tuples.push(
@@ -433,7 +436,7 @@ describe("node reads", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
     store.tuples.push(
@@ -469,13 +472,12 @@ describe("node reads", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
-        allowsUsersetSubjects: true,
+        directlyAssignable: ["user", "team#member"],
       }),
       makeConfig({
         objectType: "team",
         relation: "member",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
     store.conditionDefinitions.push({
@@ -539,7 +541,7 @@ describe("node reads", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
         impliedBy: ["broken"],
       }),
     );
@@ -613,13 +615,13 @@ describe("node reads", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
         impliedBy: ["editor"],
       }),
       makeConfig({
         objectType: "doc",
         relation: "editor",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
     store.tuples.push(
@@ -651,7 +653,7 @@ describe("contextual-tuple validation concurrency", () => {
       makeConfig({
         objectType: "fast",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
 
@@ -691,12 +693,12 @@ describe("contextual-tuple validation concurrency", () => {
       makeConfig({
         objectType: "slow",
         relation: "viewer",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
       makeConfig({
         objectType: "slow",
         relation: "editor",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
 

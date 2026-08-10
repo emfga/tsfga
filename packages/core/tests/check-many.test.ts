@@ -30,13 +30,12 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
   return {
     objectType: "",
     relation: "",
-    directlyAssignableTypes: null,
+    directlyAssignable: ["user", "user:*", "team", "team:*"],
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
     excludedBy: null,
     intersection: null,
-    allowsUsersetSubjects: false,
     ...overrides,
   };
 }
@@ -75,7 +74,7 @@ describe("checkMany", () => {
       makeConfig({
         objectType: "doc",
         relation: "deep",
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
       }),
     );
   }
@@ -140,7 +139,7 @@ describe("checkMany", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -170,7 +169,7 @@ describe("checkMany", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       const ids = ["1", "2", "3", "4", "5"];
@@ -210,7 +209,7 @@ describe("checkMany", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -288,7 +287,7 @@ describe("checkMany", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(

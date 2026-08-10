@@ -59,59 +59,55 @@ describe("Entitlements Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "member",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // plan.subscriber
     await tsfgaClient.writeRelationConfig({
       objectType: "plan",
       relation: "subscriber",
-      directlyAssignableTypes: ["organization"],
+      directlyAssignable: ["organization"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // plan.subscriber_member: member from subscriber (TTU hop 1)
     await tsfgaClient.writeRelationConfig({
       objectType: "plan",
       relation: "subscriber_member",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [{ tupleset: "subscriber", computedUserset: "member" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // feature.associated_plan
     await tsfgaClient.writeRelationConfig({
       objectType: "feature",
       relation: "associated_plan",
-      directlyAssignableTypes: ["plan"],
+      directlyAssignable: ["plan"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // feature.can_access: subscriber_member from associated_plan (TTU hop 2)
     await tsfgaClient.writeRelationConfig({
       objectType: "feature",
       relation: "can_access",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [
@@ -119,7 +115,6 @@ describe("Entitlements Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // === Tuples ===

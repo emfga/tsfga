@@ -5,7 +5,6 @@ import {
   DepthExceededError,
   InvalidSubjectTypeError,
   RelationConfigNotFoundError,
-  UsersetNotAllowedError,
 } from "../src/errors.ts";
 import { createTsfga } from "../src/index.ts";
 import type { RelationConfig, Tuple } from "../src/types.ts";
@@ -33,13 +32,27 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
   return {
     objectType: "",
     relation: "",
-    directlyAssignableTypes: null,
+    directlyAssignable: [
+      "user",
+      "user:*",
+      "robot",
+      "robot:*",
+      "team",
+      "team:*",
+      "group",
+      "group:*",
+      "org",
+      "org:*",
+      "workspace",
+      "workspace:*",
+      "blocklist",
+      "blocklist:*",
+    ],
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
     excludedBy: null,
     intersection: null,
-    allowsUsersetSubjects: false,
     ...overrides,
   };
 }
@@ -564,13 +577,13 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "editor",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
           excludedBy: "blocked",
         }),
         makeConfig({
           objectType: "doc",
           relation: "blocked",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -606,13 +619,13 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "editor",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
           excludedBy: "blocked",
         }),
         makeConfig({
           objectType: "doc",
           relation: "blocked",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -655,17 +668,17 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "writer",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
         makeConfig({
           objectType: "doc",
           relation: "owner",
-          directlyAssignableTypes: ["org"],
+          directlyAssignable: ["org"],
         }),
         makeConfig({
           objectType: "org",
           relation: "member",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -720,17 +733,17 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "writer",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
         makeConfig({
           objectType: "doc",
           relation: "owner",
-          directlyAssignableTypes: ["org"],
+          directlyAssignable: ["org"],
         }),
         makeConfig({
           objectType: "org",
           relation: "member",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -769,13 +782,20 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user", "team"],
-          allowsUsersetSubjects: true,
+          directlyAssignable: [
+            "user",
+            "team",
+            "team#member",
+            "group#member",
+            "org#member",
+            "workspace#member",
+            "blocklist#member",
+          ],
         }),
         makeConfig({
           objectType: "doc",
           relation: "editor",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
     });
@@ -806,7 +826,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "team",
           relation: "member",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -912,7 +932,7 @@ describe("check algorithm", () => {
           makeConfig({
             objectType: "doc",
             relation: "public",
-            directlyAssignableTypes: ["user", "user:*"],
+            directlyAssignable: ["user", "user:*"],
           }),
         );
         store.tuples.push(
@@ -954,7 +974,7 @@ describe("check algorithm", () => {
           makeConfig({
             objectType: "team",
             relation: "member",
-            directlyAssignableTypes: ["user"],
+            directlyAssignable: ["user"],
           }),
         );
         store.tuples.push(
@@ -1028,13 +1048,13 @@ describe("check algorithm", () => {
           subjectId: "alice",
           includeDirect: true,
           includeWildcard: true,
-          includeUsersets: true,
+          usersetRefs: null,
         });
 
         const [inner] = store.queriesFor("doc", "1", "viewer");
         expect(inner?.includeDirect).toBe(false);
         expect(inner?.includeWildcard).toBe(true);
-        expect(inner?.includeUsersets).toBe(true);
+        expect(inner?.usersetRefs).toBeNull();
       });
     });
   });
@@ -1078,8 +1098,14 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "group",
           relation: "member",
-          directlyAssignableTypes: ["user"],
-          allowsUsersetSubjects: true,
+          directlyAssignable: [
+            "user",
+            "team#member",
+            "group#member",
+            "org#member",
+            "workspace#member",
+            "blocklist#member",
+          ],
         }),
       );
       for (let i = 0; i < length; i++) {
@@ -1180,7 +1206,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "admin",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -1212,7 +1238,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "member",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -1240,7 +1266,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "banned",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
 
@@ -1256,7 +1282,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "a",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
           excludedBy: "banned",
         }),
         makeConfig({
@@ -1329,20 +1355,33 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "a",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
           excludedBy: "cyclic",
         }),
         makeConfig({
           objectType: "doc",
           relation: "cyclic",
-          directlyAssignableTypes: ["group"],
-          allowsUsersetSubjects: true,
+          directlyAssignable: [
+            "group",
+            "team#member",
+            "group#member",
+            "org#member",
+            "workspace#member",
+            "blocklist#member",
+          ],
         }),
         makeConfig({
           objectType: "group",
           relation: "member",
-          directlyAssignableTypes: ["user", "group"],
-          allowsUsersetSubjects: true,
+          directlyAssignable: [
+            "user",
+            "group",
+            "team#member",
+            "group#member",
+            "org#member",
+            "workspace#member",
+            "blocklist#member",
+          ],
         }),
       );
       store.tuples.push(
@@ -1391,8 +1430,14 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "group",
           relation: "member",
-          directlyAssignableTypes: ["user"],
-          allowsUsersetSubjects: true,
+          directlyAssignable: [
+            "user",
+            "team#member",
+            "group#member",
+            "org#member",
+            "workspace#member",
+            "blocklist#member",
+          ],
         }),
       );
       store.tuples.push(
@@ -1439,7 +1484,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "admin",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       return erring;
@@ -1487,7 +1532,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "editor",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
           excludedBy: "banned",
         }),
       );
@@ -1521,19 +1566,45 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "editor",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
           excludedBy: "banned",
         }),
         makeConfig({
           objectType: "doc",
           relation: "banned",
-          allowsUsersetSubjects: true,
+          directlyAssignable: [
+            "user",
+            "user:*",
+            "robot",
+            "robot:*",
+            "team",
+            "team:*",
+            "group",
+            "group:*",
+            "org",
+            "org:*",
+            "workspace",
+            "workspace:*",
+            "blocklist",
+            "blocklist:*",
+            "team#member",
+            "group#member",
+            "org#member",
+            "workspace#member",
+            "blocklist#member",
+          ],
         }),
         makeConfig({
           objectType: "blocklist",
           relation: "member",
-          directlyAssignableTypes: ["user"],
-          allowsUsersetSubjects: true,
+          directlyAssignable: [
+            "user",
+            "team#member",
+            "group#member",
+            "org#member",
+            "workspace#member",
+            "blocklist#member",
+          ],
         }),
       );
       store.tuples.push(
@@ -1589,7 +1660,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "editor",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
           excludedBy: "banned",
         }),
       );
@@ -1618,12 +1689,27 @@ describe("check algorithm", () => {
             { type: "computedUserset", relation: "member" },
             { type: "computedUserset", relation: "broken" },
           ],
-          allowsUsersetSubjects: false,
+          directlyAssignable: [
+            "user",
+            "user:*",
+            "robot",
+            "robot:*",
+            "team",
+            "team:*",
+            "group",
+            "group:*",
+            "org",
+            "org:*",
+            "workspace",
+            "workspace:*",
+            "blocklist",
+            "blocklist:*",
+          ],
         }),
         makeConfig({
           objectType: "doc",
           relation: "member",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       return erring;
@@ -1642,7 +1728,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "banned",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       return erring;
@@ -1810,7 +1896,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "publish",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
           intersection: [
             { type: "direct" },
             { type: "computedUserset", relation: "approved" },
@@ -1819,7 +1905,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "approved",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
     });
@@ -1901,7 +1987,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "publish",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
           intersection: [
             { type: "direct" },
             { type: "computedUserset", relation: "approved" },
@@ -1911,12 +1997,12 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "approved",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
         makeConfig({
           objectType: "doc",
           relation: "banned",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -2010,7 +2096,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       await expect(
@@ -2038,7 +2124,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       await expect(
@@ -2066,7 +2152,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user", "user:*"],
+          directlyAssignable: ["user", "user:*"],
         }),
       );
       expect(
@@ -2094,8 +2180,7 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user", "team"],
-          allowsUsersetSubjects: false,
+          directlyAssignable: ["user", "team"],
         }),
       );
       await expect(
@@ -2116,7 +2201,7 @@ describe("check algorithm", () => {
             },
           ],
         }),
-      ).rejects.toBeInstanceOf(UsersetNotAllowedError);
+      ).rejects.toBeInstanceOf(InvalidSubjectTypeError);
     });
   });
 
@@ -2127,37 +2212,51 @@ describe("check algorithm", () => {
         makeConfig({
           objectType: "workspace",
           relation: "legacy_admin",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
         makeConfig({
           objectType: "workspace",
           relation: "channels_admin",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
           impliedBy: ["legacy_admin"],
         }),
         makeConfig({
           objectType: "workspace",
           relation: "member",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
           impliedBy: ["channels_admin"],
         }),
         makeConfig({
           objectType: "workspace",
           relation: "guest",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
         makeConfig({
           objectType: "channel",
           relation: "writer",
-          directlyAssignableTypes: ["user", "workspace"],
-          allowsUsersetSubjects: true,
+          directlyAssignable: [
+            "user",
+            "workspace",
+            "team#member",
+            "group#member",
+            "org#member",
+            "workspace#member",
+            "blocklist#member",
+          ],
         }),
         makeConfig({
           objectType: "channel",
           relation: "commenter",
-          directlyAssignableTypes: ["user", "workspace"],
+          directlyAssignable: [
+            "user",
+            "workspace",
+            "team#member",
+            "group#member",
+            "org#member",
+            "workspace#member",
+            "blocklist#member",
+          ],
           impliedBy: ["writer"],
-          allowsUsersetSubjects: true,
         }),
       );
 
@@ -2433,7 +2532,7 @@ describe("createTsfga client", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       const fga = createTsfga(store);
@@ -2453,7 +2552,7 @@ describe("createTsfga client", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       const fga = createTsfga(store);
@@ -2473,7 +2572,7 @@ describe("createTsfga client", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user", "user:*"],
+          directlyAssignable: ["user", "user:*"],
         }),
       );
       const fga = createTsfga(store);
@@ -2487,13 +2586,12 @@ describe("createTsfga client", () => {
       expect(store.tuples).toHaveLength(1);
     });
 
-    test("throws UsersetNotAllowedError when forbidden", async () => {
+    test("throws InvalidSubjectTypeError when forbidden", async () => {
       store.relationConfigs.push(
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user", "team"],
-          allowsUsersetSubjects: false,
+          directlyAssignable: ["user", "team"],
         }),
       );
       const fga = createTsfga(store);
@@ -2506,7 +2604,7 @@ describe("createTsfga client", () => {
           subjectId: "writers",
           subjectRelation: "member",
         }),
-      ).rejects.toBeInstanceOf(UsersetNotAllowedError);
+      ).rejects.toBeInstanceOf(InvalidSubjectTypeError);
     });
   });
 
@@ -2516,7 +2614,7 @@ describe("createTsfga client", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -2621,8 +2719,14 @@ describe("createTsfga client", () => {
         makeConfig({
           objectType: "group",
           relation: "member",
-          directlyAssignableTypes: ["user"],
-          allowsUsersetSubjects: true,
+          directlyAssignable: [
+            "user",
+            "team#member",
+            "group#member",
+            "org#member",
+            "workspace#member",
+            "blocklist#member",
+          ],
         }),
       );
       store.tuples.push(

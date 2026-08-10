@@ -57,156 +57,144 @@ describe("Google Drive Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "group",
       relation: "member",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // folder.owner
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "owner",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // folder.parent
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "parent",
-      directlyAssignableTypes: ["folder"],
+      directlyAssignable: ["folder"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // folder.can_create_file: owner (computed userset)
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "can_create_file",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: "owner",
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // folder.viewer: [user, user:*, group#member] or owner or viewer from parent
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "viewer",
-      directlyAssignableTypes: ["user", "user:*", "group"],
+      directlyAssignable: ["user", "user:*", "group#member"],
       impliedBy: ["owner"],
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "viewer" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // doc.owner
     await tsfgaClient.writeRelationConfig({
       objectType: "doc",
       relation: "owner",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // doc.parent
     await tsfgaClient.writeRelationConfig({
       objectType: "doc",
       relation: "parent",
-      directlyAssignableTypes: ["folder"],
+      directlyAssignable: ["folder"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // doc.viewer: [user, user:*, group#member]
     await tsfgaClient.writeRelationConfig({
       objectType: "doc",
       relation: "viewer",
-      directlyAssignableTypes: ["user", "user:*", "group"],
+      directlyAssignable: ["user", "user:*", "group#member"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // doc.can_change_owner: owner (computed userset)
     await tsfgaClient.writeRelationConfig({
       objectType: "doc",
       relation: "can_change_owner",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: "owner",
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // doc.can_read: viewer or owner or viewer from parent
     await tsfgaClient.writeRelationConfig({
       objectType: "doc",
       relation: "can_read",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["viewer", "owner"],
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "viewer" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // doc.can_share: owner or owner from parent
     await tsfgaClient.writeRelationConfig({
       objectType: "doc",
       relation: "can_share",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["owner"],
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "owner" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // doc.can_write: owner or owner from parent
     await tsfgaClient.writeRelationConfig({
       objectType: "doc",
       relation: "can_write",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["owner"],
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "owner" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // === Tuples ===

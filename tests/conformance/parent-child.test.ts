@@ -49,35 +49,32 @@ describe("Parent-Child Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "editor",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "parent",
-      directlyAssignableTypes: ["folder"],
+      directlyAssignable: ["folder"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "editor",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "editor" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // Write tuples

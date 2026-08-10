@@ -1,0 +1,43 @@
+# Written under the *wide* model, which admits every ref below.
+# The narrow model is written afterwards and every check runs under
+# it, so the rows naming `team#owner` on `document#viewer` and the
+# rows on `document#owner` are ones the model under test does not
+# admit — exactly the state an operator reaches by narrowing a
+# relation with tuples already stored.
+- user: user:alice
+  relation: owner
+  object: team:eng
+
+- user: user:bob
+  relation: member
+  object: team:eng
+
+# Inadmissible under the narrow model: `document#viewer` admits
+# `team#member`, not `team#owner`.
+- user: team:eng#owner
+  relation: viewer
+  object: document:budget
+
+# Admitted under both models.
+- user: team:eng#member
+  relation: viewer
+  object: document:roadmap
+
+# `document#editor` admits both usersets under both models.
+- user: team:eng#owner
+  relation: editor
+  object: document:plan
+
+# Inadmissible under the narrow model: `document#owner` admits only
+# `user` there, so neither the userset nor the wildcard survives.
+- user: team:eng#member
+  relation: owner
+  object: document:charter
+
+- user: user:*
+  relation: owner
+  object: document:charter
+
+- user: user:*
+  relation: public
+  object: document:notice

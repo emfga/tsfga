@@ -73,7 +73,9 @@ describe("Deep Rewrite Ladder Conformance", () => {
       await tsfgaClient.writeRelationConfig({
         objectType: "document",
         relation: `lvl${i}`,
-        directlyAssignableTypes: null,
+        // Purely computed in the model: no direct assignment at
+        // all, so these rungs issue no tuple read.
+        directlyAssignable: [],
         impliedBy: null,
         computedUserset: isIntersection ? null : `lvl${i + 1}`,
         tupleToUserset: null,
@@ -84,20 +86,18 @@ describe("Deep Rewrite Ladder Conformance", () => {
               { type: "computedUserset", relation: "allowed" },
             ]
           : null,
-        allowsUsersetSubjects: false,
       });
     }
     for (const relation of [`lvl${DEPTH}`, "blocked", "allowed"]) {
       await tsfgaClient.writeRelationConfig({
         objectType: "document",
         relation,
-        directlyAssignableTypes: ["user"],
+        directlyAssignable: ["user"],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,
         excludedBy: null,
         intersection: null,
-        allowsUsersetSubjects: false,
       });
     }
 

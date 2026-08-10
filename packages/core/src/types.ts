@@ -41,8 +41,16 @@ export interface CheckTuplesQuery {
   includeDirect: boolean;
   /** Direct tuple for `subjectType:*`, no subject relation. */
   includeWildcard: boolean;
-  /** Every tuple on this relation with a subject relation. */
-  includeUsersets: boolean;
+  /**
+   * Userset refs (`type#relation`) this relation admits, so a
+   * store can restrict its userset scan to rows the model can
+   * actually use.
+   *
+   * `[]` excludes the userset part entirely. `null` means the
+   * relation declines to narrow — every tuple on it with a
+   * subject relation.
+   */
+  usersetRefs: readonly string[] | null;
 }
 
 /**
@@ -73,13 +81,31 @@ export type IntersectionOperand =
 export interface RelationConfig {
   objectType: string;
   relation: string;
-  directlyAssignableTypes: string[] | null;
+  /**
+   * What this relation admits as a direct assignment, in OpenFGA's
+   * type-restriction notation and matching its
+   * `directly_related_user_types` one for one:
+   *
+   * - `"user"` — an ordinary subject of that type
+   * - `"user:*"` — the typed wildcard
+   * - `"team#member"` — a userset, naming the relation
+   *
+   * Required. `[]` says the relation admits no direct assignment
+   * at all — a purely computed relation — which is a different
+   * statement from a relation that declines to narrow, and the
+   * check algorithm reads it as one: it issues no tuple read.
+   *
+   * The userset entries carry the relation, so `team#member` and
+   * `team#owner` are distinguishable. A relation admitting only
+   * the first must refuse a tuple naming the second, on the write
+   * path and on the read path alike.
+   */
+  directlyAssignable: string[];
   impliedBy: string[] | null;
   computedUserset: string | null;
   tupleToUserset: Array<{ tupleset: string; computedUserset: string }> | null;
   excludedBy: string | null;
   intersection: IntersectionOperand[] | null;
-  allowsUsersetSubjects: boolean;
 }
 
 /** A named CEL condition definition */

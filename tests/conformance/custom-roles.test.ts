@@ -50,35 +50,32 @@ describe("Custom Roles Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "role",
       relation: "assignee",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "asset-category",
       relation: "editor",
-      directlyAssignableTypes: ["user", "role"],
+      directlyAssignable: ["user", "role#assignee"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "asset-category",
       relation: "viewer",
-      directlyAssignableTypes: ["user", "role"],
+      directlyAssignable: ["user", "role#assignee"],
       impliedBy: ["editor"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // Write tuples

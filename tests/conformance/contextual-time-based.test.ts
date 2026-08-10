@@ -56,72 +56,67 @@ describe("Contextual Time-Based Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "timeslot",
       relation: "user",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // ip-address-range.user
     await tsfgaClient.writeRelationConfig({
       objectType: "ip-address-range",
       relation: "user",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // branch.account_manager
     await tsfgaClient.writeRelationConfig({
       objectType: "branch",
       relation: "account_manager",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // branch.approved_ip_address_range
     await tsfgaClient.writeRelationConfig({
       objectType: "branch",
       relation: "approved_ip_address_range",
-      directlyAssignableTypes: ["ip-address-range"],
+      directlyAssignable: ["ip-address-range"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // branch.approved_timeslot
     await tsfgaClient.writeRelationConfig({
       objectType: "branch",
       relation: "approved_timeslot",
-      directlyAssignableTypes: ["timeslot"],
+      directlyAssignable: ["timeslot"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // branch.approved_context: user from approved_timeslot and user from approved_ip_address_range
     await tsfgaClient.writeRelationConfig({
       objectType: "branch",
       relation: "approved_context",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -138,27 +133,25 @@ describe("Contextual Time-Based Conformance", () => {
           computedUserset: "user",
         },
       ],
-      allowsUsersetSubjects: false,
     });
 
     // account.branch
     await tsfgaClient.writeRelationConfig({
       objectType: "account",
       relation: "branch",
-      directlyAssignableTypes: ["branch"],
+      directlyAssignable: ["branch"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // account.account_manager: account_manager from branch (TTU)
     await tsfgaClient.writeRelationConfig({
       objectType: "account",
       relation: "account_manager",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [
@@ -166,27 +159,25 @@ describe("Contextual Time-Based Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // account.customer
     await tsfgaClient.writeRelationConfig({
       objectType: "account",
       relation: "customer",
-      directlyAssignableTypes: ["user"],
+      directlyAssignable: ["user"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // account.account_manager_viewer: account_manager and approved_context from branch
     await tsfgaClient.writeRelationConfig({
       objectType: "account",
       relation: "account_manager_viewer",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -199,59 +190,54 @@ describe("Contextual Time-Based Conformance", () => {
           computedUserset: "approved_context",
         },
       ],
-      allowsUsersetSubjects: false,
     });
 
     // account.viewer: customer or account_manager_viewer
     await tsfgaClient.writeRelationConfig({
       objectType: "account",
       relation: "viewer",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["customer", "account_manager_viewer"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // account.can_view: viewer (computed userset)
     await tsfgaClient.writeRelationConfig({
       objectType: "account",
       relation: "can_view",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: "viewer",
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // transaction.account
     await tsfgaClient.writeRelationConfig({
       objectType: "transaction",
       relation: "account",
-      directlyAssignableTypes: ["account"],
+      directlyAssignable: ["account"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // transaction.can_view: viewer from account (TTU)
     await tsfgaClient.writeRelationConfig({
       objectType: "transaction",
       relation: "can_view",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [{ tupleset: "account", computedUserset: "viewer" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // === Tuples ===

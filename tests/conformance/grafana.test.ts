@@ -87,608 +87,805 @@ describe("Grafana Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "user",
       relation: "get",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: null,
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "user",
-      relation: "update",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: null,
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "user",
-      relation: "delete",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: null,
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    // user subresource hierarchy
-    await tsfgaClient.writeRelationConfig({
-      objectType: "user",
-      relation: "resource_admin",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: null,
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "user",
-      relation: "resource_edit",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: ["resource_admin"],
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "user",
-      relation: "resource_view",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: ["resource_edit"],
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "user",
-      relation: "resource_get",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: ["resource_view"],
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "user",
-      relation: "resource_create",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: ["resource_edit"],
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "user",
-      relation: "resource_update",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: ["resource_edit"],
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "user",
-      relation: "resource_delete",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: ["resource_edit"],
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-
-    // --- Core types: service-account ---
-    await tsfgaClient.writeRelationConfig({
-      objectType: "service-account",
-      relation: "get",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: null,
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "service-account",
-      relation: "update",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: null,
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "service-account",
-      relation: "delete",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: null,
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    // service-account subresource hierarchy
-    await tsfgaClient.writeRelationConfig({
-      objectType: "service-account",
-      relation: "resource_admin",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: null,
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "service-account",
-      relation: "resource_edit",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: ["resource_admin"],
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "service-account",
-      relation: "resource_view",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: ["resource_edit"],
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "service-account",
-      relation: "resource_get",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: ["resource_view"],
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "service-account",
-      relation: "resource_create",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: ["resource_edit"],
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "service-account",
-      relation: "resource_update",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: ["resource_edit"],
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "service-account",
-      relation: "resource_delete",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: ["resource_edit"],
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-
-    // --- role ---
-    await tsfgaClient.writeRelationConfig({
-      objectType: "role",
-      relation: "assignee",
-      directlyAssignableTypes: [
+      directlyAssignable: [
         "user",
         "service-account",
-        "anonymous",
-        "team",
-        "role",
+        "team#member",
+        "role#assignee",
       ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
-      objectType: "role",
-      relation: "get",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
-      impliedBy: null,
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-      allowsUsersetSubjects: true,
-    });
-    await tsfgaClient.writeRelationConfig({
-      objectType: "role",
+      objectType: "user",
       relation: "update",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
-      objectType: "role",
+      objectType: "user",
       relation: "delete",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
-    // role subresource hierarchy
+    // user subresource hierarchy
     await tsfgaClient.writeRelationConfig({
-      objectType: "role",
+      objectType: "user",
       relation: "resource_admin",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
-      objectType: "role",
+      objectType: "user",
       relation: "resource_edit",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
-      objectType: "role",
+      objectType: "user",
       relation: "resource_view",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
-      objectType: "role",
+      objectType: "user",
       relation: "resource_get",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_view"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "user",
+      relation: "resource_create",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: ["resource_edit"],
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "user",
+      relation: "resource_update",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: ["resource_edit"],
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "user",
+      relation: "resource_delete",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: ["resource_edit"],
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+
+    // --- Core types: service-account ---
+    await tsfgaClient.writeRelationConfig({
+      objectType: "service-account",
+      relation: "get",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: null,
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "service-account",
+      relation: "update",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: null,
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "service-account",
+      relation: "delete",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: null,
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    // service-account subresource hierarchy
+    await tsfgaClient.writeRelationConfig({
+      objectType: "service-account",
+      relation: "resource_admin",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: null,
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "service-account",
+      relation: "resource_edit",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: ["resource_admin"],
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "service-account",
+      relation: "resource_view",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: ["resource_edit"],
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "service-account",
+      relation: "resource_get",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: ["resource_view"],
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "service-account",
+      relation: "resource_create",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: ["resource_edit"],
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "service-account",
+      relation: "resource_update",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: ["resource_edit"],
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "service-account",
+      relation: "resource_delete",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: ["resource_edit"],
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+
+    // --- role ---
+    await tsfgaClient.writeRelationConfig({
+      objectType: "role",
+      relation: "assignee",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "anonymous",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: null,
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "role",
+      relation: "get",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: null,
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "role",
+      relation: "update",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: null,
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "role",
+      relation: "delete",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: null,
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    // role subresource hierarchy
+    await tsfgaClient.writeRelationConfig({
+      objectType: "role",
+      relation: "resource_admin",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: null,
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "role",
+      relation: "resource_edit",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: ["resource_admin"],
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "role",
+      relation: "resource_view",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: ["resource_edit"],
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "role",
+      relation: "resource_get",
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
+      impliedBy: ["resource_view"],
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "role",
       relation: "resource_create",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "role",
       relation: "resource_update",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "role",
       relation: "resource_delete",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // --- team ---
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "admin",
-      directlyAssignableTypes: ["user", "service-account"],
+      directlyAssignable: ["user", "service-account"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "member",
-      directlyAssignableTypes: ["user", "service-account"],
+      directlyAssignable: ["user", "service-account"],
       impliedBy: ["admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "get",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["member"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "update",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "delete",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "get_permissions",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "set_permissions",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     // team subresource hierarchy
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "resource_admin",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "resource_edit",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "resource_view",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "resource_get",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_view"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "resource_create",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "resource_update",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "resource_delete",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // --- folder ---
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "parent",
-      directlyAssignableTypes: ["folder"],
+      directlyAssignable: ["folder"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "admin",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "admin" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "edit",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "edit" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "view",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "view" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "get",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "get" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "create",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "create" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "update",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "update" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "delete",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "delete" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "get_permissions",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [
@@ -696,12 +893,16 @@ describe("Grafana Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "set_permissions",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [
@@ -709,80 +910,78 @@ describe("Grafana Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     // folder computed can_* relations
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "can_get",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["admin", "edit", "view", "get"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "can_create",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["admin", "edit", "create"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "can_update",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["admin", "edit", "update"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "can_delete",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["admin", "edit", "delete"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "can_get_permissions",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["admin", "get_permissions"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "can_set_permissions",
-      directlyAssignableTypes: null,
+      directlyAssignable: [],
       impliedBy: ["admin", "set_permissions"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
     // folder subresource hierarchy
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "resource_admin",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [
@@ -790,12 +989,16 @@ describe("Grafana Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "resource_edit",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_admin"],
       computedUserset: null,
       tupleToUserset: [
@@ -803,12 +1006,16 @@ describe("Grafana Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "resource_view",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_edit"],
       computedUserset: null,
       tupleToUserset: [
@@ -816,23 +1023,31 @@ describe("Grafana Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "resource_get",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_view"],
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "resource_get" }],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "resource_create",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_edit"],
       computedUserset: null,
       tupleToUserset: [
@@ -840,12 +1055,16 @@ describe("Grafana Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "resource_update",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_edit"],
       computedUserset: null,
       tupleToUserset: [
@@ -853,12 +1072,16 @@ describe("Grafana Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "resource_delete",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_edit"],
       computedUserset: null,
       tupleToUserset: [
@@ -866,12 +1089,16 @@ describe("Grafana Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "resource_get_permissions",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_admin"],
       computedUserset: null,
       tupleToUserset: [
@@ -879,12 +1106,16 @@ describe("Grafana Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "resource_set_permissions",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["resource_admin"],
       computedUserset: null,
       tupleToUserset: [
@@ -892,222 +1123,269 @@ describe("Grafana Model Conformance", () => {
       ],
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // --- group_resource ---
     await tsfgaClient.writeRelationConfig({
       objectType: "group_resource",
       relation: "admin",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "group_resource",
       relation: "edit",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "group_resource",
       relation: "view",
-      directlyAssignableTypes: [
+      directlyAssignable: [
         "user",
         "service-account",
         "render",
-        "team",
-        "role",
+        "team#member",
+        "role#assignee",
       ],
       impliedBy: ["edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "group_resource",
       relation: "get",
-      directlyAssignableTypes: [
+      directlyAssignable: [
         "user",
         "service-account",
         "render",
-        "team",
-        "role",
+        "team#member",
+        "role#assignee",
       ],
       impliedBy: ["view"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "group_resource",
       relation: "create",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "group_resource",
       relation: "update",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "group_resource",
       relation: "delete",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "group_resource",
       relation: "get_permissions",
-      directlyAssignableTypes: [
+      directlyAssignable: [
         "user",
         "service-account",
         "render",
-        "team",
-        "role",
+        "team#member",
+        "role#assignee",
       ],
       impliedBy: ["admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "group_resource",
       relation: "set_permissions",
-      directlyAssignableTypes: [
+      directlyAssignable: [
         "user",
         "service-account",
         "render",
-        "team",
-        "role",
+        "team#member",
+        "role#assignee",
       ],
       impliedBy: ["admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // --- resource ---
     await tsfgaClient.writeRelationConfig({
       objectType: "resource",
       relation: "admin",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "resource",
       relation: "edit",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "resource",
       relation: "view",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "resource",
       relation: "get",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["view"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "resource",
       relation: "update",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "resource",
       relation: "delete",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["edit"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "resource",
       relation: "get_permissions",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
     await tsfgaClient.writeRelationConfig({
       objectType: "resource",
       relation: "set_permissions",
-      directlyAssignableTypes: ["user", "service-account", "team", "role"],
+      directlyAssignable: [
+        "user",
+        "service-account",
+        "team#member",
+        "role#assignee",
+      ],
       impliedBy: ["admin"],
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: true,
     });
 
     // === Tuples ===

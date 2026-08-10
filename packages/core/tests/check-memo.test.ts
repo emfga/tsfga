@@ -27,13 +27,12 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
   return {
     objectType: "",
     relation: "",
-    directlyAssignableTypes: null,
+    directlyAssignable: ["user", "user:*", "group", "group:*"],
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
     excludedBy: null,
     intersection: null,
-    allowsUsersetSubjects: false,
     ...overrides,
   };
 }
@@ -111,7 +110,7 @@ describe("request-scoped node memoization", () => {
         makeConfig({
           objectType: "doc",
           relation: "shared",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
     }
@@ -232,7 +231,7 @@ describe("request-scoped node memoization", () => {
         makeConfig({
           objectType: "doc",
           relation: "granted",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -266,14 +265,12 @@ describe("request-scoped node memoization", () => {
         makeConfig({
           objectType: "doc",
           relation: "top",
-          directlyAssignableTypes: ["group"],
-          allowsUsersetSubjects: true,
+          directlyAssignable: ["group", "group#member"],
         }),
         makeConfig({
           objectType: "group",
           relation: "member",
-          directlyAssignableTypes: ["user", "group"],
-          allowsUsersetSubjects: true,
+          directlyAssignable: ["user", "group", "group#member"],
         }),
       );
       const link = (
@@ -373,7 +370,7 @@ describe("request-scoped node memoization", () => {
         makeConfig({
           objectType: "doc",
           relation: "leaf",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.resetCounts();
@@ -404,7 +401,7 @@ describe("request-scoped node memoization", () => {
         makeConfig({
           objectType: "doc",
           relation: "shared",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -455,7 +452,7 @@ describe("request-scoped node memoization", () => {
         makeConfig({
           objectType: "doc",
           relation: "granted",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -497,7 +494,7 @@ describe("request-scoped node memoization", () => {
         makeConfig({
           objectType: "doc",
           relation: "shared",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
       store.tuples.push(
@@ -529,7 +526,7 @@ describe("request-scoped node memoization", () => {
         makeConfig({
           objectType: "doc",
           relation: "shared",
-          directlyAssignableTypes: ["user"],
+          directlyAssignable: ["user"],
         }),
       );
 

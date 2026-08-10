@@ -101,9 +101,17 @@ export class MockTupleStore implements TupleStore {
     return {
       direct: query.includeDirect ? findDirect(query.subjectId) : null,
       wildcard: query.includeWildcard ? findDirect("*") : null,
-      usersets: query.includeUsersets
-        ? onRelation.filter((t) => t.subjectRelation != null)
-        : [],
+      // Narrowed to the admitted refs, as a real adapter would.
+      // `null` declines to narrow, `[]` excludes the scan.
+      usersets: onRelation.filter(
+        (t) =>
+          t.subjectRelation !== null &&
+          t.subjectRelation !== undefined &&
+          (query.usersetRefs === null ||
+            query.usersetRefs.includes(
+              `${t.subjectType}#${t.subjectRelation}`,
+            )),
+      ),
     };
   }
 

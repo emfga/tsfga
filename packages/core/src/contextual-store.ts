@@ -64,9 +64,10 @@ export class ContextualTupleStore implements TupleStore {
     return {
       direct: direct ?? stored.direct,
       wildcard: wildcard ?? stored.wildcard,
-      usersets: query.includeUsersets
-        ? [...this.findContextualUsersets(query), ...stored.usersets]
-        : stored.usersets,
+      usersets:
+        query.usersetRefs === null || query.usersetRefs.length > 0
+          ? [...this.findContextualUsersets(query), ...stored.usersets]
+          : stored.usersets,
     };
   }
 

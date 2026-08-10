@@ -51,6 +51,7 @@ describe("Invalid stored data", () => {
   });
 
   async function insertConfigRow(columns: {
+    directly_assignable?: Json;
     tuple_to_userset?: Json;
     intersection?: Json;
   }): Promise<void> {
@@ -59,13 +60,12 @@ describe("Invalid stored data", () => {
       .values({
         object_type: "malformed",
         relation: "rel",
-        directly_assignable_types: null,
+        directly_assignable: columns.directly_assignable ?? JSON.stringify([]),
         implied_by: null,
         computed_userset: null,
         tuple_to_userset: columns.tuple_to_userset ?? null,
         excluded_by: null,
         intersection: columns.intersection ?? null,
-        allows_userset_subjects: false,
       })
       .execute();
   }
@@ -80,6 +80,24 @@ describe("Invalid stored data", () => {
       })
       .execute();
   }
+
+  describe("relation_configs.directly_assignable", () => {
+    test("throws when value is not an array", async () => {
+      await insertConfigRow({
+        directly_assignable: JSON.stringify({ user: true }),
+      });
+      await expect(
+        store.findRelationConfig("malformed", "rel"),
+      ).rejects.toBeInstanceOf(InvalidStoredDataError);
+    });
+
+    test("throws when an element is not a string", async () => {
+      await insertConfigRow({ directly_assignable: JSON.stringify([1]) });
+      await expect(
+        store.findRelationConfig("malformed", "rel"),
+      ).rejects.toBeInstanceOf(InvalidStoredDataError);
+    });
+  });
 
   describe("relation_configs.tuple_to_userset", () => {
     test("throws when value is not an array", async () => {
@@ -212,7 +230,7 @@ describe("Invalid stored data", () => {
           subjectId: uuid2,
           includeDirect: true,
           includeWildcard: false,
-          includeUsersets: false,
+          usersetRefs: [],
         }),
       ).rejects.toBeInstanceOf(InvalidStoredDataError);
     });

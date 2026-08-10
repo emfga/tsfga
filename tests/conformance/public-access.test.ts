@@ -48,13 +48,12 @@ describe("Public Access Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "viewer",
-      directlyAssignableTypes: ["user", "user:*"],
+      directlyAssignable: ["user", "user:*"],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
       excludedBy: null,
       intersection: null,
-      allowsUsersetSubjects: false,
     });
 
     // Write tuples: user:* is viewer of document:company_psa

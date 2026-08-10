@@ -26,13 +26,6 @@ export class InvalidSubjectTypeError extends TsfgaError {
   }
 }
 
-export class UsersetNotAllowedError extends TsfgaError {
-  constructor(objectType: string, relation: string) {
-    super(`Userset subjects are not allowed for ${objectType}.${relation}`);
-    this.name = "UsersetNotAllowedError";
-  }
-}
-
 export class ConditionNotFoundError extends TsfgaError {
   constructor(conditionName: string) {
     super(`Condition definition not found: ${conditionName}`);
