@@ -2,7 +2,11 @@ import { check } from "./check.ts";
 import { type CheckOutcome, checkMany } from "./check-many.ts";
 import { listObjects } from "./list-objects.ts";
 import type { TupleStore } from "./store-interface.ts";
-import { validateTupleWrite } from "./tuple-validation.ts";
+import {
+  admitsSubjectRef,
+  directSubjectRef,
+  validateTupleWrite,
+} from "./tuple-validation.ts";
 import type {
   AddTupleRequest,
   CheckOptions,
@@ -70,7 +74,21 @@ export interface TsfgaClient {
     subjectId: string,
     context?: Record<string, unknown>,
   ): Promise<string[]>;
-  /** List direct subjects only — no userset/relation expansion. */
+  /**
+   * List direct subjects only — no userset or relation expansion.
+   *
+   * Filtered by the relation's `directlyAssignable`, so a row the
+   * model does not admit is never reported: a subject this returns
+   * is one `check` could act on, not merely one that is stored.
+   * That matters because narrowing a relation does not revalidate
+   * the tuples already written, so inadmissible rows are an
+   * ordinary state to be in.
+   *
+   * The consequence, stated plainly: there is then no library path
+   * that *finds* such a row in order to delete it. Upstream keeps
+   * `Read` unfiltered for exactly that reason and filters only
+   * Expand and ListUsers. A maintenance read is owed.
+   */
   listSubjects(
     objectType: string,
     objectId: string,
@@ -128,7 +146,7 @@ export function createTsfga(
       );
     },
 
-    listSubjects(
+    async listSubjects(
       objectType: string,
       objectId: string,
       relation: string,
@@ -139,7 +157,28 @@ export function createTsfga(
         subjectRelation: string | null;
       }>
     > {
-      return store.listDirectSubjects(objectType, objectId, relation);
+      // Gated here rather than in the adapter. A store-side filter
+      // would leave every other `TupleStore` — the wrappers, the
+      // mock, any third-party one — reporting subjects the model
+      // does not admit, and would put adapter authors inside the
+      // security boundary. `clampToQuery` already refused that
+      // trade for the check reads; this is the same call.
+      const config = await store.findRelationConfig(objectType, relation);
+      const subjects = await store.listDirectSubjects(
+        objectType,
+        objectId,
+        relation,
+      );
+      return subjects.filter((subject) =>
+        admitsSubjectRef(
+          config,
+          directSubjectRef(
+            subject.subjectType,
+            subject.subjectId,
+            subject.subjectRelation,
+          ),
+        ),
+      );
     },
 
     writeRelationConfig(config: RelationConfig): Promise<void> {

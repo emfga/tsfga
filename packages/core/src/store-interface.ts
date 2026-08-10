@@ -63,7 +63,16 @@ export interface TupleStore {
 
   // === Query ===
 
-  /** List candidate object IDs for list_objects (pre-filter, check still required) */
+  /**
+   * List candidate object IDs for `listObjects` (pre-filter, check
+   * still required).
+   *
+   * Deliberately ungated, unlike `listSubjects`. Every candidate is
+   * re-checked through the gated path before `listObjects` returns
+   * it, so over-returning here costs work and cannot grant —
+   * whereas under-returning would silently drop objects the subject
+   * really can reach.
+   */
   listCandidateObjectIds(objectType: string): Promise<string[]>;
 
   /** List direct subjects for an object + relation */
