@@ -8,7 +8,7 @@ import {
   test,
 } from "bun:test";
 import type { Tuple } from "@tsfga/core";
-import type { Kysely } from "kysely";
+import { CamelCasePlugin, type Kysely } from "kysely";
 import { KyselyTupleStore } from "../src/adapter.ts";
 import type { DB } from "../src/schema.ts";
 import {
@@ -895,6 +895,187 @@ describe("KyselyTupleStore", () => {
       expect(subjects).toHaveLength(2);
       expect(subjects.find((s) => s.subjectId === uuid2)).toBeTruthy();
       expect(subjects.find((s) => s.subjectRelation === "member")).toBeTruthy();
+    });
+  });
+
+  /**
+   * A consumer's result-transforming plugin must not change how the
+   * adapter reads its own tables.
+   *
+   * `CamelCasePlugin.transformResult` renames every result-row key
+   * regardless of how the query was built, so an adapter that reads
+   * `row.subject_relation` gets `undefined` — which is not `null`,
+   * so every row files as a userset and `direct` is always null.
+   * Silent, and wrong in the granting direction.
+   *
+   * `withPlugin` returns an instance sharing this one's executor, so
+   * these reads run on the same connection and see the surrounding
+   * transaction.
+   */
+  describe("consumer result plugins do not reach adapter reads", () => {
+    let camelStore: KyselyTupleStore;
+
+    beforeEach(() => {
+      camelStore = new KyselyTupleStore(db.withPlugin(new CamelCasePlugin()));
+    });
+
+    test("findCheckTuples partitions rows correctly", async () => {
+      await store.insertTuple({
+        objectType: "channel",
+        objectId: uuid1,
+        relation: "writer",
+        subjectType: "user",
+        subjectId: uuid2,
+      });
+      await store.insertTuple({
+        objectType: "channel",
+        objectId: uuid1,
+        relation: "writer",
+        subjectType: "workspace",
+        subjectId: uuid3,
+        subjectRelation: "member",
+      });
+
+      const result = await camelStore.findCheckTuples({
+        objectType: "channel",
+        objectId: uuid1,
+        relation: "writer",
+        subjectType: "user",
+        subjectId: uuid2,
+        includeDirect: true,
+        includeWildcard: true,
+        includeUsersets: true,
+      });
+
+      expect(result.direct).not.toBeNull();
+      expect(result.direct?.subjectId).toBe(uuid2);
+      expect(result.direct?.subjectRelation).toBeNull();
+      expect(result.wildcard).toBeNull();
+      expect(result.usersets).toHaveLength(1);
+      expect(result.usersets[0]?.subjectRelation).toBe("member");
+    });
+
+    test("findCheckTuples maps the wildcard row back", async () => {
+      await store.insertTuple({
+        objectType: "channel",
+        objectId: uuid1,
+        relation: "writer",
+        subjectType: "user",
+        subjectId: "*",
+      });
+
+      const result = await camelStore.findCheckTuples({
+        objectType: "channel",
+        objectId: uuid1,
+        relation: "writer",
+        subjectType: "user",
+        subjectId: uuid2,
+        includeDirect: true,
+        includeWildcard: true,
+        includeUsersets: true,
+      });
+
+      expect(result.direct).toBeNull();
+      expect(result.wildcard).not.toBeNull();
+      expect(result.wildcard?.subjectId).toBe("*");
+    });
+
+    test("rowToTuple carries every field", async () => {
+      await store.upsertConditionDefinition({
+        name: "in_hours",
+        expression: "hour < 18",
+        parameters: { hour: "int" },
+      });
+      await store.insertTuple({
+        objectType: "channel",
+        objectId: uuid1,
+        relation: "writer",
+        subjectType: "user",
+        subjectId: uuid2,
+        conditionName: "in_hours",
+        conditionContext: { hour: 9 },
+      });
+
+      const tuples = await camelStore.findTuplesByRelation(
+        "channel",
+        uuid1,
+        "writer",
+      );
+      expect(tuples).toHaveLength(1);
+      expect(tuples[0]).toEqual({
+        objectType: "channel",
+        objectId: uuid1,
+        relation: "writer",
+        subjectType: "user",
+        subjectId: uuid2,
+        subjectRelation: null,
+        conditionName: "in_hours",
+        conditionContext: { hour: 9 },
+      });
+    });
+
+    test("findRelationConfig round-trips", async () => {
+      await store.upsertRelationConfig({
+        objectType: "channel",
+        relation: "writer",
+        directlyAssignableTypes: ["user"],
+        impliedBy: ["admin"],
+        computedUserset: null,
+        tupleToUserset: [{ tupleset: "parent", computedUserset: "member" }],
+        excludedBy: "banned",
+        intersection: null,
+        allowsUsersetSubjects: true,
+      });
+
+      const config = await camelStore.findRelationConfig("channel", "writer");
+      expect(config).not.toBeNull();
+      expect(config?.objectType).toBe("channel");
+      expect(config?.relation).toBe("writer");
+      expect(config?.directlyAssignableTypes).toEqual(["user"]);
+      expect(config?.impliedBy).toEqual(["admin"]);
+      expect(config?.tupleToUserset).toEqual([
+        { tupleset: "parent", computedUserset: "member" },
+      ]);
+      expect(config?.excludedBy).toBe("banned");
+      expect(config?.allowsUsersetSubjects).toBe(true);
+    });
+
+    test("findConditionDefinition round-trips", async () => {
+      await store.upsertConditionDefinition({
+        name: "in_hours",
+        expression: "hour < 18",
+        parameters: { hour: "int" },
+      });
+
+      const def = await camelStore.findConditionDefinition("in_hours");
+      expect(def).not.toBeNull();
+      expect(def?.name).toBe("in_hours");
+      expect(def?.expression).toBe("hour < 18");
+      expect(def?.parameters).toEqual({ hour: "int" });
+    });
+
+    test("the query methods round-trip", async () => {
+      await store.insertTuple({
+        objectType: "channel",
+        objectId: uuid1,
+        relation: "writer",
+        subjectType: "workspace",
+        subjectId: uuid3,
+        subjectRelation: "member",
+      });
+
+      expect(await camelStore.listCandidateObjectIds("channel")).toEqual([
+        uuid1,
+      ]);
+      expect(
+        await camelStore.listDirectSubjects("channel", uuid1, "writer"),
+      ).toEqual([
+        {
+          subjectType: "workspace",
+          subjectId: uuid3,
+          subjectRelation: "member",
+        },
+      ]);
     });
   });
 });

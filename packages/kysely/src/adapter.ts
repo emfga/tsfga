@@ -46,7 +46,30 @@ function isConditionParameterType(
 }
 
 export class KyselyTupleStore implements TupleStore {
-  constructor(private db: Kysely<DB>) {}
+  private db: Kysely<DB>;
+
+  /**
+   * Takes a `Kysely<DB>` it does not own — including a
+   * `Transaction<DB>`, which Kysely declares as a subtype, so
+   * `new KyselyTupleStore(trx)` scopes every method to that
+   * transaction.
+   *
+   * The instance's plugins are stripped. `tsfga.*` is the adapter's
+   * own schema and `schema.ts` names its columns as the database
+   * does, so a plugin installed for the consumer's tables has no
+   * business rewriting these queries or their results — and a
+   * result-transforming one is not merely unhelpful but silently
+   * wrong. `CamelCasePlugin.transformResult` renames every result
+   * key regardless of how the query was built, which turns
+   * `row.subject_relation` into `undefined`; `undefined !== null`,
+   * so every row would file as a userset and no direct grant would
+   * ever be found. Kysely's own transaction is preserved:
+   * `Transaction#withoutPlugins` returns a `Transaction`, sharing
+   * the connection.
+   */
+  constructor(db: Kysely<DB>) {
+    this.db = db.withoutPlugins();
+  }
 
   /**
    * All three per-node check reads in one round-trip.
