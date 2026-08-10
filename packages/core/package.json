@@ -1,6 +1,6 @@
 {
   "name": "@tsfga/core",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "author": "Lemuel Roberto Bonifacio <code@lemuelroberto.online>",
   "description": "OpenFGA-compatible relationship-based access control for TypeScript",

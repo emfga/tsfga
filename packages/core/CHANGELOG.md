@@ -5,6 +5,92 @@ Notable changes to `@tsfga/core`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
+## 0.5.0 — 2026-08
+
+### Added
+
+- **`checkMany(requests)`**, on the client and as a standalone
+  export, runs a batch of checks in one resolution scope. The
+  relation-config cache and the node memo span the batch, so the
+  part of the graph the requests have in common is resolved once
+  instead of once per call. A consumer measured a page render
+  making four checks about one object at 862 store statements;
+  the same work in one scope is 21-31.
+
+  Shape follows OpenFGA's BatchCheck: outcomes are
+  `{ allowed, error? }`, a failing check reports its error in its
+  own outcome rather than failing the batch, and only invalid
+  options throw. Answers come back in request order — upstream
+  keys an unordered map on a caller-supplied correlation id, and
+  the array position serves the same purpose without asking for
+  one. Identical requests in a batch coalesce and cost one
+  resolution, which is what upstream gets by de-duplicating on a
+  cache key before dispatch.
+
+  The scope is bounded by the call, so it is safe to use inside a
+  transaction — a tuple written earlier in that transaction is
+  visible to it. That is why this is a shared scope and not a
+  tuple cache.
+
+- **`CheckOptions.maxConcurrentChecks`** (default 50, matching
+  `OPENFGA_MAX_CONCURRENT_CHECKS_PER_BATCH_CHECK`) bounds how many
+  checks of one `checkMany` batch resolve concurrently. It is a
+  separate knob from `maxBreadth`, which bounds the branches
+  within a single check — the same split upstream makes. `check`
+  and `listObjects` ignore it.
+
+### Changed
+
+- **Concurrent routes into the same node now resolve it once.**
+  The node memo published only settled results, so at any
+  `maxBreadth` above 1 the routes overlapped and every one of them
+  re-resolved the shared subtree and re-issued its reads: the
+  resolution DAG walked as a tree, with breadth as the duplication
+  multiplier. A consumer profiling a page render measured one
+  immutable parent edge read 215 times in a single request. A
+  route that arrives while another is still resolving now waits
+  for it.
+
+  Results are unchanged, including for cyclic models. A subtree
+  truncated by a cycle and a subtree that threw are still never
+  shared — both are properties of the route rather than of the
+  node, which is the same line upstream's cached resolver draws
+  for a cycle-detected response.
+
+- **Branches abandoned after a node settles stop querying the
+  store.** A union that found its grant already refused to launch
+  queued branches; the branches already in flight now stop at
+  their next checkpoint instead of walking their subtree. One read
+  per abandoned branch — the one already handed to the store —
+  still lands, because cancellation is not part of the
+  `TupleStore` contract. If you instrument your store, drain its
+  counters before reading them.
+
+### Documentation
+
+- **The README no longer claims that `maxBreadth` never changes the
+  boolean result.** It can, on a model where a cycle reaches an
+  intersection operand: the first failing operand decides and
+  carries its own indeterminacy out, and an enclosing `but not`
+  reads a cycle-flagged denial differently from a plain one. This
+  is upstream's behaviour — OpenFGA's intersection short-circuits
+  the same way and its answer likewise tracks which operand is
+  cheaper — so it is documented rather than "fixed"; making it
+  deterministic would mean granting where OpenFGA denies. The claim
+  was already wrong in 0.4.0. New conformance fixture
+  `intersection-cycle-precedence` pins both directions against a
+  live OpenFGA.
+
+### Notes
+
+- `maxBreadth` keeps its default of 10.
+  `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT` is 10 upstream, and with
+  the change above breadth is no longer a duplication multiplier.
+  What remains true is that breadth buys parallelism only if the
+  store can execute reads concurrently: on a single pooled
+  PostgreSQL connection it buys queueing, and `maxBreadth: 1` is a
+  reasonable setting there.
+
 ## 0.4.0 — 2026-08
 
 ### Breaking changes
