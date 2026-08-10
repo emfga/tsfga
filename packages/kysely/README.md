@@ -65,6 +65,75 @@ standard migration tables.
 The raw migration map is also exported as `migrations` for tools
 that need direct access.
 
+### 005-type-restrictions is destructive
+
+This migration replaces `directly_assignable_types` and
+`allows_userset_subjects` on `tsfga.relation_configs` with a
+single `directly_assignable` (jsonb, NOT NULL) holding OpenFGA
+type restrictions: `["user", "user:*", "team#member"]`.
+
+**Existing relation configs are not converted, and cannot be.**
+`allows_userset_subjects = true` does not record which usersets
+the model intended, and `NULL` does not record which types — so
+any automatic conversion would invent a model nobody authored, in
+the granting direction. After migrating, rewrite your relation
+configs from your authorization model. **Tuples are untouched.**
+
+Consumers on `@tsfga/core` 0.5.x and `@tsfga/kysely` 0.4.x should
+plan this as a coordinated deploy: the new adapter cannot read the
+old columns, and the old adapter cannot read the new one.
+
+## Transactions
+
+`KyselyTupleStore` takes a `Kysely<DB>` it does not own, and
+Kysely declares `Transaction<DB>` as a subtype of `Kysely<DB>`.
+So a store — and a whole `TsfgaClient` built over it — can be
+scoped to a transaction with no extra API:
+
+```typescript
+await db.transaction().execute(async (trx) => {
+  const fga = createTsfga(new KyselyTupleStore(trx));
+  await fga.addTuple(/* ... */);
+  if (!(await fga.check(/* ... */))) throw new Error("rolled back");
+});
+```
+
+Every store method then runs inside `trx`.
+
+### Preserving an invariant across concurrent writers
+
+For a rule like "an organization always keeps at least one
+administrator", the read and the write must be in the same
+transaction *and* the transaction must be isolated enough that a
+concurrent writer cannot invalidate what was read.
+
+**Use `SERIALIZABLE`.** It preserves the invariant with no extra
+API surface — the losing transaction aborts with `40001` and you
+retry it:
+
+```typescript
+await db.transaction().setIsolationLevel("serializable").execute(
+  async (trx) => {
+    const fga = createTsfga(new KyselyTupleStore(trx));
+    const admins = await fga.listSubjects("organization", orgId, "admin");
+    if (admins.length <= 1) throw new Error("last administrator");
+    await fga.removeTuple(/* ... */);
+  },
+);
+```
+
+**Do not reach for `SELECT … FOR UPDATE` instead.** Probed against
+PostgreSQL 18: row locks are taken on rows that *exist*, so a
+concurrent `INSERT` of a new administrator is not blocked at
+either isolation level. `FOR UPDATE` is therefore adequate for
+"at least one X" only if you count from the locking read itself,
+and useless for any "at most N X" invariant. That is why the
+adapter exposes no lock option: a `TupleStore` that cannot lock
+would have to ignore one silently, which is a fail-open mode the
+core's clamping cannot protect against. OpenFGA reaches the same
+conclusion — it uses `SELECT … FOR UPDATE` strictly inside its
+Postgres datastore, never on its storage interface.
+
 ## Subject IDs and wildcards
 
 All object and subject IDs are stored in `uuid` columns, so
@@ -92,7 +161,7 @@ query the adapter actually issues:
 | Index | Columns | Serves |
 |---|---|---|
 | `idx_tuples_unique` | `(object_type, object_id, relation, subject_type, subject_id, COALESCE(subject_relation, ''))`, unique | The upsert's conflict target; also every probe, via its leading columns |
-| `idx_tuples_object` | `(object_type, object_id)` | `findTuplesByRelation`, `listDirectSubjects` |
+| `idx_tuples_object` | `(object_type, object_id)` | `findTuplesByRelation` |
 | `idx_tuples_userset` | `(object_type, object_id, relation)` where `subject_relation IS NOT NULL`, partial | The userset scan |
 | `idx_tuples_subject` | `(subject_type, subject_id)` | Reverse lookups by subject |
 

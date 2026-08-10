@@ -83,8 +83,8 @@ const fga = createTsfga(store);
 await fga.writeRelationConfig({
   objectType: "document",
   relation: "viewer",
-  directlyAssignableTypes: ["user"],
-  allowsUsersetSubjects: false,
+  // OpenFGA type restrictions: `user`, `user:*`, `team#member`.
+  directlyAssignable: ["user"],
 });
 
 // Add a tuple

@@ -24,8 +24,11 @@ const fga = createTsfga(store);
 await fga.writeRelationConfig({
   objectType: "document",
   relation: "viewer",
-  directlyAssignableTypes: ["user"],
-  allowsUsersetSubjects: false,
+  // What the relation admits, in OpenFGA's type-restriction
+  // notation: a bare type, `type:*` for the wildcard, and
+  // `type#relation` for a userset. `[]` means the relation admits
+  // no direct assignment at all.
+  directlyAssignable: ["user"],
 });
 
 // Add a tuple
@@ -316,18 +319,29 @@ nothing it could find would be valid:
 
 | Part | Left out when |
 |---|---|
-| direct probe | `directlyAssignableTypes` omits the subject type |
-| wildcard probe | `directlyAssignableTypes` omits `subjectType:*` |
-| userset scan | `allowsUsersetSubjects` is `false` |
+| direct probe | `directlyAssignable` omits the subject type |
+| wildcard probe | `directlyAssignable` omits `subjectType:*` |
+| userset scan | `directlyAssignable` has no `type#relation` entry |
+
+The userset scan is narrowed rather than switched: the query
+carries the `type#relation` refs the relation admits, so a
+relation admitting `team#member` never asks for — and never
+expands — a `team:eng#owner` row. The refs are a hint the store
+may use to narrow its query; the guarantee is that the reply is
+re-clamped against the same list, so a store that over-returns
+loses rows rather than smuggling them past the model.
 
 With all three ruled out there is nothing to ask, and the node
 skips the store entirely — it still resolves through its rewrites.
+That is how a purely computed relation is expressed: an empty
+`directlyAssignable` says the relation admits nothing directly,
+and no read is issued.
 
 A part is left out only on a *positive* exclusion. A relation with
-no config at all, or with `directlyAssignableTypes: null` — which
-means "not narrowed", not "purely computed" — still reads
-everything. The gate is the same predicate `addTuple` applies, so
-a tuple that can be written is always a tuple that can be found.
+no config at all still reads everything — there is nothing to
+narrow against. The gate is the same predicate `addTuple` applies,
+so a tuple that can be written is always a tuple that can be
+found.
 
 **This makes relation configs load-bearing rather than
 advisory.** A tuple written straight to the database, bypassing
@@ -341,24 +355,61 @@ open.
 The config for a relation is read once per request and cached, so
 this ordering costs one round-trip per relation, not per node.
 
-tsfga skips less than upstream in one case. A purely computed
-relation (`define viewer: owner`) issues no tuple reads at all in
-OpenFGA, which dispatches on the relation's rewrite. tsfga
-encodes "purely computed" as the same `directlyAssignableTypes:
-null` that also means "unrestricted", so it cannot tell the two
-apart and reads. Distinguishing them would mean changing what
-`null` means for writes as well, so it is deliberately not folded
-in here.
+### Applying the same gate yourself
+
+`admitsSubjectRef` and `directSubjectRef` are exported so a
+consumer narrowing their own query can apply the gate tsfga
+applies rather than reimplementing it and drifting out of step.
+
+```typescript
+import { admitsSubjectRef, directSubjectRef } from "@tsfga/core";
+
+const config = await store.findRelationConfig("document", "viewer");
+admitsSubjectRef(config, directSubjectRef("team", "eng", "member"));
+```
+
+Two things to know before relying on it:
+
+- **A `null` config is permissive**, because that is what `check`
+  does and agreement is the whole point of exporting these. Inside
+  `check` a `null` config means the relation is unconstrained; in
+  your `WHERE` clause it usually means you misspelled the relation
+  name, and the filter then silently admits everything. Look the
+  config up yourself and fail on `null` if that is what you meant.
+- **It filters tuple *shapes* only.** It knows nothing of
+  `excludedBy` or `intersection`, which revoke a grant after the
+  row is read. A row it admits is one `check` will *consider*, not
+  one `check` will allow. There is no substitute for `check`.
+
+## Listing subjects
+
+`listSubjects` applies the same type restrictions, so a subject it
+reports is one `check` could act on rather than merely one that is
+stored. Narrowing a relation does not revalidate the tuples
+already written, so inadmissible rows are an ordinary state to be
+in, and reporting them was a divergence: OpenFGA filters in Expand
+and ListUsers for the same reason.
+
+The consequence is worth stating plainly: **there is no library
+path that finds an inadmissible row in order to delete it.**
+Upstream keeps `Read` unfiltered for exactly that reason. Until a
+maintenance read exists, removing such rows means going to the
+store directly.
+
+`listObjects` is deliberately *not* gated at the candidate stage.
+It re-checks every candidate through the gated path, so
+over-returning candidates costs work and cannot grant, whereas
+under-returning would silently drop objects the subject can
+really reach.
 
 ## Contextual tuples
 
 Contextual tuples passed on a `CheckRequest` are validated
-against relation configs with the same rules as `addTuple`:
-the relation config must exist, the subject type must be
-directly assignable (including `type:*` for wildcard
-subjects), and userset subjects must be allowed. Invalid
-contextual tuples throw `RelationConfigNotFoundError`,
-`InvalidSubjectTypeError`, or `UsersetNotAllowedError`.
+against relation configs with the same rules as `addTuple`: the
+relation config must exist, and the subject ref — the bare type,
+`type:*` for a wildcard subject, or `type#relation` for a userset
+— must appear in `directlyAssignable`. Invalid contextual tuples
+throw `RelationConfigNotFoundError` or `InvalidSubjectTypeError`.
 
 ## TupleStore interface
 
