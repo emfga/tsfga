@@ -55,6 +55,7 @@ const allowed = await fga.check({
 | Method | Description |
 |---|---|
 | `check(request)` | Check if a subject has a relation on an object |
+| `checkMany(requests)` | Check several requests in one shared resolution scope; outcomes in request order |
 | `addTuple(request)` | Insert or update a relationship tuple |
 | `removeTuple(request)` | Delete a relationship tuple |
 | `listObjects(objectType, relation, subjectType, subjectId, context?)` | List object IDs the subject can access, in candidate order; `context` is forwarded to each check |
@@ -159,6 +160,8 @@ object as `maxDepth`). The default matches OpenFGA's default
 breadth never changes the boolean result or whether a check
 errors — it caps how many concurrent store reads a single wide
 node can issue (useful to avoid saturating a connection pool).
+(Before 0.5.0 that invariant had one exception, on a model with a
+cycle running through an intersection; see the changelog.)
 When several branches fail, which branch's error surfaces
 depends on completion order — the same nondeterminism OpenFGA
 has. Branches still queued when a node settles are never
@@ -169,6 +172,94 @@ anything else throws `TsfgaError`.
 checked at once — the same knob deliberately, following
 upstream, whose ListObjects worker pool is sized at
 `1 + resolveNodeBreadthLimit`.
+
+**Breadth buys parallelism only if the store can execute
+concurrently.** On a single pooled PostgreSQL connection — the
+normal case for a request-scoped store, and unavoidable for one
+bound to an open transaction — the driver serialises, so raising
+breadth buys queueing rather than parallelism. It no longer costs
+extra *work*: concurrent routes into the same node coalesce onto
+one resolution (see below), so breadth is not a duplication
+multiplier. But if your store cannot resolve reads in parallel,
+the default of 10 gains you little, and `maxBreadth: 1` is a
+reasonable setting. Measure before changing it.
+
+## One resolution per node
+
+The check graph is a DAG, not a tree: the same
+`(object, relation)` is commonly reached by several routes, and a
+deep permission chain funnels every route through the same few
+nodes near the root of the hierarchy.
+
+Each node is resolved once per check, whichever route gets there
+first. A route arriving after another finished reads the settled
+result; a route arriving while another is still resolving waits
+for it rather than starting again. Both are request-scoped: no
+result outlives the call it was computed in, so a check never
+answers from data older than itself.
+
+Two kinds of result are deliberately *not* shared, because they
+are properties of the route rather than of the node: a subtree
+truncated by a cycle, and a subtree that threw. Both are
+re-resolved by the next route, matching what upstream's cached
+resolver does with a cycle-detected response.
+
+## Abandoned branches stop reading
+
+When a union finds its grant, the branches still in flight are no
+longer needed. They stop at their next checkpoint — entering a
+node, a tuple-to-userset lookup, a condition evaluation — instead
+of walking their subtree and querying a store the caller believes
+it is finished with.
+
+The one read that cannot be called back is the one already handed
+to the store: tsfga does not put a cancellation token into
+`TupleStore`. So a store may still see **one** read per abandoned
+branch land after `check()` resolves. If you instrument your
+store, drain its counters before reading them, or you will bill
+one call's reads to the next.
+
+## checkMany
+
+`check()` builds its resolution scope per call, so two checks in
+the same request share nothing and each pays for the whole walk.
+`checkMany` runs a batch of requests in one scope: the
+relation-config cache and the node memo span the batch, so the
+part of the graph they have in common — usually most of it — is
+resolved once.
+
+```ts
+const [canView, canEdit] = await fga.checkMany([
+  { objectType: "document", objectId: docId, relation: "viewer", ...subject },
+  { objectType: "document", objectId: docId, relation: "editor", ...subject },
+]);
+// → [{ allowed: true }, { allowed: false }]
+```
+
+- **Answers are in request order**, one outcome per request.
+  Upstream's BatchCheck keys an unordered map on a
+  caller-supplied correlation id; the array position is the same
+  thing, without asking you for one.
+- **A failing check does not fail the batch.** Its error is
+  reported as `outcome.error` and `allowed` is `false`, matching
+  upstream. `checkMany` itself throws only for invalid options.
+- **Identical requests cost one resolution.** They coalesce at
+  their root node, which is what upstream achieves by
+  de-duplicating a batch on a cache key before dispatching it.
+- **Concurrency is `maxConcurrentChecks`** (default 50, matching
+  `OPENFGA_MAX_CONCURRENT_CHECKS_PER_BATCH_CHECK`). It bounds
+  whole checks; `maxBreadth` bounds the branches inside one. There
+  is no cap on batch size — upstream's
+  `OPENFGA_MAX_CHECKS_PER_BATCH_CHECK` guards a server's request
+  handler, and a library holds nobody's socket.
+- **Pass one `context` object**, not an equal copy per request.
+  Requests are grouped into one scope per context by reference
+  identity, because the node memo does not key on the context and
+  requests resolving over different contexts must not share one.
+- **The scope is bounded by the call**, so it is safe inside a
+  transaction: a tuple written earlier in the same transaction is
+  visible to it. This is why a shared scope is offered rather than
+  a tuple cache — a cache would hide that write.
 
 ## listObjects
 
