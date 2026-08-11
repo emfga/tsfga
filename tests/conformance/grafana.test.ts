@@ -84,7 +84,7 @@ describe("Grafana Model Conformance", () => {
       expression: "subresource in subresources",
       parameters: {
         subresource: "string",
-        subresources: "list",
+        subresources: "list<string>",
       },
     });
 

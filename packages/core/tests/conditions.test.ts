@@ -253,10 +253,10 @@ describe("condition parameter coercion", () => {
     ["duration", "300ms"],
     ["timestamp", "2026-01-01T00:00:00Z"],
     ["timestamp", "2026-01-01T00:00:00+01:00"],
-    ["list", []],
-    ["list", ["a"]],
-    ["map", {}],
-    ["map", { a: "x" }],
+    ["list<string>", []],
+    ["list<string>", ["a"]],
+    ["map<string>", {}],
+    ["map<string>", { a: "x" }],
     ["any", { x: 1 }],
     ["any", "anything"],
   ];
@@ -285,11 +285,15 @@ describe("condition parameter coercion", () => {
     ["timestamp", 1700000000],
     ["timestamp", "not a date"],
     ["timestamp", "2026-01-01"],
-    ["list", "a"],
-    ["list", { a: 1 }],
-    ["map", ["a"]],
-    ["map", "a"],
-    ["map", null],
+    ["list<string>", "a"],
+    ["list<string>", { a: 1 }],
+    ["map<string>", ["a"]],
+    ["map<string>", "a"],
+    ["map<string>", null],
+    // The element type is enforced, not just the container.
+    ["list<string>", [1]],
+    ["map<string>", { a: 1 }],
+    ["list<int>", ["x"]],
   ];
 
   for (const [paramType, value] of ACCEPTED) {
@@ -363,11 +367,17 @@ describe("integer parameters are read as bigint", () => {
     expect(int("-99999999999999999999999")).toBe(-9223372036854775808n);
   });
 
-  test("uint saturates at its own ceiling", () => {
-    expect(uint("99999999999999999999999")).toBe(18446744073709551615n);
+  test("uint saturates at the int64 ceiling, not the uint64 one", () => {
+    // Measured against v1.18.2, which is the only reason this is
+    // not the obvious bound: every numeric string goes through the
+    // same `bigFloat.Int64()`, and the uint branch only rejects
+    // the result afterwards for being negative. So a magnitude
+    // past int64 clamps to int64's ceiling and
+    // `n == 18446744073709551615u` is `false` upstream.
+    expect(uint("99999999999999999999999")).toBe(9223372036854775807n);
   });
 
-  describe("the decimal grammar refuses what BigInt would accept", () => {
+  describe("the numeric grammar refuses what BigInt would accept", () => {
     // BigInt("0x10") is 16n, BigInt(" 42 ") is 42n and BigInt("")
     // is 0n, so delegating the parse to the built-in would be as
     // lax as Number was.
@@ -378,13 +388,35 @@ describe("integer parameters are read as bigint", () => {
       " 42 ",
       "\n42",
       "",
-      "1e3",
       "4.5",
+      ".5",
       "1_000",
       "abc",
+      "Inf",
     ]) {
       test(`refuses ${JSON.stringify(spelling)}`, () => {
         expect(() => int(spelling)).toThrow();
+      });
+    }
+  });
+
+  describe("and accepts what upstream's does", () => {
+    // Upstream parses every numeric type with
+    // `big.ParseFloat(value, 10, 64, 0)` and then asks
+    // `bigFloat.IsInt()`, so an exponent or a zero fraction is an
+    // ordinary integer spelling and answers `true` there. A
+    // grammar of bare digits refused all four.
+    for (const [spelling, expected] of [
+      ["1e3", 1000n],
+      ["1E3", 1000n],
+      ["1e+3", 1000n],
+      ["1000e-3", 1n],
+      ["4.0", 4n],
+      ["5.", 5n],
+      ["1p3", 8n],
+    ] as const) {
+      test(`reads ${JSON.stringify(spelling)} as ${expected}`, () => {
+        expect(int(spelling)).toBe(expected);
       });
     }
   });
@@ -414,6 +446,181 @@ describe("cel-js mixed-type behaviour under bigint", () => {
     // conservative match rather than a divergence.
     const { coerced } = coerceContext({ n: "int" }, { n: "7" });
     expect(coerced["n"]).toBe(7n);
+  });
+});
+
+/**
+ * `double` reads the same grammar as `int`, and one rule more:
+ * upstream parses at 64-bit precision and refuses the value when
+ * converting it to a `float64` is inexact. So a decimal fraction
+ * with no finite binary form is an error rather than the nearest
+ * double, which is why `"0.1"` is refused and `1.5` is not.
+ *
+ * Every one of these was measured on v1.18.2. `double` used to
+ * inherit the whole `Number()` grammar, so the first four answered
+ * where upstream refuses to read the value at all.
+ */
+describe("double parameters read Go's grammar", () => {
+  const double = (value: unknown): unknown =>
+    coerceContext({ n: "double" }, { n: value }).coerced["n"];
+
+  for (const spelling of [
+    "0x10",
+    "0o10",
+    "0b10",
+    " 1.5 ",
+    "1e-400",
+    "1e400",
+    "1.0000000000000000001",
+    "0.1",
+    "3.14",
+    "9007199254740993",
+    "Infinity",
+    "INF",
+    "NaN",
+    "",
+  ]) {
+    test(`refuses ${JSON.stringify(spelling)}`, () => {
+      expect(() => double(spelling)).toThrow();
+    });
+  }
+
+  for (const [spelling, expected] of [
+    ["1.5", 1.5],
+    ["1.5e3", 1500],
+    [".5", 0.5],
+    ["-2.25", -2.25],
+    ["1p3", 8],
+    // `big.Float.Parse` special-cases exactly these spellings
+    // before it scans anything, and `Number()` reads none of them.
+    ["Inf", Number.POSITIVE_INFINITY],
+    ["+Inf", Number.POSITIVE_INFINITY],
+    ["-Inf", Number.NEGATIVE_INFINITY],
+    ["inf", Number.POSITIVE_INFINITY],
+  ] as const) {
+    test(`reads ${JSON.stringify(spelling)} as ${expected}`, () => {
+      expect(double(spelling)).toBe(expected);
+    });
+  }
+
+  test("a JSON number is taken as it stands", () => {
+    // The precision rule is upstream's *string* parser. A number
+    // is already a float64 there and is asserted, not parsed, so
+    // 0.1 given as a number is fine where "0.1" is not.
+    expect(double(0.1)).toBe(0.1);
+  });
+});
+
+/**
+ * `duration` and `timestamp` are strings on both sides, and each
+ * had one spelling that disagreed.
+ */
+describe("duration and timestamp grammars", () => {
+  const duration = (value: unknown): unknown =>
+    coerceContext({ n: "duration" }, { n: value }).coerced["n"];
+  const timestamp = (value: unknown): unknown =>
+    coerceContext({ n: "timestamp" }, { n: value }).coerced["n"];
+
+  for (const spelling of ["0", "+0", "-0"]) {
+    test(`duration accepts the bare zero ${JSON.stringify(spelling)}`, () => {
+      // `time.ParseDuration` special-cases it before looking for a
+      // unit. The unit-demanding grammar refused all three.
+      expect(duration(spelling)).toEqual(duration("0s"));
+    });
+  }
+
+  for (const spelling of ["00", "1", "0.5", " 1h "]) {
+    test(`duration still refuses ${JSON.stringify(spelling)}`, () => {
+      expect(() => duration(spelling)).toThrow();
+    });
+  }
+
+  for (const spelling of [
+    "2026-01-01t00:00:00z",
+    "2026-01-01t00:00:00Z",
+    "2026-01-01T00:00:00z",
+  ]) {
+    test(`timestamp refuses the lowercase ${JSON.stringify(spelling)}`, () => {
+      // Go's RFC3339 layout spells the designators uppercase and
+      // its parser is exact about it.
+      expect(() => timestamp(spelling)).toThrow();
+    });
+  }
+
+  for (const digits of [3, 9, 10, 12, 30]) {
+    test(`timestamp accepts ${digits} fractional digits`, () => {
+      // cel-js's own timestamp() refuses anything longer than 30
+      // characters, which is where ten digits lands, so the Date
+      // is built here instead. Upstream keeps nanoseconds and
+      // discards the rest, accepting all five.
+      const value = `2026-01-01T00:00:00.${"1".repeat(digits)}Z`;
+      expect(timestamp(value)).toBeInstanceOf(Date);
+    });
+  }
+
+  for (const spelling of [
+    "2026-13-01T00:00:00Z",
+    "2026-01-32T00:00:00Z",
+    "2016-12-31T23:59:60Z",
+    "2026-01-01T00:00:00.Z",
+    "2026-01-01T00:00:00",
+  ]) {
+    test(`timestamp still refuses ${JSON.stringify(spelling)}`, () => {
+      // The regex admits the shape of the first three, so what
+      // refuses them is the Date being invalid — the check that
+      // came free while cel-js built it.
+      expect(() => timestamp(spelling)).toThrow();
+    });
+  }
+});
+
+/**
+ * A container's elements are coerced as its declared element type,
+ * which is the whole reason the type carries one.
+ */
+describe("list and map elements are coerced", () => {
+  const coerce = (type: ConditionParameterType, value: unknown): unknown =>
+    coerceContext({ n: type }, { n: value }).coerced["n"];
+
+  test("a list<int> reaches CEL as bigints", () => {
+    // Otherwise `n[0] + 1` finds no overload, exactly as a bare
+    // int parameter did.
+    expect(coerce("list<int>", ["1", 2])).toEqual([1n, 2n]);
+  });
+
+  test("a map<int> reaches CEL as bigints", () => {
+    expect(coerce("map<int>", { a: 1 })).toEqual({ a: 1n });
+  });
+
+  test("a list<timestamp> reaches CEL as dates", () => {
+    expect(coerce("list<timestamp>", ["2026-01-01T00:00:00Z"])).toEqual([
+      new Date("2026-01-01T00:00:00Z"),
+    ]);
+  });
+
+  test("an ill-typed element refuses the whole value", () => {
+    // A `false` here would not exclude under a `but not`, which
+    // grants. Upstream refuses the check.
+    expect(() => coerce("list<string>", [1])).toThrow("n[0]");
+    expect(() => coerce("map<string>", { a: 1 })).toThrow("n['a']");
+  });
+
+  test("an empty container is accepted whatever it holds", () => {
+    expect(coerce("list<int>", [])).toEqual([]);
+    expect(coerce("map<int>", {})).toEqual({});
+  });
+
+  test("a type with no rule refuses rather than substituting itself", () => {
+    // Reachable only through a store reporting a parameter type
+    // the union does not have -- which the adapter refuses, but
+    // `TupleStore` is the documented extension point. The branch
+    // used to `return paramType`, so the value CEL evaluated
+    // became the literal string "ipaddress".
+    const parameters = { n: "ipaddress" } as unknown as Record<
+      string,
+      ConditionParameterType
+    >;
+    expect(() => coerceContext(parameters, { n: ["a"] })).toThrow();
   });
 });
 

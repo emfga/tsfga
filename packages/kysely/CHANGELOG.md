@@ -36,6 +36,14 @@ releases may contain breaking changes).
   part. An adapter reading `[]` as "no filter" answers a query
   that asked for nothing with a full scan.
 
+- **BREAKING: a condition parameter of container type names its
+  element type.** `parseConditionParameters` reads `list<string>`
+  and `map<int>` — as the model spells them, and as core 0.6.0's
+  `ConditionParameterType` now requires — and rejects a stored
+  bare `list` or `map` as invalid data. A row written under the
+  previous spelling must be rewritten from the model, which is
+  also the only place that says what the elements are.
+
 - `parseDirectlyAssignable` validates the structured shape at the
   adapter boundary and normalizes `wildcard` to `true`-or-absent,
   so a stored `{"wildcard": false}` cannot compare unequal to an

@@ -1,7 +1,11 @@
 import { type ParseResult, parse } from "@marcbachmann/cel-js";
 import { ConditionEvaluationError, ConditionNotFoundError } from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
-import type { ConditionParameterType, Tuple } from "./types.ts";
+import type {
+  ConditionParameterScalarType,
+  ConditionParameterType,
+  Tuple,
+} from "./types.ts";
 
 /**
  * Cache compiled CEL expressions keyed by the expression source
@@ -12,8 +16,7 @@ import type { ConditionParameterType, Tuple } from "./types.ts";
  */
 const exprCache = new Map<string, ParseResult>();
 
-/** Pre-compiled coercion helpers for timestamp/duration strings */
-const coerceTimestamp = parse("timestamp(val)");
+/** Pre-compiled coercion helper for duration strings */
 const coerceDuration = parse("duration(val)");
 
 /**
@@ -37,11 +40,14 @@ const coerceDuration = parse("duration(val)");
  * | `"1d"`, `3600` | duration | refused |
  * | `"true"` | bool | refused |
  * | `1` | string | refused |
+ * | `[1]` | list&lt;string&gt; | refused |
  *
  * The shape of it: the **numeric** types accept numeric strings,
  * because JSON has no integer type and upstream parses rather than
- * asserts. `duration` and `timestamp` accept **only** strings.
- * Everything else is exact.
+ * asserts — but the grammar is Go's, so it is neither `Number`'s
+ * nor `BigInt`'s. `duration` and `timestamp` accept **only**
+ * strings. A container coerces every element as its declared
+ * element type. Everything else is exact.
  *
  * Refusing rather than answering `false` is the point. On the
  * subtract side of an `excludedBy` a `false` condition means the
@@ -59,17 +65,39 @@ const coerceDuration = parse("duration(val)");
 const DURATION =
   /^[+-]?(\d+(\.\d*)?|\.\d+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h)([+-]?(\d+(\.\d*)?|\.\d+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))*$/;
 
-/** RFC 3339, as `time.Parse(time.RFC3339, …)` accepts it. */
-const RFC3339 =
-  /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/;
+/**
+ * The one unitless duration Go accepts.
+ *
+ * `time.ParseDuration` special-cases a bare zero before it looks
+ * for a unit, so `"0"`, `"+0"` and `"-0"` parse while `"00"` and
+ * `"1"` do not.
+ */
+const DURATION_ZERO = /^[+-]?0$/;
 
 /**
- * A JSON number or numeric string as a finite number, or `null`.
+ * RFC 3339, as `time.Parse(time.RFC3339, …)` accepts it.
  *
- * Booleans are excluded deliberately: upstream's type assertion
- * refuses `true` for an int, where a bare `Number(true)` would
- * happily produce `1`.
+ * The designators are uppercase because Go's RFC3339 layout spells
+ * them that way and its parser is exact about it: upstream refuses
+ * `2026-01-01t00:00:00z` in all three combinations of case, where
+ * this regex used to admit them and answer.
+ *
+ * The fractional part is unbounded on purpose. Upstream accepts 3,
+ * 9, 12 and 30 digits alike — it keeps nanoseconds and discards the
+ * rest — so the digits are not what this has to gate.
  */
+const RFC3339 =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * The range CEL gives a timestamp: year 1 through year 9999.
+ *
+ * cel-js applies the same bounds inside `timestamp()`; they are
+ * restated here because the coercion no longer goes through it.
+ */
+const TIMESTAMP_MIN = -62135596800000;
+const TIMESTAMP_MAX = 253402300799999;
+
 /**
  * A context value as text, for a refusal message.
  *
@@ -84,35 +112,116 @@ function describeValue(value: unknown): string {
 }
 
 /**
- * A decimal integer, and nothing else.
+ * The numeric string grammar, which is Go's and not JavaScript's.
  *
- * `BigInt`'s own string grammar is as lax as `Number`'s in exactly
- * the ways that matter here: `BigInt("0x10")` is `16n`,
- * `BigInt(" 42 ")` is `42n`, and `BigInt("")` is `0n`. Upstream
- * refuses all three, so the parse cannot be delegated to either
- * built-in. Owned here and generalised to the remaining numeric
- * types in the commit that follows.
+ * Every numeric type — `int`, `uint` and `double` alike — reaches
+ * upstream through `big.ParseFloat(value, 10, 64, 0)`. Base 10 is
+ * given explicitly, so none of the prefixed literal forms
+ * `Number()` accepts are: `0x10`, `0o10`, `0b10` and `1_000` are
+ * all refused, as is any surrounding whitespace and the empty
+ * string. What it does accept is a decimal mantissa with an
+ * optional exponent — `1e3`, `1E3`, `1e+3`, `1000e-3`, `.5` and
+ * `5.` all parse — where `Number()` and `BigInt()` between them
+ * agree on none of the boundary.
+ *
+ * `p` is Go's binary exponent: `1p3` is 8.
  */
-const DECIMAL_INTEGER = /^[+-]?[0-9]+$/;
+const GO_NUMERIC =
+  /^([+-])?(\d+(?:\.\d*)?|\.\d+)(?:[eE]([+-]?\d+)|[pP]([+-]?\d+))?$/;
+
+/**
+ * The infinities, which `big.Float.Parse` special-cases before it
+ * scans anything: exactly `Inf` or `inf`, optionally signed.
+ * `INF`, `Infinity` and `NaN` are refused, upstream and here.
+ */
+const GO_INFINITY = /^([+-])?(?:Inf|inf)$/;
 
 /** Go's int64, which is what upstream stores an `int` in. */
 const INT64_MIN = -(2n ** 63n);
 const INT64_MAX = 2n ** 63n - 1n;
-/** Go's uint64. */
-const UINT64_MAX = 2n ** 64n - 1n;
 
 /**
- * Saturate to the range the declared type can hold.
+ * How far the exponents are followed exactly.
  *
- * Upstream converts through `bigFloat.Int64()`, which clamps
- * rather than failing, and then answers on the clamped value. An
- * exact `BigInt` would answer the opposite boolean for a magnitude
- * outside the range, so the clamp is part of matching it.
+ * Past this the value is many orders of magnitude outside both
+ * `float64` and `int64`, and the only cost of following it would
+ * be raising 5 to an attacker-chosen power. Refusing matches the
+ * behaviour these spellings already had.
  */
-function saturate(value: bigint, min: bigint, max: bigint): bigint {
-  if (value < min) return min;
-  if (value > max) return max;
-  return value;
+const MAX_EXPONENT_10 = 4000;
+const MAX_EXPONENT_2 = 16000;
+
+/** A parsed numeric string: `digits × 10^exp10 × 2^exp2`. */
+interface ParsedNumber {
+  negative: boolean;
+  digits: bigint;
+  exp10: number;
+  exp2: number;
+}
+
+function parseGoNumeric(value: string): ParsedNumber | null {
+  const match = GO_NUMERIC.exec(value);
+  if (!match) return null;
+  const [, sign, mantissa, decimalExponent, binaryExponent] = match;
+  if (mantissa === undefined) return null;
+
+  const point = mantissa.indexOf(".");
+  const digits =
+    point === -1
+      ? mantissa
+      : mantissa.slice(0, point) + mantissa.slice(point + 1);
+  const fraction = point === -1 ? 0 : mantissa.length - point - 1;
+
+  return {
+    negative: sign === "-",
+    digits: BigInt(digits),
+    exp10: Number(decimalExponent ?? 0) - fraction,
+    exp2: Number(binaryExponent ?? 0),
+  };
+}
+
+/**
+ * The same value written as `significand × 2^exp2` with an odd
+ * significand, or `null` when it cannot be — `0.1` is a decimal
+ * fraction with no finite binary form, and no rounding here would
+ * make it one.
+ *
+ * That is the whole of upstream's precision rule. It parses at
+ * 64-bit precision and then converts, refusing when the conversion
+ * is inexact, so a `double` given `"0.1"` or
+ * `"1.0000000000000000001"` is an error rather than the nearest
+ * `float64`.
+ */
+function toDyadic(
+  parsed: ParsedNumber,
+): { significand: bigint; exp2: number } | null {
+  if (parsed.digits === 0n) return { significand: 0n, exp2: 0 };
+  if (Math.abs(parsed.exp10) > MAX_EXPONENT_10) return null;
+  if (Math.abs(parsed.exp2) > MAX_EXPONENT_2) return null;
+
+  // 10^n is 2^n·5^n, so the power of ten splits into a power of
+  // two the binary exponent absorbs and a power of five that must
+  // divide the digits exactly or the value is not dyadic.
+  let significand = parsed.digits;
+  let exp2 = parsed.exp2 + parsed.exp10;
+  if (parsed.exp10 > 0) {
+    significand *= 5n ** BigInt(parsed.exp10);
+  } else if (parsed.exp10 < 0) {
+    const fifths = 5n ** BigInt(-parsed.exp10);
+    if (significand % fifths !== 0n) return null;
+    significand /= fifths;
+  }
+
+  while (significand % 2n === 0n) {
+    significand >>= 1n;
+    exp2 += 1;
+  }
+  return { significand, exp2 };
+}
+
+/** How many bits the significand needs. */
+function bitLength(value: bigint): number {
+  return value === 0n ? 0 : value.toString(2).length;
 }
 
 /**
@@ -125,8 +234,15 @@ function saturate(value: bigint, min: bigint, max: bigint): bigint {
  * as a string, so it is parsed directly: routing it through
  * `Number` first loses the precision before a `BigInt` could
  * preserve it.
+ *
+ * A string is an integer when its dyadic form has no negative
+ * exponent left, which is how `"4.0"` and `"1e3"` are integers and
+ * `"4.5"` and `".5"` are not — upstream asks `bigFloat.IsInt()`
+ * and draws the line in the same place.
  */
 function asBigInt(value: unknown, allowNegative: boolean): bigint | null {
+  // Deliberate: upstream's type assertion refuses `true` for an
+  // int, where a bare `Number(true)` would happily produce `1`.
   if (typeof value === "boolean") return null;
   if (typeof value === "bigint") {
     return allowNegative || value >= 0n ? value : null;
@@ -137,19 +253,124 @@ function asBigInt(value: unknown, allowNegative: boolean): bigint | null {
     return allowNegative || parsed >= 0n ? parsed : null;
   }
   if (typeof value !== "string") return null;
-  if (!DECIMAL_INTEGER.test(value)) return null;
-  const parsed = BigInt(value);
-  return allowNegative || parsed >= 0n ? parsed : null;
+
+  const parsed = parseGoNumeric(value);
+  if (!parsed) return null;
+  const dyadic = toDyadic(parsed);
+  if (!dyadic || dyadic.exp2 < 0) return null;
+
+  const magnitude = dyadic.significand << BigInt(dyadic.exp2);
+  const signed = parsed.negative ? -magnitude : magnitude;
+  return allowNegative || signed >= 0n ? signed : null;
 }
 
+/**
+ * Saturate to the range the declared type can hold.
+ *
+ * Upstream converts through `bigFloat.Int64()`, which clamps
+ * rather than failing, and then answers on the clamped value. An
+ * exact `BigInt` would answer the opposite boolean for a magnitude
+ * outside the range, so the clamp is part of matching it.
+ *
+ * A `uint` clamps at the **int64** ceiling, not the uint64 one:
+ * upstream reads every numeric string through the same
+ * `bigFloat.Int64()` and only then rejects a negative, so
+ * `n == 9223372036854775807u` holds for a value far past it and
+ * `n == 18446744073709551615u` does not.
+ */
+function saturate(value: bigint, min: bigint): bigint {
+  if (value < min) return min;
+  if (value > INT64_MAX) return INT64_MAX;
+  return value;
+}
+
+/**
+ * A double context value as a `number`, or `null`.
+ *
+ * A JSON number is taken as it stands — it is already a `float64`
+ * and upstream asserts rather than parses it. A string goes
+ * through Go's grammar and Go's precision rule, so the ways
+ * `Number()` is laxer than `big.ParseFloat` are all closed: the
+ * prefixed literal forms, surrounding whitespace, an inexact
+ * decimal, and a magnitude that overflows or underflows the type.
+ * The infinities go the other way — upstream reads `Inf` and
+ * `Number()` does not.
+ */
 function asNumber(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (typeof value !== "string") return null;
-  // `Number("")` and `Number(" ")` are `0`; upstream's parser
-  // rejects both.
-  if (value.trim() === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+
+  const infinite = GO_INFINITY.exec(value);
+  if (infinite) {
+    return infinite[1] === "-"
+      ? Number.NEGATIVE_INFINITY
+      : Number.POSITIVE_INFINITY;
+  }
+
+  const parsed = parseGoNumeric(value);
+  if (!parsed) return null;
+  const dyadic = toDyadic(parsed);
+  if (!dyadic) return null;
+  if (dyadic.significand === 0n) return parsed.negative ? -0 : 0;
+
+  // The exponent range of a float64: the largest is just under
+  // 2^1024 and the smallest subnormal is 2^-1074.
+  const exponent = dyadic.exp2 + bitLength(dyadic.significand) - 1;
+  if (bitLength(dyadic.significand) > 53) return null;
+  if (exponent > 1023 || dyadic.exp2 < -1074) return null;
+
+  const magnitude = Number(dyadic.significand) * 2 ** dyadic.exp2;
+  return parsed.negative ? -magnitude : magnitude;
+}
+
+/**
+ * A timestamp string as a `Date`, or `null`.
+ *
+ * Built here rather than through cel-js's `timestamp()`, which
+ * refuses any spelling longer than 30 characters — ten fractional
+ * digits are enough — where upstream keeps nanoseconds and
+ * discards the rest of whatever it is given. The bounds and the
+ * `Date` itself are what cel-js would have produced.
+ */
+function asTimestamp(value: string): Date | null {
+  const date = new Date(value);
+  const time = date.getTime();
+  if (Number.isNaN(time)) return null;
+  if (time < TIMESTAMP_MIN || time > TIMESTAMP_MAX) return null;
+  return date;
+}
+
+const SCALAR_PARAMETER_TYPES: ReadonlySet<string> = new Set([
+  "string",
+  "int",
+  "uint",
+  "bool",
+  "double",
+  "duration",
+  "timestamp",
+  "any",
+]);
+
+function isScalarParameterType(
+  value: string,
+): value is ConditionParameterScalarType {
+  return SCALAR_PARAMETER_TYPES.has(value);
+}
+
+const CONTAINER_PARAMETER_TYPE = /^(list|map)<(.+)>$/;
+
+/**
+ * A declared `list<…>` or `map<…>` taken apart, or `null` for a
+ * type that holds nothing.
+ */
+function containerOf(
+  paramType: ConditionParameterType,
+): { kind: "list" | "map"; element: ConditionParameterScalarType } | null {
+  const match = CONTAINER_PARAMETER_TYPE.exec(paramType);
+  if (!match) return null;
+  const [, kind, element] = match;
+  if (element === undefined || !isScalarParameterType(element)) return null;
+  return { kind: kind === "map" ? "map" : "list", element };
 }
 
 function coerceValue(
@@ -165,6 +386,33 @@ function coerceValue(
         `${describeValue(value)}`,
     );
   };
+
+  // Containers first, because their element type decides the rest
+  // and the scalar switch has nothing to say about them. Every
+  // element is coerced as its declared type, which is what makes
+  // `list<string>` given `[1]` an error rather than a list CEL
+  // will happily compare a number out of.
+  const container = containerOf(paramType);
+  if (container) {
+    if (container.kind === "list") {
+      if (!Array.isArray(value)) refuse("a list");
+      return value.map((item, index) =>
+        coerceValue(`${parameter}[${index}]`, item, container.element),
+      );
+    }
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      refuse("a map");
+    }
+    const coerced: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      coerced[key] = coerceValue(
+        `${parameter}['${key}']`,
+        item,
+        container.element,
+      );
+    }
+    return coerced;
+  }
 
   switch (paramType) {
     case "any":
@@ -190,9 +438,7 @@ function coerceValue(
         }
         refuse(`an ${paramType} value`);
       }
-      return signed
-        ? saturate(parsed, INT64_MIN, INT64_MAX)
-        : saturate(parsed, 0n, UINT64_MAX);
+      return saturate(parsed, signed ? INT64_MIN : 0n);
     }
 
     case "double": {
@@ -201,33 +447,32 @@ function coerceValue(
       return numeric;
     }
 
-    case "duration":
+    case "duration": {
       // String only. `3600` is refused rather than read as
       // seconds — upstream asserts the string before parsing.
       if (typeof value !== "string") refuse("a duration string");
+      // Go's parser takes a bare zero and nothing else unitless,
+      // and cel-js's `duration()` takes no such thing, so the one
+      // spelling it declines is written out.
+      if (DURATION_ZERO.test(value)) return coerceDuration({ val: "0s" });
       if (!DURATION.test(value)) refuse("a valid duration string");
       return coerceDuration({ val: value });
+    }
 
-    case "timestamp":
+    case "timestamp": {
       if (typeof value !== "string") refuse("an RFC 3339 timestamp string");
       if (!RFC3339.test(value)) refuse("a valid RFC 3339 timestamp string");
-      return coerceTimestamp({ val: value });
-
-    case "list":
-      if (!Array.isArray(value)) refuse("a list");
-      return value;
-
-    case "map":
-      if (typeof value !== "object" || value === null || Array.isArray(value)) {
-        refuse("a map");
-      }
-      return value;
+      const timestamp = asTimestamp(value);
+      if (timestamp === null) refuse("a valid RFC 3339 timestamp string");
+      return timestamp;
+    }
 
     default:
-      // `paramType` is `never` here; a new member of the union
-      // must decide its own rule rather than falling through
-      // unvalidated.
-      return paramType;
+      // A parameter type with no rule of its own must not reach
+      // CEL. This branch returned `paramType` — substituting the
+      // type's own name for the caller's value, silently — which
+      // is the shape a new union member would have fallen into.
+      refuse("a value of a declared parameter type");
   }
 }
 

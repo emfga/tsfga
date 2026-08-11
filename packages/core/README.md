@@ -145,9 +145,42 @@ node plus `maxDepth - 1` dispatches.
   | `"1d"`, `3600` | duration | refused |
   | `"2026-01-01T00:00:00Z"` | timestamp | accepted |
   | `1700000000` | timestamp | refused |
+  | `["a"]` | `list<string>` | accepted |
+  | `[1]` | `list<string>` | refused |
 
   A context key the condition does not declare is accepted at
   check time and refused on write.
+
+  **The numeric grammar is Go's, not JavaScript's.** Every numeric
+  type is parsed upstream by `big.ParseFloat(value, 10, 64, 0)`,
+  and the boundary is nowhere near `Number()`'s:
+
+  | spelling | read as | note |
+  |---|---|---|
+  | `"0x10"`, `"0o10"`, `"0b10"`, `"1_000"` | refused | base 10 is explicit |
+  | `" 42 "`, `"\n42"`, `""` | refused | no surrounding space |
+  | `"1e3"`, `"1E3"`, `"4.0"`, `"5."`, `".5"`, `"1p3"` | accepted | `p` is a binary exponent |
+  | `"Inf"`, `"+Inf"`, `"-Inf"`, `"inf"` | ±∞ (double) | `"Infinity"` and `"NaN"` are refused |
+  | `"0.1"`, `"3.14"` | refused (double) | see below |
+
+  An `int` is whatever parses to an integral value, so `"4.0"` and
+  `"1e3"` are ints and `"4.5"` is not. Magnitudes outside int64
+  saturate to its bounds — including for `uint`, whose ceiling is
+  **int64**'s, because upstream converts every numeric string
+  through the same `Int64()` and only then rejects a negative.
+
+  A `double` carries one rule more: upstream parses at 64-bit
+  precision and refuses the value if converting it to a `float64`
+  loses anything. A decimal fraction with no finite binary form is
+  therefore an error rather than the nearest double — `"0.1"` as a
+  **string** is refused, while `0.1` as a **number** is accepted,
+  since a number is already a `float64` and is asserted rather
+  than parsed.
+
+  A `duration` takes Go's unit grammar plus the one unitless form
+  its parser special-cases, a bare `"0"`. A `timestamp` takes RFC
+  3339 with **uppercase** `T` and `Z` and any number of fractional
+  digits.
 
 ## Cycles and indeterminacy
 

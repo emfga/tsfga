@@ -40,6 +40,62 @@ releases may contain breaking changes).
   README: cel-js has no `uint`, so `type(n) == uint` is `false`
   and a bare `u`-suffixed literal finds no overload.
 
+- **Context values are read by OpenFGA's grammar, everywhere it
+  differs from JavaScript's.** An exhaustive sweep of the coercion
+  surface against v1.18.2 found 39 diverging cells of 70 — 16
+  fail-open, 19 fail-closed, 4 answering a different boolean. All
+  70 now agree.
+
+  The largest cause was `asNumber` accepting the whole `Number()`
+  grammar. Upstream parses every numeric type with
+  `big.ParseFloat(value, 10, 64, 0)`, which takes none of the
+  prefixed literal forms (`0x10`, `0o10`, `0b10`, `1_000`) and no
+  surrounding whitespace, but does take the exponent and
+  zero-fraction spellings (`1e3`, `4.0`, `5.`, `.5`, and `1p3`
+  with a binary exponent) that a bare-digit grammar refused. It
+  reads `Inf`, `+Inf`, `-Inf` and `inf` — and not `Infinity` or
+  `NaN`. A `double` additionally refuses any decimal that is not
+  exactly a `float64`, so `"0.1"` as a string is an error where
+  `0.1` as a number is not.
+
+  Also: a `uint` saturates at **int64**'s ceiling rather than
+  uint64's, matching upstream's single `Int64()` conversion; a
+  bare `"0"` is a duration; RFC 3339 designators must be
+  uppercase, where the lowercase forms used to be read and
+  answered on; and fractional seconds past nine digits are read
+  rather than refused — cel-js's `timestamp()` declines them by
+  string length, so the `Date` is built directly.
+
+  Under an exclusion each of these inverts into a grant, which is
+  why they are one item: a value upstream refuses to read at all
+  coerced cleanly here, the exclusion did not fire, and access
+  followed.
+
+  `coerceValue`'s fallback branch returned the parameter type's
+  own **name** in place of the caller's value. It refuses now.
+
+  `ipaddress` and `in_cidr` remain unsupported. cel-js has
+  neither, and adding them means moving the compile path onto a
+  configured `Environment` with a registered host type — a change
+  of architecture rather than of grammar.
+
+### Changed
+
+- **`ConditionParameterType` carries a container's element type.**
+  `"list"` and `"map"` are no longer spellings; a container
+  parameter is declared `"list<string>"` or `"map<int>"`, matching
+  the model, and every element is coerced as that type. Without it
+  nothing read the elements: `list<string>` given `[1]` was
+  accepted here and refused upstream, and a `list<int>` reached
+  CEL as doubles, so `n[0] + 1` found no overload.
+
+  The scalar half is exported as `ConditionParameterScalarType`.
+
+  **Breaking.** A condition declaring `"list"` or `"map"` no
+  longer type-checks, and `KyselyTupleStore` rejects a stored row
+  spelling it that way as invalid data. Rewrite it as the
+  model spells it.
+
 ### Documented
 
 - **Sub-millisecond timestamps are a known divergence.** Go's

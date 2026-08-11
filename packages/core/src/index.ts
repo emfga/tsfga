@@ -244,6 +244,7 @@ export type {
   CheckTuples,
   CheckTuplesQuery,
   ConditionDefinition,
+  ConditionParameterScalarType,
   ConditionParameterType,
   IntersectionOperand,
   RelationConfig,

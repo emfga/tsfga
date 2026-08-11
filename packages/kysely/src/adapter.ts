@@ -27,7 +27,7 @@ import type { DB, Json } from "./schema.ts";
  */
 const WILDCARD_SENTINEL = "00000000-0000-0000-0000-000000000000";
 
-const VALID_PARAMETER_TYPES: ReadonlySet<string> = new Set([
+const SCALAR_PARAMETER_TYPES: ReadonlySet<string> = new Set([
   "string",
   "int",
   "uint",
@@ -35,15 +35,18 @@ const VALID_PARAMETER_TYPES: ReadonlySet<string> = new Set([
   "double",
   "duration",
   "timestamp",
-  "list",
-  "map",
   "any",
 ]);
+
+/** `list<…>` and `map<…>`, which hold one scalar type. */
+const CONTAINER_PARAMETER_TYPE = /^(?:list|map)<(.+)>$/;
 
 function isConditionParameterType(
   value: string,
 ): value is ConditionParameterType {
-  return VALID_PARAMETER_TYPES.has(value);
+  if (SCALAR_PARAMETER_TYPES.has(value)) return true;
+  const element = CONTAINER_PARAMETER_TYPE.exec(value)?.[1];
+  return element !== undefined && SCALAR_PARAMETER_TYPES.has(element);
 }
 
 export class KyselyTupleStore implements TupleStore {

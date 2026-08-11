@@ -117,7 +117,7 @@ const CONDITION_DEFS = [
       'allowed_domains == [] || email_domain == "" || email_domain in allowed_domains',
     parameters: {
       email_domain: "string" as const,
-      allowed_domains: "list" as const,
+      allowed_domains: "list<string>" as const,
     },
   },
 ] as const;

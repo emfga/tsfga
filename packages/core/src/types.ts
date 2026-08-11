@@ -162,8 +162,15 @@ export interface ConditionDefinition {
   parameters: Record<string, ConditionParameterType> | null;
 }
 
-/** Supported CEL parameter types */
-export type ConditionParameterType =
+/**
+ * A parameter type that stands on its own, and the only thing a
+ * `list` or a `map` may hold.
+ *
+ * `ipaddress` is absent: cel-js has no such type and no `in_cidr`,
+ * so a condition declaring one could be stored but never
+ * evaluated.
+ */
+export type ConditionParameterScalarType =
   | "string"
   | "int"
   | "uint"
@@ -171,9 +178,22 @@ export type ConditionParameterType =
   | "double"
   | "duration"
   | "timestamp"
-  | "list"
-  | "map"
   | "any";
+
+/**
+ * Supported CEL parameter types.
+ *
+ * `list` and `map` carry their element type, as upstream requires:
+ * a container parameter is declared `list<string>`, never a bare
+ * `list`. Without it nothing reads the elements, so `list<string>`
+ * given `[1]` — which OpenFGA refuses — was accepted here and the
+ * number reached CEL. A map's keys are always strings; only the
+ * value type is declared.
+ */
+export type ConditionParameterType =
+  | ConditionParameterScalarType
+  | `list<${ConditionParameterScalarType}>`
+  | `map<${ConditionParameterScalarType}>`;
 
 /** Parameters for a check request */
 export interface CheckRequest {

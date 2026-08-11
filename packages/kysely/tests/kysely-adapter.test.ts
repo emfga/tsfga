@@ -212,6 +212,24 @@ describe("KyselyTupleStore", () => {
       expect(await store.findConditionDefinition("nope")).toBeNull();
     });
 
+    test("a container parameter round-trips with its element type", async () => {
+      // The element type is half the declaration: `list<string>`
+      // given `[1]` is a value upstream refuses, and only the
+      // element type says so. The stored-JSON validation used to
+      // know a bare `list` and would reject this row.
+      await store.upsertConditionDefinition({
+        name: "domains",
+        expression: "domain in domains",
+        parameters: { domain: "string", domains: "list<string>" },
+      });
+
+      const cond = await store.findConditionDefinition("domains");
+      expect(cond?.parameters).toEqual({
+        domain: "string",
+        domains: "list<string>",
+      });
+    });
+
     test("deleteConditionDefinition", async () => {
       await store.upsertConditionDefinition({
         name: "test",
