@@ -710,23 +710,33 @@ this interface — it has no database dependencies.
 Its read surface is deliberately shaped around what a check
 actually asks for, not around individual predicates. The one to
 understand when writing an adapter is `findCheckTuples`: it takes
-a `CheckTuplesQuery` (the node, plus which of the three parts are
-wanted) and returns a `CheckTuples` (`direct`, `wildcard`,
-`usersets`). Both types are exported. Serving it as one query is
-the single largest thing an adapter can do for check latency; an
-implementation may run three instead, and simply gives that up.
+a `CheckTuplesQuery` (the node, plus which restrictions each of
+the three parts may be served under) and returns a `CheckTuples`
+(`direct`, `wildcard`, `usersets`). Both types are exported.
+Serving it as one query is the single largest thing an adapter
+can do for check latency; an implementation may run three
+instead, and simply gives that up.
 
-The `include*` flags exist so a store can **narrow** its query —
-that is where the saving is. They are a hint, not a trust
-boundary: `check` re-clamps every reply against the query it
-sent, so returning a part that was not asked for, or filing a row
-under the wrong slot, loses that row. An adapter bug cannot widen
-what the model admits, only lose grants it should have found.
+The `directRefs`, `wildcardRefs` and `usersetRefs` fields exist so
+a store can **narrow** its query — that is where the saving is.
+Each carries the type restrictions the relation admits for that
+part, so a row the model cannot admit need never be fetched. On
+all three, `null` declines to narrow and `[]` excludes the part
+outright; reading `[]` as "no filter" answers a query that asked
+for nothing with a full scan.
+
+They are a hint, not a trust boundary: `check` re-clamps every
+reply against the query it sent — the exact match on type,
+subject relation *and* condition — so returning a part that was
+not asked for, or a row under a restriction the relation does not
+admit, or filing a row under the wrong slot, loses that row. An
+adapter bug cannot widen what the model admits, only lose grants
+it should have found.
 
 Slots are exact. `direct` is the tuple for this subject with no
 subject relation, `wildcard` the one for `subjectType:*` likewise,
 and every row in `usersets` has a subject relation. A minimal
-correct implementation may ignore the flags entirely and return
+correct implementation may leave every field `null` and return
 all three parts; it just gives up the saving.
 
 See
@@ -750,7 +760,10 @@ Compiled CEL expressions are cached by expression source text
 (content-keyed). Redefining a condition via
 `writeConditionDefinition` therefore takes effect on the next
 evaluation — there is no per-name cache to go stale — and
-identical expressions share one compiled entry.
+identical expressions share one compiled entry. The cache holds a
+thousand entries and evicts the least recently used, so a caller
+that keeps rewriting condition definitions does not grow it
+without limit.
 
 ## License
 
