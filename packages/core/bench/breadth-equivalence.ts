@@ -17,20 +17,37 @@ function rng(seed: number) {
   };
 }
 
-/**
- * Every subject ref these generated models can name. A config
- * that is not itself narrowing admits all of them, which is what
- * the old nullable type list plus boolean used to say.
- */
+/** Every direct subject ref these generated models can name. */
 const ANY_DIRECT = ["user", "user:*", "doc", "doc:*"];
-const USERSET_REFS = ["doc#member", "user#member"];
-const ANY_SUBJECT = [...ANY_DIRECT, ...USERSET_REFS];
 
-function cfg(o: Partial<RelationConfig>): RelationConfig {
+/**
+ * The userset refs a generated model can name, derived from the
+ * very relation list the tuple generator draws `subjectRelation`
+ * from.
+ *
+ * Deriving is the whole point; a hand-written list is what broke
+ * this harness. It read `["doc#member", "user#member"]` while the
+ * generator emitted `doc#r0 … doc#r8`, so `clampToQuery` dropped
+ * every userset row and the run reported clean over a path it
+ * never entered.
+ *
+ * `doc#absent` names no relation any config defines and is here on
+ * purpose, so that admitting some refs is never the same as
+ * admitting all of them.
+ */
+function usersetRefsFor(rels: readonly string[]): string[] {
+  return [...rels.map((r) => `doc#${r}`), "doc#absent"];
+}
+
+// `directlyAssignable` is required rather than defaulted: what a
+// relation admits is the thing under test, and a default is how it
+// silently stops matching the tuples generated beside it.
+function cfg(
+  o: Partial<RelationConfig> & Pick<RelationConfig, "directlyAssignable">,
+): RelationConfig {
   return {
     objectType: "",
     relation: "",
-    directlyAssignable: ANY_SUBJECT,
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
@@ -63,6 +80,24 @@ function buildStore(
   const store = new MockTupleStore();
   const rels = Array.from({ length: n }, (_, i) => `r${i}`);
   const objs = ["1", "2", "3"];
+  const usersetRefs = usersetRefsFor(rels);
+
+  // Deterministic, so a condition never makes the answer depend on
+  // anything but whether the row carrying it was reached. `never`
+  // is the interesting one: the row is admitted by the type
+  // restriction and then denied by its condition, which is a
+  // different path from never being admitted at all.
+  store.conditionDefinitions.push(
+    { name: "always", expression: "true", parameters: null },
+    { name: "never", expression: "false", parameters: null },
+  );
+  const condition = (): string | null => {
+    const pick = rand();
+    if (pick < 0.12) return "never";
+    if (pick < 0.24) return "always";
+    return null;
+  };
+
   for (const relation of rels) {
     const implied: string[] = [];
     for (const other of rels) {
@@ -75,9 +110,13 @@ function buildStore(
       cfg({
         objectType: "doc",
         relation,
+        // Partial admission on both halves. A config that admits
+        // either everything or nothing never exercises the clamp;
+        // a random subset is what makes a row that the gate lets
+        // through and the clamp drops actually occur.
         directlyAssignable: [
           ...(rand() < 0.5 ? ["user", "doc"] : ANY_DIRECT),
-          ...(rand() < 0.5 ? USERSET_REFS : []),
+          ...(rand() < 0.25 ? [] : usersetRefs.filter(() => rand() < 0.6)),
         ],
         impliedBy: implied.length ? implied : null,
         computedUserset: usesComputed
@@ -131,6 +170,7 @@ function buildStore(
             relation,
             subjectType: "user",
             subjectId: "alice",
+            conditionName: condition(),
           }),
         );
       }
@@ -143,6 +183,7 @@ function buildStore(
             subjectType: "doc",
             subjectId: objs[Math.floor(rand() * objs.length)] ?? "1",
             subjectRelation: rels[Math.floor(rand() * rels.length)] ?? "r0",
+            conditionName: condition(),
           }),
         );
       }
@@ -154,11 +195,39 @@ function buildStore(
             relation,
             subjectType: "doc",
             subjectId: objs[Math.floor(rand() * objs.length)] ?? "1",
+            conditionName: condition(),
           }),
         );
       }
     }
   }
+  return store;
+}
+
+/**
+ * Rows the generator emitted, and rows the model actually let
+ * through. The generator builds tuples independently of the
+ * configs, so these can disagree — and if `admittedUserset` is
+ * zero the run has exercised no userset expansion at all, no
+ * matter how many cases it reports.
+ */
+const coverage = { usersetRows: 0, admittedUserset: 0, directRows: 0 };
+
+/** Tally the rows a store holds, and what its reads give back. */
+function instrument(store: MockTupleStore): MockTupleStore {
+  for (const t of store.tuples) {
+    if (t.subjectRelation === null || t.subjectRelation === undefined) {
+      coverage.directRows++;
+    } else {
+      coverage.usersetRows++;
+    }
+  }
+  const read = store.findCheckTuples.bind(store);
+  store.findCheckTuples = async (query) => {
+    const reply = await read(query);
+    coverage.admittedUserset += reply.usersets.length;
+    return reply;
+  };
   return store;
 }
 
@@ -222,7 +291,7 @@ for (const withIntersections of [false, true]) {
   for (let seed = 1; seed <= 300; seed++) {
     const rand = rng(seed * 7919);
     const n = 3 + Math.floor(rand() * 6);
-    const store = buildStore(rand, n, withIntersections);
+    const store = instrument(buildStore(rand, n, withIntersections));
     for (let i = 0; i < n; i++) {
       for (const objectId of ["1", "2"]) {
         const request = {
@@ -269,3 +338,15 @@ console.log(
     `${expectedDivergences} expected divergences, ` +
     `${unknownErrors} unknown error classes (must be 0), no hangs`,
 );
+console.log("coverage:", coverage);
+
+// The counts above are the deliverable, not decoration. A run whose
+// configs admit none of the userset refs its tuples carry reports
+// clean while never entering step 2 at all.
+if (coverage.admittedUserset === 0) {
+  console.log(
+    "FAIL: no userset row was admitted by any config — " +
+      "userset expansion was never exercised",
+  );
+  process.exit(1);
+}

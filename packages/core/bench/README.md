@@ -55,6 +55,22 @@ sentinel leaked to a caller.
 Both end with a summary line per phase. Phase 1's divergence count must
 be `0` and phase 2's unknown-error count must be `0`.
 
+Each run also prints a `coverage` line — how many rows the generator
+emitted, and how many userset rows the models actually admitted — and
+**exits non-zero if the admitted count is `0`**. That assertion is
+load-bearing rather than decorative. The generator builds tuples
+independently of the configs, so the refs a config admits and the refs
+the tuple generator draws from can fall out of agreement. When they do,
+`clampToQuery` drops every userset row, the harness still runs, still
+reports zero divergences, and has silently stopped testing userset
+expansion at all.
+
+That is not hypothetical. These harnesses read `admittedUserset: 0`
+against 2500-odd generated userset rows for a full round, so a "0
+divergences" result from that period says nothing whatever about step 2.
+The counts exist so the next such drift is a red run rather than a quiet
+one.
+
 [tsfga]: https://github.com/emfga/tsfga
 [package README]: ../README.md
 [root README]: ../../../README.md
