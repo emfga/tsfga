@@ -92,5 +92,12 @@ workspace automatically. Renovate manages them instead, and CI installs,
 type-checks and runs every example on each PR, so a bad bump fails
 visibly rather than silently shipping a broken template.
 
+**So this file must be written against the API of the versions in
+`package.json`, not against the source next to it.** A repo-wide rename
+that sweeps this directory type-checks locally — `turbo run tsc` does
+not reach outside the `workspaces` globs — and then fails the
+`examples` CI job, which resolves `@tsfga/*` from npm. The example
+moves to a new API only after that API is published.
+
 [tsfga]: https://github.com/emfga/tsfga
 [root README]: ../../README.md
