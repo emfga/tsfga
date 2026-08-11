@@ -92,6 +92,15 @@ releases may contain breaking changes).
 
 ### Changed
 
+- **The compiled-expression cache holds at most 1000 entries**,
+  evicting the least recently used. It is process-wide and keyed
+  by expression source text, so nothing about a caller's lifetime
+  released it: writing many condition definitions — or rewriting
+  one repeatedly, since every new source text is a new key — grew
+  it without limit. A model of ordinary size never reaches the
+  bound, and re-inserting on a hit keeps a hot expression from
+  being evicted by a burst of cold ones.
+
 - **A relation with no config is refused, not unrestricted.**
   `check` read a missing relation config as "nothing to restrict
   against" and narrowed nothing, so a row already in the store on

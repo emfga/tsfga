@@ -21,6 +21,26 @@ import type {
 const exprCache = new Map<string, ParseResult>();
 
 /**
+ * How many compiled expressions the cache holds.
+ *
+ * The cache is process-wide and keyed by source text, so nothing
+ * about a caller's lifetime releases it: a caller that writes many
+ * condition definitions, or rewrites one repeatedly — each new
+ * source text being a new key — grows it forever. Bounding it
+ * costs nothing a model of ordinary size would notice, since a
+ * model has one expression per condition and this holds a
+ * thousand.
+ *
+ * Exported so a test can state the bound rather than hard-code it.
+ */
+export const EXPR_CACHE_MAX_ENTRIES = 1000;
+
+/** Whether an expression is currently compiled. For tests. */
+export function hasCompiledExpression(expression: string): boolean {
+  return exprCache.has(expression);
+}
+
+/**
  * Compile an expression, or raise `ConditionCompileError`.
  *
  * The one place `parse` is called on a stored expression, so that
@@ -34,12 +54,24 @@ export function compileCondition(
   expression: string,
 ): ParseResult {
   const cached = exprCache.get(expression);
-  if (cached) return cached;
+  if (cached) {
+    // Re-insert so the iteration order is least-recently-used
+    // first. Eviction by insertion order alone would drop the
+    // hottest expression in a workload that cycles through more
+    // than the bound, which is the case the bound exists for.
+    exprCache.delete(expression);
+    exprCache.set(expression, cached);
+    return cached;
+  }
   let compiled: ParseResult;
   try {
     compiled = parse(expression);
   } catch (error) {
     throw new ConditionCompileError(conditionName, error);
+  }
+  if (exprCache.size >= EXPR_CACHE_MAX_ENTRIES) {
+    const oldest = exprCache.keys().next();
+    if (!oldest.done) exprCache.delete(oldest.value);
   }
   exprCache.set(expression, compiled);
   return compiled;

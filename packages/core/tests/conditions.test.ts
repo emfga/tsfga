@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { coerceContext, evaluateTupleCondition } from "../src/conditions.ts";
+import {
+  coerceContext,
+  compileCondition,
+  EXPR_CACHE_MAX_ENTRIES,
+  evaluateTupleCondition,
+  hasCompiledExpression,
+} from "../src/conditions.ts";
 import {
   ConditionCompileError,
   ConditionEvaluationError,
@@ -706,5 +712,38 @@ describe("an expression that does not compile", () => {
     );
     await expect(failure).rejects.toBeInstanceOf(ConditionCompileError);
     await expect(failure).rejects.toBeInstanceOf(TsfgaError);
+  });
+});
+
+/**
+ * The compiled-expression cache is process-wide and keyed by
+ * expression text, so nothing about a caller's own lifetime
+ * releases it. A caller that writes many condition definitions —
+ * or one that rewrites the same one repeatedly, since each new
+ * source text is a new key — would otherwise grow it forever.
+ */
+describe("the compiled expression cache is bounded", () => {
+  test("filling past the bound evicts the least recently used", () => {
+    const expr = (i: number) => `evict_probe_${i} == ${i}`;
+    const first = expr(0);
+
+    for (let i = 0; i < EXPR_CACHE_MAX_ENTRIES; i++) {
+      compileCondition("probe", expr(i));
+    }
+    expect(hasCompiledExpression(first)).toBe(true);
+
+    // A hit refreshes recency, so the entry after it is now the
+    // oldest and the next insert must take that one instead.
+    compileCondition("probe", first);
+    compileCondition("probe", expr(EXPR_CACHE_MAX_ENTRIES));
+
+    expect(hasCompiledExpression(first)).toBe(true);
+    expect(hasCompiledExpression(expr(1))).toBe(false);
+
+    // And the bound holds however far past it the caller goes.
+    for (let i = 0; i < EXPR_CACHE_MAX_ENTRIES; i++) {
+      compileCondition("probe", `overflow_${i} == ${i}`);
+    }
+    expect(hasCompiledExpression(first)).toBe(false);
   });
 });
