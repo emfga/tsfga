@@ -7,7 +7,10 @@ import {
 import type { DB } from "@tsfga/kysely";
 import { KyselyTupleStore } from "@tsfga/kysely";
 import type { Kysely } from "kysely";
-import { expectConformance } from "./helpers/conformance.ts";
+import {
+  expectConfigsMatchModel,
+  expectConformance,
+} from "./helpers/conformance.ts";
 import {
   beginTransaction,
   destroyDb,
@@ -304,6 +307,48 @@ describe("Condition Type Restrictions Conformance", () => {
     test("is admitted where the conditioned userset ref is named", async () => {
       await expectUnder("userset-conditioned", uuid("ucond"), true);
     });
+  });
+
+  describe("each narrowing says what its own model says", () => {
+    // This fixture rewrites `document.viewer` per case, so the
+    // usual end-of-file drift assertion would only ever check
+    // whichever narrowing ran last. Each one is checked against
+    // its own `.dsl` instead — nine model files and nine
+    // `admits` lists, and nothing else would notice them
+    // disagreeing.
+    for (const { name, admits } of NARROWINGS) {
+      test(name, () => {
+        expectConfigsMatchModel(
+          `./condition-restrictions/model-${name}.dsl`,
+          {
+            configs: [
+              {
+                objectType: "team",
+                relation: "member",
+                directlyAssignable: [{ type: "user" }],
+                impliedBy: null,
+                computedUserset: null,
+                tupleToUserset: null,
+                excludedBy: null,
+                intersection: null,
+              },
+              {
+                objectType: "document",
+                relation: "viewer",
+                directlyAssignable: admits,
+                impliedBy: null,
+                computedUserset: null,
+                tupleToUserset: null,
+                excludedBy: null,
+                intersection: null,
+              },
+            ],
+            tupleRelations: new Set(),
+          },
+          { coverage: "complete" },
+        );
+      });
+    }
   });
 
   describe("the wildcard row mirrors it exactly", () => {
