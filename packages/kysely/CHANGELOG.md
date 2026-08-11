@@ -5,6 +5,82 @@ Notable changes to `@tsfga/kysely`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
+## 0.5.0 — 2026-08
+
+### Fixed
+
+- **A consumer's result-transforming plugin no longer corrupts
+  adapter reads.** `CamelCasePlugin.transformResult` renames every
+  result-row key regardless of how the query was built, so a
+  consumer who installed it for their own tables silently changed
+  how `KyselyTupleStore` read ours: `row.subject_relation` became
+  `undefined`, and `undefined !== null`, so every row filed as a
+  userset and no direct grant was ever found. **Wrong check
+  answers, in the granting direction, with no error** — shipped
+  that way in 0.4.0 and 0.4.1.
+
+  The partition was not the only casualty: `condition_context` and
+  `tuple_to_userset` reached `InvalidStoredDataError` instead, and
+  `listCandidateObjectIds` returned `undefined` entries.
+
+  The constructor now strips the instance's plugins. `tsfga.*` is
+  the adapter's own schema and `schema.ts` names its columns as
+  the database does, so a plugin configured for the consumer's
+  tables has no business rewriting these queries or their results.
+  This is also robust against result transformers other than the
+  camel-case one.
+
+  Kysely's transaction is preserved — `Transaction#withoutPlugins`
+  returns a `Transaction` — and a test now pins that, since every
+  other test in the package shares one pooled connection wrapped
+  in a raw `BEGIN` and so could not observe a store escaping its
+  transaction.
+
+### Changed
+
+- **BREAKING: peer range on `@tsfga/core` is now
+  `>=0.6.0 <0.7.0`.** The floor is raised rather than the ceiling
+  widened: core 0.6.0 changes the `TupleStore` interface itself,
+  so this adapter does not work with earlier cores and earlier
+  adapters do not work with this core.
+
+- **BREAKING: migration `005-type-restrictions`.** Replaces
+  `directly_assignable_types` and `allows_userset_subjects` on
+  `tsfga.relation_configs` with a single `directly_assignable`
+  (jsonb, NOT NULL) holding OpenFGA type restrictions.
+
+  **Destructive, and deliberately not data-preserving.** There is
+  no honest conversion: `allows_userset_subjects = true` does not
+  record which usersets the model intended, and `NULL` does not
+  record which types. Inventing either would write a model nobody
+  authored, in the granting direction. Rewrite relation configs
+  from your authorization model after migrating; **tuples are
+  untouched**. Old and new adapters cannot read each other's
+  columns, so plan a coordinated deploy.
+
+- **BREAKING: `listDirectSubjects` is removed** from the adapter,
+  following its removal from `TupleStore`. Use
+  `findTuplesByRelation`, of which it was already a strict subset.
+
+- The userset scan is narrowed to the `(subject_type,
+  subject_relation)` pairs the relation admits, rather than
+  scanning every row with a subject relation.
+
+### Documented
+
+- **`new KyselyTupleStore(trx)`**, which has always worked —
+  Kysely declares `Transaction<DB>` a subtype of `Kysely<DB>` and
+  the store takes a handle it does not own — but was written down
+  nowhere.
+
+- **SERIALIZABLE, not `SELECT … FOR UPDATE`**, for
+  invariant-preserving writes such as "always at least one
+  administrator". Probed against PostgreSQL 18: row locks are
+  taken on rows that *exist*, so a concurrent `INSERT` is not
+  blocked at either isolation level. `FOR UPDATE` is adequate for
+  "at least one X" only if you count from the locking read, and
+  useless for "at most N X".
+
 ## 0.4.1 — 2026-08
 
 ### Fixed

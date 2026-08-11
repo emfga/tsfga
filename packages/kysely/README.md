@@ -14,12 +14,18 @@ npm install @tsfga/kysely @tsfga/core kysely pg
 ```
 
 `@tsfga/core`, `kysely` and `pg` are peer dependencies. This
-version accepts `@tsfga/core` `>=0.4.0 <0.6.0` — the adapter
-implements the `TupleStore` interface as those releases shape
-it. The range carries an explicit ceiling rather than a caret:
-below 1.0.0 a core minor may change that interface, so each
-minor is admitted only once the adapter has been tested
-against it.
+version accepts `@tsfga/core` `>=0.6.0 <0.7.0` — the adapter
+implements the `TupleStore` interface as that release shapes it.
+The range carries an explicit ceiling rather than a caret: below
+1.0.0 a core minor may change that interface, so each minor is
+admitted only once the adapter has been tested against it.
+
+The floor moved to 0.6.0 rather than the ceiling widening,
+because core 0.6.0 changed `TupleStore` itself — `RelationConfig`
+holds one `directlyAssignable` list, `CheckTuplesQuery` carries
+userset refs, and `listDirectSubjects` is gone. This adapter does
+not work with earlier cores, and earlier adapters do not work
+with this core.
 
 ## Quick start
 

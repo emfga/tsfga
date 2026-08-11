@@ -5,6 +5,96 @@ Notable changes to `@tsfga/core`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
+## 0.6.0 — 2026-08
+
+### Fixed
+
+- **Userset type restrictions are now recorded and enforced.**
+  `RelationConfig` kept a type array plus a bare boolean —
+  *whether* userset subjects were allowed, never *which*. A
+  relation admitting only `team#member` accepted
+  `document:budget#viewer@team:eng#owner` through `addTuple`, the
+  documented validating write path, and then granted on it.
+
+  Probed against OpenFGA v1.18.2: it refuses that write outright,
+  and on a store where the row already exists it answers `false`
+  where tsfga answered `true`. A fail-open divergence reachable
+  through the ordinary public API, with no raw SQL.
+
+  Both halves are now enforced, on the write path and in the check
+  read gate, and both are covered by
+  `tests/conformance/userset-restrictions.test.ts`.
+
+- **`listSubjects` applies the relation's type restrictions.** It
+  was a bare pass-through to the store, so it reported subjects
+  the model does not admit and `check` denies. Narrowing a
+  relation does not revalidate the tuples already written, so that
+  state is reached by ordinary model evolution.
+
+  The gate is in core, not the adapter, so every `TupleStore` —
+  the wrappers, third-party stores — is covered, and adapter
+  authors stay outside the security boundary.
+
+  **Consequence:** no library path now *finds* an inadmissible row
+  in order to delete it. Upstream keeps `Read` unfiltered for that
+  reason; a maintenance read is owed.
+
+  `listObjects` is deliberately unchanged: it re-checks every
+  candidate through the gated path, so over-returning candidates
+  costs work and cannot grant.
+
+### Changed
+
+- **BREAKING: `RelationConfig.directlyAssignableTypes` and
+  `.allowsUsersetSubjects` are replaced by one required
+  `directlyAssignable: string[]`**, matching OpenFGA's
+  `directly_related_user_types` one for one: `"user"`, `"user:*"`,
+  `"team#member"`.
+
+  This also retires an overloaded `null`, which meant both
+  *unrestricted* and *purely computed*. `[]` now says "admits no
+  direct assignment" precisely, so a purely computed relation
+  issues no tuple read at all — which upstream does and tsfga
+  previously could not express.
+
+  Migrating: enumerate what each relation admits, from your
+  authorization model. There is no automatic conversion, and a
+  guessed one would err in the granting direction.
+
+- **BREAKING: `CheckTuplesQuery.includeUsersets` is replaced by
+  `usersetRefs: readonly string[] | null`** — the `type#relation`
+  refs the relation admits, so a store can narrow its scan.
+  `null` declines to narrow, `[]` excludes the userset part.
+  Still a hint: `clampToQuery` re-clamps the reply against the
+  same list, so a store that over-returns loses rows rather than
+  smuggling them past the model.
+
+- **BREAKING: `TupleStore.listDirectSubjects` is removed.** It was
+  already a strict subset of `findTuplesByRelation` — the same
+  columns off the same predicate, minus the condition fields.
+  `listSubjects` reads through `findTuplesByRelation` and
+  projects.
+
+- **BREAKING: `UsersetNotAllowedError` is removed.** A userset on
+  a relation that admits none is now an `InvalidSubjectTypeError`
+  naming the offending ref, which is the single error upstream
+  raises for every type-restriction violation.
+
+### Added
+
+- **`admitsSubjectRef` and `directSubjectRef` are exported.** A
+  consumer narrowing their own query can apply the gate tsfga
+  applies instead of reimplementing it and drifting out of step.
+
+  `null` config stays permissive, because that is what `check`
+  does and agreement is the point. Two hazards are documented
+  rather than designed away: a `null` config in a consumer's
+  `WHERE` clause usually means a misspelled relation name, where
+  it silently admits everything; and the predicate filters tuple
+  *shapes* only, knowing nothing of `excludedBy` or
+  `intersection`, so a row it admits is one `check` will consider,
+  not one `check` will allow.
+
 ## 0.5.0 — 2026-08
 
 ### Added
