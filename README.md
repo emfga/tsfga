@@ -63,7 +63,8 @@ as peer dependencies.
 import { createTsfga } from "@tsfga/core";
 import { KyselyTupleStore, type DB } from "@tsfga/kysely";
 import { migrationProvider } from "@tsfga/kysely/migrations";
-import { Kysely, Migrator, PostgresDialect } from "kysely";
+import { Kysely, PostgresDialect } from "kysely";
+import { Migrator } from "kysely/migration";
 import pg from "pg";
 
 const db = new Kysely<DB>({

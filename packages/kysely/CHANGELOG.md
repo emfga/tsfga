@@ -301,7 +301,7 @@ package contents are identical to 0.3.0.
 
   ```typescript
   import { migrationProvider } from "@tsfga/kysely/migrations";
-  import { Migrator } from "kysely";
+  import { Migrator } from "kysely/migration";
 
   const migrator = new Migrator({ db, provider: migrationProvider });
   await migrator.migrateToLatest();

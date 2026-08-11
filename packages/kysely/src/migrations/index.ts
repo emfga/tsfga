@@ -23,7 +23,7 @@ export const migrations: Record<string, Migration> = {
  * Client applications provision or upgrade the tsfga schema with:
  *
  * ```ts
- * import { Migrator } from "kysely";
+ * import { Migrator } from "kysely/migration";
  * import { migrationProvider } from "@tsfga/kysely/migrations";
  *
  * const migrator = new Migrator({ db, provider: migrationProvider });
