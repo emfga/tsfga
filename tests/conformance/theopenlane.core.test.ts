@@ -2,7 +2,11 @@ import { afterAll, beforeAll, describe, test } from "bun:test";
 import type { TsfgaClient } from "@tsfga/core";
 import type { DB } from "@tsfga/kysely";
 import type { Kysely } from "kysely";
-import { expectConformance } from "./helpers/conformance.ts";
+import {
+  expectConfigsMatchModel,
+  expectConformance,
+  type FixtureRecord,
+} from "./helpers/conformance.ts";
 import {
   setupTheopenlane,
   teardownTheopenlane,
@@ -22,9 +26,10 @@ describe("TheOpenLane — Core", () => {
   let storeId: string;
   let authorizationModelId: string;
   let tsfgaClient: TsfgaClient;
+  let fixture: FixtureRecord;
 
   beforeAll(async () => {
-    ({ db, storeId, authorizationModelId, tsfgaClient } =
+    ({ db, storeId, authorizationModelId, tsfgaClient, fixture } =
       await setupTheopenlane());
   });
 
@@ -682,5 +687,67 @@ describe("TheOpenLane — Core", () => {
       },
       false,
     );
+  });
+
+  // Asserted once for the whole model rather than in all three
+  // TheOpenLane files: every one of them writes the same 225
+  // configs through the same setup.
+  test("the relation configs say what the model says", () => {
+    expectConfigsMatchModel("./theopenlane/model.dsl", fixture, {
+      // The model defines 632 relations across 67 types; this
+      // fixture configures 225 of them on purpose. What it does
+      // configure must still be right, and any relation a tuple
+      // targets must be configured at all.
+      coverage: "subset",
+      // Relations tsfga needs and the DSL has no name for, each
+      // decomposing a shape the check algorithm has no single form
+      // for. Every one is asserted to be absent from the model.
+      tsfgaOnlyHelpers: [
+        "organization._admin_and_access",
+        "organization._member_and_access",
+        "program._editor_not_blocked",
+        "program._editor_or_viewer_not_blocked",
+        "control._editor_not_blocked",
+        "control._viewer_not_blocked",
+        "subcontrol._editor_not_blocked",
+        "subcontrol._viewer_not_blocked",
+        "internal_policy._editor_not_blocked",
+        "internal_policy._viewer_not_blocked",
+        "contact._direct_and_parent_member_view",
+        "contact._direct_and_parent_member_edit",
+        "contact._direct_user_and_parent_member",
+        "contact._editor_not_blocked",
+        "contact._viewer_not_blocked",
+        "evidence._delete_not_blocked",
+        "evidence._edit_not_blocked",
+        "evidence._view_not_blocked",
+        "workflow_definition._editor_not_blocked",
+        "workflow_definition._viewer_not_blocked",
+        "workflow_instance._viewer_not_blocked",
+        "assessment._editor_not_blocked",
+        "assessment._viewer_not_blocked",
+        "campaign._editor_not_blocked",
+        "campaign._viewer_not_blocked",
+      ],
+      // The three relations whose direct assignment tsfga cannot
+      // express alongside their intersection, so it lives on a
+      // helper. Naming the destination makes the exemption
+      // checkable: the helper must admit everything the model gave
+      // the original, and the original must now admit nothing.
+      moved: [
+        {
+          relation: "contact.can_view",
+          movedTo: "contact._direct_and_parent_member_view",
+        },
+        {
+          relation: "contact.can_edit",
+          movedTo: "contact._direct_and_parent_member_edit",
+        },
+        {
+          relation: "contact.can_delete",
+          movedTo: "contact._direct_user_and_parent_member",
+        },
+      ],
+    });
   });
 });

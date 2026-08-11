@@ -3,7 +3,12 @@ import { createTsfga, type TsfgaClient } from "@tsfga/core";
 import type { DB } from "@tsfga/kysely";
 import { KyselyTupleStore } from "@tsfga/kysely";
 import type { Kysely } from "kysely";
-import { expectConformance } from "./helpers/conformance.ts";
+import {
+  expectConfigsMatchModel,
+  expectConformance,
+  type FixtureRecord,
+  recordFixture,
+} from "./helpers/conformance.ts";
 import {
   beginTransaction,
   destroyDb,
@@ -51,6 +56,7 @@ describe("Wide Union Conformance", () => {
   let storeId: string;
   let authorizationModelId: string;
   let tsfgaClient: TsfgaClient;
+  let fixture: FixtureRecord;
 
   beforeAll(async () => {
     db = getDb();
@@ -58,6 +64,7 @@ describe("Wide Union Conformance", () => {
 
     const store = new KyselyTupleStore(db);
     tsfgaClient = createTsfga(store);
+    fixture = recordFixture(tsfgaClient);
 
     // === Relation configs ===
     await tsfgaClient.writeRelationConfig({
@@ -174,5 +181,11 @@ describe("Wide Union Conformance", () => {
       },
       false,
     );
+  });
+
+  test("the relation configs say what the model says", () => {
+    expectConfigsMatchModel("./wide-union/model.dsl", fixture, {
+      coverage: "complete",
+    });
   });
 });

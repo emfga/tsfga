@@ -3,7 +3,12 @@ import { createTsfga, type TsfgaClient } from "@tsfga/core";
 import type { DB } from "@tsfga/kysely";
 import { KyselyTupleStore } from "@tsfga/kysely";
 import type { Kysely } from "kysely";
-import { expectConformance } from "./helpers/conformance.ts";
+import {
+  expectConfigsMatchModel,
+  expectConformance,
+  type FixtureRecord,
+  recordFixture,
+} from "./helpers/conformance.ts";
 import {
   beginTransaction,
   destroyDb,
@@ -40,6 +45,7 @@ describe("Intersection + Exclusion Conformance", () => {
   let storeId: string;
   let authorizationModelId: string;
   let tsfgaClient: TsfgaClient;
+  let fixture: FixtureRecord;
 
   beforeAll(async () => {
     db = getDb();
@@ -47,6 +53,7 @@ describe("Intersection + Exclusion Conformance", () => {
 
     const store = new KyselyTupleStore(db);
     tsfgaClient = createTsfga(store);
+    fixture = recordFixture(tsfgaClient);
 
     // Write relation configs
     await tsfgaClient.writeRelationConfig({
@@ -223,5 +230,11 @@ describe("Intersection + Exclusion Conformance", () => {
       },
       false,
     );
+  });
+
+  test("the relation configs say what the model says", () => {
+    expectConfigsMatchModel("./intersection-exclusion/model.dsl", fixture, {
+      coverage: "complete",
+    });
   });
 });

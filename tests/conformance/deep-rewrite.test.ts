@@ -3,7 +3,12 @@ import { createTsfga, type TsfgaClient } from "@tsfga/core";
 import type { DB } from "@tsfga/kysely";
 import { KyselyTupleStore } from "@tsfga/kysely";
 import type { Kysely } from "kysely";
-import { expectConformance } from "./helpers/conformance.ts";
+import {
+  expectConfigsMatchModel,
+  expectConformance,
+  type FixtureRecord,
+  recordFixture,
+} from "./helpers/conformance.ts";
 import {
   beginTransaction,
   destroyDb,
@@ -59,6 +64,7 @@ describe("Deep Rewrite Ladder Conformance", () => {
   let storeId: string;
   let authorizationModelId: string;
   let tsfgaClient: TsfgaClient;
+  let fixture: FixtureRecord;
 
   beforeAll(async () => {
     db = getDb();
@@ -66,6 +72,7 @@ describe("Deep Rewrite Ladder Conformance", () => {
 
     const store = new KyselyTupleStore(db);
     tsfgaClient = createTsfga(store);
+    fixture = recordFixture(tsfgaClient);
 
     // === Relation configs: the ladder ===
     for (let i = 0; i < DEPTH; i++) {
@@ -219,5 +226,11 @@ describe("Deep Rewrite Ladder Conformance", () => {
       },
       true,
     );
+  });
+
+  test("the relation configs say what the model says", () => {
+    expectConfigsMatchModel("./deep-rewrite/model.dsl", fixture, {
+      coverage: "complete",
+    });
   });
 });

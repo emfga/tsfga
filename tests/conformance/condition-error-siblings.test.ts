@@ -7,7 +7,12 @@ import {
 import type { DB } from "@tsfga/kysely";
 import { KyselyTupleStore } from "@tsfga/kysely";
 import type { Kysely } from "kysely";
-import { expectConformance } from "./helpers/conformance.ts";
+import {
+  expectConfigsMatchModel,
+  expectConformance,
+  type FixtureRecord,
+  recordFixture,
+} from "./helpers/conformance.ts";
 import {
   beginTransaction,
   destroyDb,
@@ -51,6 +56,7 @@ describe("Condition Error vs Sibling Grant Conformance", () => {
   let storeId: string;
   let authorizationModelId: string;
   let tsfgaClient: TsfgaClient;
+  let fixture: FixtureRecord;
 
   beforeAll(async () => {
     db = getDb();
@@ -58,6 +64,7 @@ describe("Condition Error vs Sibling Grant Conformance", () => {
 
     const store = new KyselyTupleStore(db);
     tsfgaClient = createTsfga(store);
+    fixture = recordFixture(tsfgaClient);
 
     // === Condition definition ===
     await tsfgaClient.writeConditionDefinition({
@@ -261,5 +268,11 @@ describe("Condition Error vs Sibling Grant Conformance", () => {
       },
       false,
     );
+  });
+
+  test("the relation configs say what the model says", () => {
+    expectConfigsMatchModel("./condition-error-siblings/model.dsl", fixture, {
+      coverage: "complete",
+    });
   });
 });

@@ -3,7 +3,12 @@ import { createTsfga, type TsfgaClient } from "@tsfga/core";
 import type { DB } from "@tsfga/kysely";
 import { KyselyTupleStore } from "@tsfga/kysely";
 import type { Kysely } from "kysely";
-import { expectConformance } from "./helpers/conformance.ts";
+import {
+  expectConfigsMatchModel,
+  expectConformance,
+  type FixtureRecord,
+  recordFixture,
+} from "./helpers/conformance.ts";
 import {
   beginTransaction,
   destroyDb,
@@ -86,6 +91,7 @@ describe("Cycle Conformance", () => {
   let storeId: string;
   let authorizationModelId: string;
   let tsfgaClient: TsfgaClient;
+  let fixture: FixtureRecord;
 
   async function expectCycle(
     relation: string,
@@ -113,6 +119,7 @@ describe("Cycle Conformance", () => {
 
     const store = new KyselyTupleStore(db);
     tsfgaClient = createTsfga(store);
+    fixture = recordFixture(tsfgaClient);
 
     // === Relation configs ===
     // The two mutually reference each other, so each admits the
@@ -383,5 +390,11 @@ describe("Cycle Conformance", () => {
     // The subtract side of but-not is the only place the two
     // differ, and that case is the documented divergence.
     await expectCycle("intersect_recursive", "anne", false);
+  });
+
+  test("the relation configs say what the model says", () => {
+    expectConfigsMatchModel("./cycles/model.dsl", fixture, {
+      coverage: "complete",
+    });
   });
 });

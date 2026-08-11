@@ -4,8 +4,11 @@ import type { DB } from "@tsfga/kysely";
 import { KyselyTupleStore } from "@tsfga/kysely";
 import type { Kysely } from "kysely";
 import {
+  expectConfigsMatchModel,
   expectConformance,
   expectWriteConformance,
+  type FixtureRecord,
+  recordFixture,
 } from "./helpers/conformance.ts";
 import {
   beginTransaction,
@@ -61,6 +64,7 @@ describe("Userset Type Restriction Conformance", () => {
   let storeId: string;
   let narrowModelId: string;
   let tsfgaClient: TsfgaClient;
+  let fixture: FixtureRecord;
 
   beforeAll(async () => {
     db = getDb();
@@ -68,6 +72,7 @@ describe("Userset Type Restriction Conformance", () => {
 
     const store = new KyselyTupleStore(db);
     tsfgaClient = createTsfga(store);
+    fixture = recordFixture(tsfgaClient);
 
     // tsfga has no model versioning, so it is configured with the
     // narrow model directly and the inadmissible rows are pushed
@@ -461,5 +466,15 @@ describe("Userset Type Restriction Conformance", () => {
         "refused",
       );
     });
+  });
+
+  test("the relation configs say what the model says", () => {
+    expectConfigsMatchModel(
+      "./userset-restrictions/model-narrow.dsl",
+      fixture,
+      {
+        coverage: "complete",
+      },
+    );
   });
 });
