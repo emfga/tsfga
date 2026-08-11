@@ -460,6 +460,30 @@ each with the tuple's condition — must appear in
 `RelationConfigNotFoundError`, `InvalidSubjectTypeError` or
 `InvalidConditionalTupleError`.
 
+## Write-time condition validation
+
+`addTuple` refuses a tuple whose condition the model cannot
+accept, with the cause on `InvalidConditionalTupleError.cause`:
+
+| cause | meaning |
+|---|---|
+| `condition is missing` | no condition, and every matching restriction has one |
+| `invalid condition for type restriction` | a defined condition this relation does not name |
+| `undefined condition` | no such condition in the store |
+| `parameter type error` | a context value not readable as its declared type |
+| `invalid context parameter` | a context key the condition does not declare |
+
+Only the context keys actually **present** are validated. A
+conditioned tuple with no context, or a partial one, is accepted:
+the rest can arrive with the check request.
+
+A conditioned write costs one extra round-trip — the
+condition-definition lookup — so 3 rather than 2. Unconditioned
+writes are unchanged. That is deliberate and uncached: a
+client-lifetime cache on a *validation* gate goes stale across
+processes, and would keep accepting tuples after another instance
+narrowed the model.
+
 ## TupleStore interface
 
 The `TupleStore` interface is the extension point for custom

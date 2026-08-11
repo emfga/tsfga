@@ -134,6 +134,8 @@ export async function fgaWrite(
     subjectType: string;
     subjectId: string;
     subjectRelation?: string | null;
+    conditionName?: string | null;
+    conditionContext?: Record<string, unknown> | null;
   },
 ): Promise<"accepted" | "refused"> {
   const client = createClient(storeId);
@@ -147,6 +149,19 @@ export async function fgaWrite(
           user,
           relation: tuple.relation,
           object: `${tuple.objectType}:${tuple.objectId}`,
+          // The condition is part of what the write is validated
+          // against, so a write-conformance assertion that dropped
+          // it would compare two different writes.
+          ...(tuple.conditionName
+            ? {
+                condition: {
+                  name: tuple.conditionName,
+                  ...(tuple.conditionContext
+                    ? { context: tuple.conditionContext }
+                    : {}),
+                },
+              }
+            : {}),
         },
       ],
       { authorizationModelId },

@@ -9,6 +9,44 @@ releases may contain breaking changes).
 
 ### Fixed
 
+- **`addTuple` validates the condition, all five ways OpenFGA
+  does.** Type restrictions are enforced twice upstream — on write
+  and on read — and only the read half checked the condition, so a
+  caller could create a row the model does not admit and get no
+  error, then find every check ignoring it. The read gate made
+  that safe; it did not make it discoverable.
+
+  Refused, each with its own `cause` on
+  `InvalidConditionalTupleError`: *condition is missing*,
+  *invalid condition for type restriction*, *undefined condition*,
+  *parameter type error*, *invalid context parameter*.
+
+  Two ordering rules are upstream's and were probed rather than
+  assumed: an **undefined** condition reports that even when the
+  restriction would not have admitted the name either, and a
+  context carrying both an ill-typed value and a stray key reports
+  the type error.
+
+  **Only the context keys actually present are validated.** A
+  conditioned tuple with no context, or a partial one, is
+  accepted — the rest can still arrive with the check request, and
+  requiring it here would refuse writes OpenFGA takes.
+
+  **Cost: a conditioned write goes from 2 round-trips to 3.**
+  `addTuple` validates against the raw store — the request-scoped
+  config cache is built inside `check`, so it is not on this path
+  — and the third trip is the condition-definition lookup.
+  Unconditioned writes are unchanged, since an unconditioned tuple
+  needs no definition and no context read. Bulk-loading 10,000
+  conditioned tuples goes from 20,000 trips to 30,000.
+
+  A client-lifetime cache was rejected rather than overlooked. A
+  validation gate that caches goes stale across processes: another
+  instance narrows a restriction and this client keeps accepting
+  tuples the model no longer admits, which is the fail-open class
+  this whole round exists to close. A cache scoped to one
+  `addTuple` would save nothing.
+
 - **A context value is now read as its declared parameter type.**
   An ill-typed value raised nothing and resolved the condition
   `false`, which on the subtract side of an `excludedBy` means the

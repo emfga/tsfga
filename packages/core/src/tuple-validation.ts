@@ -1,4 +1,6 @@
+import { coerceContext } from "./conditions.ts";
 import {
+  type ConditionalTupleCause,
   InvalidConditionalTupleError,
   InvalidSubjectTypeError,
   RelationConfigNotFoundError,
@@ -244,19 +246,68 @@ export async function validateTupleWrite(
     request.subjectRelation,
     request.conditionName,
   );
-  if (!admitsSubjectRef(config, ref)) {
-    // Upstream's two causes for this, discriminated the same way:
-    // a tuple carrying no condition where every matching
-    // restriction has one is "condition is missing"; anything else
-    // is a condition the restriction does not name.
+  // Explicitly typed so TypeScript treats it as never-returning
+  // and narrows after each call.
+  const refuse: (cause: ConditionalTupleCause, detail?: string) => never = (
+    cause,
+    detail,
+  ) => {
     throw new InvalidConditionalTupleError(
-      ref.condition === undefined
-        ? "condition is missing"
-        : "invalid condition for type restriction",
+      cause,
       ref,
       request.objectType,
       request.relation,
       config.directlyAssignable,
+      detail,
     );
+  };
+
+  // An unconditioned tuple needs a matching restriction that names
+  // no condition. There is nothing further to check for it — no
+  // definition to look up, no context to read — so it costs no
+  // extra round-trip.
+  if (ref.condition === undefined) {
+    if (!admitsSubjectRef(config, ref)) refuse("condition is missing");
+    return;
+  }
+
+  // Upstream's order, and it is observable: a name that is not
+  // defined reports *that*, even when the restriction would not
+  // have admitted it either. Probed against v1.18.2 — a defined
+  // condition the restriction omits reports "invalid condition for
+  // type restriction"; an undefined one reports "undefined
+  // condition" whatever the restriction says.
+  const definition = await store.findConditionDefinition(ref.condition);
+  if (!definition) refuse("undefined condition");
+
+  if (!admitsSubjectRef(config, ref)) {
+    refuse("invalid condition for type restriction");
+  }
+
+  const context = request.conditionContext;
+  if (!context) return;
+
+  // Only the keys actually present are validated. A conditioned
+  // tuple with no context at all, or with a partial one, is
+  // accepted — probed — because the rest can still arrive with the
+  // check request.
+  try {
+    coerceContext(definition.parameters, context);
+  } catch (error) {
+    refuse(
+      "parameter type error",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
+  // A key the condition does not declare can never be read, so it
+  // is a mistake rather than spare data. Checked after the type
+  // pass, which is upstream's order when a context has both
+  // problems.
+  const declared = definition.parameters ?? {};
+  for (const key of Object.keys(context)) {
+    if (!(key in declared)) {
+      refuse("invalid context parameter", key);
+    }
   }
 }
