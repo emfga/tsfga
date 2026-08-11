@@ -107,6 +107,20 @@ export type ConditionalTupleCause =
  */
 export class InvalidConditionalTupleError extends TsfgaError {
   override readonly cause: ConditionalTupleCause;
+  /** The subject ref the write named. */
+  readonly subject: TypeRestriction;
+  readonly objectType: string;
+  readonly relation: string;
+  /**
+   * Everything the relation admits.
+   *
+   * On the error, not in the message, for the reason given on
+   * `InvalidSubjectTypeError`: rendering it would disclose the
+   * relation's whole type restriction list -- every admitted type,
+   * every userset relation, every condition name -- to whoever can
+   * attempt a write and read the response.
+   */
+  readonly allowed: readonly TypeRestriction[];
 
   constructor(
     cause: ConditionalTupleCause,
@@ -119,11 +133,14 @@ export class InvalidConditionalTupleError extends TsfgaError {
     super(
       `Invalid conditional tuple for ${objectType}.${relation}: ${cause}` +
         (detail === undefined ? "" : ` (${detail})`) +
-        `. Subject: '${formatRestriction(subject)}'. Allowed: ` +
-        `${allowed.map(formatRestriction).join(", ")}`,
+        `. Subject: '${formatRestriction(subject)}'`,
     );
     this.name = "InvalidConditionalTupleError";
     this.cause = cause;
+    this.subject = subject;
+    this.objectType = objectType;
+    this.relation = relation;
+    this.allowed = allowed;
   }
 }
 

@@ -222,6 +222,15 @@ releases may contain breaking changes).
   `isSelfDefining` and `validateRelationConfigWrite` are exported
   for store authors applying the same gates.
 
+- **`InvalidConditionalTupleError` no longer names what the
+  relation admits either.** It kept rendering the allow-list into
+  its message after its sibling stopped, which left the same
+  disclosure on the same write path — and it is the *more* likely
+  of the two to be returned, since condition mistakes are the
+  ordinary case. The list moves onto the error as `allowed`,
+  alongside new `subject`, `objectType` and `relation` fields.
+  **Breaking** if you matched on the message text.
+
 - **`InvalidSubjectTypeError` no longer names what the relation
   admits.** Its message rendered the relation's whole type
   restriction list — every admitted type, every userset relation

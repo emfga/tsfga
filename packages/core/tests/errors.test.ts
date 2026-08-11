@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { InvalidSubjectTypeError } from "../src/errors.ts";
+import {
+  InvalidConditionalTupleError,
+  InvalidSubjectTypeError,
+} from "../src/errors.ts";
 import type { TypeRestriction } from "../src/types.ts";
 
 /**
@@ -71,5 +74,35 @@ describe("InvalidSubjectTypeError", () => {
       [...ALLOWED].reverse(),
     );
     expect(reordered.message).toBe(error.message);
+  });
+});
+
+describe("InvalidConditionalTupleError", () => {
+  const error = new InvalidConditionalTupleError(
+    "undefined condition",
+    { type: "user", condition: "nosuch" },
+    "doc",
+    "viewer",
+    ALLOWED,
+  );
+
+  test("names the cause and the offending subject", () => {
+    expect(error.cause).toBe("undefined condition");
+    expect(error.message).toContain("nosuch");
+    expect(error.message).toContain("doc");
+  });
+
+  test("does not enumerate what the relation admits", () => {
+    // The sibling error stopped doing this; this one kept doing
+    // it, which left the same disclosure on the same write path.
+    expect(error.message).not.toContain("weekday_only");
+    expect(error.message).not.toContain("secretgroup");
+    expect(error.message).not.toContain("Allowed:");
+  });
+
+  test("carries the allow-list on the error instead", () => {
+    expect(error.allowed).toEqual(ALLOWED);
+    expect(error.objectType).toBe("doc");
+    expect(error.relation).toBe("viewer");
   });
 });
