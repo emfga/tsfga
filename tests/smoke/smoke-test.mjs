@@ -17,23 +17,25 @@ assert(typeof check === "function", "check should be a function");
 
 // Minimal mock store (only methods used by a simple direct-tuple
 // check). `findCheckTuples` answers all three per-node reads at
-// once; a store may use the query's include* flags to skip work,
-// but core re-clamps the reply, so returning a slot that was not
-// asked for just loses it.
+// once; a store may use the query's *Refs lists to skip work, but
+// core re-clamps the reply, so returning a slot that was not asked
+// for just loses it. An empty list admits nothing; `null` is the
+// store declining to narrow, not a permission to widen.
 const mockStore = {
   findCheckTuples: async (query) => ({
-    direct: query.includeDirect
-      ? {
-          objectType: query.objectType,
-          objectId: query.objectId,
-          relation: query.relation,
-          subjectType: query.subjectType,
-          subjectId: query.subjectId,
-          subjectRelation: null,
-          conditionName: null,
-          conditionContext: null,
-        }
-      : null,
+    direct:
+      query.directRefs?.length === 0
+        ? null
+        : {
+            objectType: query.objectType,
+            objectId: query.objectId,
+            relation: query.relation,
+            subjectType: query.subjectType,
+            subjectId: query.subjectId,
+            subjectRelation: null,
+            conditionName: null,
+            conditionContext: null,
+          },
     wildcard: null,
     usersets: [],
   }),
@@ -43,7 +45,6 @@ const mockStore = {
   insertTuple: async () => {},
   deleteTuple: async () => false,
   listCandidateObjectIds: async () => [],
-  listDirectSubjects: async () => [],
   upsertRelationConfig: async () => {},
   deleteRelationConfig: async () => false,
   upsertConditionDefinition: async () => {},
