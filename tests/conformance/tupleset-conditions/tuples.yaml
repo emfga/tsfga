@@ -1,0 +1,19 @@
+# The link under test is `document.parent`: conditioned on one
+# document and plain on the other, so each case has its control.
+- user: user:alice
+  relation: viewer
+  object: folder:f1
+
+- user: user:alice
+  relation: editor
+  object: folder:f1
+
+- user: folder:f1
+  relation: parent
+  object: document:cond
+  condition:
+    name: flag
+
+- user: folder:f1
+  relation: parent
+  object: document:bare

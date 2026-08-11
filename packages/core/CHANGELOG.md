@@ -9,6 +9,24 @@ releases may contain breaking changes).
 
 ### Fixed
 
+- **A tuple-to-userset's tupleset row is now condition-checked.**
+  `define parent: [folder with flag]` with
+  `define viewer: viewer from parent` means the link exists only
+  while `flag` holds. tsfga read the tupleset rows and dispatched
+  on every one without evaluating their conditions, so access
+  granted through a link the model had switched off. The rows are
+  also now gated on the tupleset relation's own type restriction,
+  which nothing narrowed before.
+
+  **Two call sites shared the defect** — step 5's plain
+  tuple-to-userset and `checkIntersection`'s `tupleToUserset`
+  operand — and they now share one `resolveTupleset` helper. The
+  second is the more dangerous: an intersection operand satisfied
+  through a switched-off link, inside the subtrahend of an
+  exclusion, grants rather than denies. A test covering only the
+  first passes while it is still live, which is what
+  `tests/conformance/tupleset-conditions.test.ts` pins.
+
 - **A type restriction now carries its condition, and the
   condition is matched exactly.** `directlyAssignable` recorded
   `user` for the OpenFGA restriction `[user with weekday_only]`,

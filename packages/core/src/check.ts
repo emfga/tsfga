@@ -4,6 +4,7 @@ import { ContextualTupleStore } from "./contextual-store.ts";
 import { DepthExceededError, TsfgaError } from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
 import {
+  admitsSubjectRef,
   admittedRefsForShape,
   admittedUsersetRefs,
   directSubjectRef,
@@ -1118,14 +1119,11 @@ async function checkBase(
     const ttuEntries = config.tupleToUserset;
     handlers.push(async (branch) => {
       if (branch.abandoned) throw new BranchAbandoned();
-      // Batch all tupleset lookups
+      // Batch all tupleset lookups. Each returns only the rows
+      // the tupleset relation admits whose condition holds.
       const linkedResults = await Promise.all(
         ttuEntries.map(({ tupleset }) =>
-          store.findTuplesByRelation(
-            request.objectType,
-            request.objectId,
-            tupleset,
-          ),
+          resolveTupleset(store, request, tupleset),
         ),
       );
 
@@ -1213,9 +1211,9 @@ async function checkIntersection(
       // tupleToUserset operand
       handlers.push(async (branch) => {
         if (branch.abandoned) throw new BranchAbandoned();
-        const linkedTuples = await store.findTuplesByRelation(
-          request.objectType,
-          request.objectId,
+        const linkedTuples = await resolveTupleset(
+          store,
+          request,
           operand.tupleset,
         );
         const ttuHandlers: Handler[] = [];
@@ -1243,6 +1241,63 @@ async function checkIntersection(
   }
 
   return resolveIntersection(handlers, maxBreadth, frame.branch);
+}
+
+/**
+ * The tupleset rows a tuple-to-userset may expand through.
+ *
+ * A tupleset row is a tuple like any other, so two things gate it
+ * and neither was applied:
+ *
+ * - **its condition.** `define parent: [folder with flag]` means
+ *   the link exists only while `flag` holds, so dispatching on the
+ *   row without evaluating its condition grants through a link the
+ *   model has switched off. Probed against v1.18.2: upstream
+ *   answers `false` when the condition fails.
+ * - **the tupleset relation's own type restriction.** The row is
+ *   read by relation alone, so nothing else narrows it to the
+ *   subject types that relation admits.
+ *
+ * Factored out because there are **two** call sites — step 5's
+ * plain tuple-to-userset and `checkIntersection`'s
+ * `tupleToUserset` operand — and a fix applied to only the first
+ * leaves the second granting. The second is the worse of the two:
+ * an intersection operand satisfied through a switched-off link,
+ * inside the subtrahend of an exclusion, grants rather than denies.
+ */
+async function resolveTupleset(
+  store: TupleStore,
+  request: CheckRequest,
+  tupleset: string,
+): Promise<Tuple[]> {
+  const [linked, config] = await Promise.all([
+    store.findTuplesByRelation(request.objectType, request.objectId, tupleset),
+    store.findRelationConfig(request.objectType, tupleset),
+  ]);
+
+  const admitted = linked.filter((tuple) =>
+    admitsSubjectRef(
+      config,
+      directSubjectRef(
+        tuple.subjectType,
+        tuple.subjectId,
+        tuple.subjectRelation,
+        tuple.conditionName,
+      ),
+    ),
+  );
+
+  // Sequential rather than concurrent: a condition evaluation can
+  // throw, and `Promise.all` would surface whichever rejected
+  // first rather than the first row in order — the same
+  // determinism the union handlers keep.
+  const satisfied: Tuple[] = [];
+  for (const tuple of admitted) {
+    if (await evaluateTupleCondition(store, tuple, request.context)) {
+      satisfied.push(tuple);
+    }
+  }
+  return satisfied;
 }
 
 /**
