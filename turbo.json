@@ -19,6 +19,10 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
+    "//#tsc:harness": {
+      "dependsOn": ["@tsfga/core#build"],
+      "outputs": []
+    },
     "test": {
       "dependsOn": ["^build"],
       "cache": false

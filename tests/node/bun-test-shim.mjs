@@ -12,8 +12,16 @@ const beforeAll = before;
 const afterAll = after;
 
 /**
+ * What `toThrow` accepts: bare, a constructor, a RegExp, a message
+ * substring, or an Error whose message must match exactly.
+ * @typedef {undefined | Function | RegExp | Error | string} ThrowExpectation
+ */
+
+/**
  * Run `fn` and report what it threw, distinguishing "threw nothing"
  * from "threw undefined" so `toThrow` cannot pass on the latter.
+ * @param {unknown} fn
+ * @returns {{ threw: boolean, error: any }}
  */
 function capture(fn) {
   if (typeof fn !== "function") {
@@ -31,6 +39,9 @@ function capture(fn) {
  * Bun's toThrow argument forms. Bare means "threw anything"; a class
  * matches by instance, a RegExp against the message, a string as a
  * message substring, and an Error by exact message.
+ * @param {any} error
+ * @param {ThrowExpectation} expected
+ * @returns {boolean}
  */
 function matchesExpected(error, expected) {
   if (expected === undefined) {
@@ -48,6 +59,10 @@ function matchesExpected(error, expected) {
   return String(error?.message ?? error).includes(String(expected));
 }
 
+/**
+ * @param {ThrowExpectation} expected
+ * @returns {string}
+ */
 function describeExpected(expected) {
   if (expected === undefined) {
     return "to throw";
@@ -64,29 +79,37 @@ function describeExpected(expected) {
   return `to throw a message containing ${JSON.stringify(String(expected))}`;
 }
 
+/**
+ * @param {any} actual
+ */
 function expect(actual) {
   const matchers = {
+    /** @param {any} expected */
     toBe(expected) {
       assert.strictEqual(actual, expected);
     },
     toBeNull() {
       assert.strictEqual(actual, null);
     },
+    /** @param {any} expected */
     toEqual(expected) {
       assert.deepStrictEqual(actual, expected);
     },
+    /** @param {number} n */
     toHaveLength(n) {
       assert.strictEqual(actual.length, n);
     },
     toBeTruthy() {
       assert.ok(actual);
     },
+    /** @param {Function} ctor */
     toBeInstanceOf(ctor) {
       assert.ok(
         actual instanceof ctor,
         `Expected instance of ${ctor.name}, got ${actual?.constructor?.name}`,
       );
     },
+    /** @param {ThrowExpectation} [expected] */
     toThrow(expected) {
       const { threw, error } = capture(actual);
       if (!threw) {
@@ -101,9 +124,11 @@ function expect(actual) {
       toBeNull() {
         assert.notStrictEqual(actual, null);
       },
+      /** @param {any} expected */
       toBe(expected) {
         assert.notStrictEqual(actual, expected);
       },
+      /** @param {ThrowExpectation} [expected] */
       toThrow(expected) {
         const { threw, error } = capture(actual);
         if (threw && matchesExpected(error, expected)) {
@@ -114,8 +139,9 @@ function expect(actual) {
       },
     },
     rejects: {
+      /** @param {Function} ctor */
       async toBeInstanceOf(ctor) {
-        await assert.rejects(actual, (err) => err instanceof ctor);
+        await assert.rejects(actual, (/** @type {any} */ err) => err instanceof ctor);
       },
     },
   };

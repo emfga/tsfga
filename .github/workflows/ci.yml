@@ -75,6 +75,12 @@ jobs:
         with:
           bun-version-file: package.json
 
+      # The harness type check ends in `deno check` on the Deno
+      # shim, whose jsr: imports tsc cannot resolve.
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: "2.9.x"
+
       - run: bun install --frozen-lockfile
 
       - run: bun run tsc

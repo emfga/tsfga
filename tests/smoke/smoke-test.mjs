@@ -21,6 +21,7 @@ assert(typeof check === "function", "check should be a function");
 // core re-clamps the reply, so returning a slot that was not asked
 // for just loses it. An empty list admits nothing; `null` is the
 // store declining to narrow, not a permission to widen.
+/** @type {import("../../packages/core/dist/index.js").TupleStore} */
 const mockStore = {
   findCheckTuples: async (query) => ({
     direct:
@@ -84,6 +85,10 @@ assert(denied === false, `expected false, got ${denied}`);
 
 console.log("smoke test passed");
 
+/**
+ * @param {unknown} condition
+ * @param {string} message
+ */
 function assert(condition, message) {
   if (!condition) {
     throw new Error(`Assertion failed: ${message}`);

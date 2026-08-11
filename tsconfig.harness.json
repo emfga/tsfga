@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // The harnesses are the only JavaScript the repo type-checks.
+    // They are .mjs because of what they are: loader.mjs and
+    // register.mjs are `node --import` hooks that run before any
+    // transpiler could help them, and the smoke test exists to
+    // import the built package from a plain runtime. checkJs is
+    // how they get a static gate without being rewritten.
+    "checkJs": true,
+    // The smoke test imports dist/ and runs under plain node and
+    // deno, so it resolves like a consumer rather than like the
+    // workspace.
+    "moduleResolution": "nodenext",
+    "module": "nodenext",
+    "allowImportingTsExtensions": false
+  },
+  "include": ["tests/node/**/*.mjs", "tests/smoke/**/*.mjs", "tests/docs/**/*.ts"]
+}
