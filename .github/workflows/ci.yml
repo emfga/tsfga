@@ -118,6 +118,13 @@ jobs:
 
       - run: bun run db:latest
 
+      # A step in the job that already has the migrated database
+      # rather than a job of its own: nothing else checks that the
+      # committed schema.ts still describes what the migrations
+      # produce, and the compiler cannot, because the payload
+      # columns are typed Json.
+      - run: bun run check:schema-drift
+
       - run: bun run turbo:test
 
   test-node:
