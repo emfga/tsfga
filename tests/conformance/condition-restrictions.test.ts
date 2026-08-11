@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, test } from "bun:test";
 import {
   createTsfga,
+  type RelationConfig,
   type TsfgaClient,
   type TypeRestriction,
 } from "@tsfga/core";
@@ -10,6 +11,7 @@ import type { Kysely } from "kysely";
 import {
   expectConfigsMatchModel,
   expectConformance,
+  recordFixture,
 } from "./helpers/conformance.ts";
 import {
   beginTransaction,
@@ -100,6 +102,16 @@ describe("Condition Type Restrictions Conformance", () => {
   let tsfgaClient: TsfgaClient;
   let store: KyselyTupleStore;
   const modelIds = new Map<string, string>();
+  /**
+   * The configs this fixture writes once, as it wrote them.
+   *
+   * Snapshotted at the end of `beforeAll` rather than read live,
+   * because `expectUnder` rewrites `document.viewer` on every case
+   * and the record would otherwise carry whichever narrowing ran
+   * last — which is the same thing that made the hand-kept record
+   * unable to fail.
+   */
+  let setupConfigs: RelationConfig[] = [];
 
   beforeAll(async () => {
     db = getDb();
@@ -107,6 +119,7 @@ describe("Condition Type Restrictions Conformance", () => {
 
     store = new KyselyTupleStore(db);
     tsfgaClient = createTsfga(store);
+    const fixture = recordFixture(tsfgaClient);
 
     await tsfgaClient.writeConditionDefinition({
       name: "weekday_only",
@@ -221,6 +234,8 @@ describe("Condition Type Restrictions Conformance", () => {
         ),
       );
     }
+
+    setupConfigs = [...fixture.configs];
   });
 
   afterAll(async () => {
@@ -316,22 +331,21 @@ describe("Condition Type Restrictions Conformance", () => {
     // its own `.dsl` instead — nine model files and nine
     // `admits` lists, and nothing else would notice them
     // disagreeing.
+    //
+    // Only `document.viewer` is stated here. Everything the
+    // fixture writes once comes from `recordFixture`, so widening
+    // one of those writes is a failure rather than a second
+    // literal quietly disagreeing with the first: `team.member`
+    // used to be written and then restated, with nothing holding
+    // the two together, and widening the write to admit `user:*`
+    // left all nineteen cases passing.
     for (const { name, admits } of NARROWINGS) {
       test(name, () => {
         expectConfigsMatchModel(
           `./condition-restrictions/model-${name}.dsl`,
           {
             configs: [
-              {
-                objectType: "team",
-                relation: "member",
-                directlyAssignable: [{ type: "user" }],
-                impliedBy: null,
-                computedUserset: null,
-                tupleToUserset: null,
-                excludedBy: null,
-                intersection: null,
-              },
+              ...setupConfigs,
               {
                 objectType: "document",
                 relation: "viewer",
