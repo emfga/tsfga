@@ -310,7 +310,7 @@ function wouldDeadlock(entry: InflightEntry, waiter: WaitNode | null): boolean {
  *   branch errored.
  * - Contextual tuples are validated against relation configs
  *   exactly like `addTuple` (RelationConfigNotFoundError,
- *   InvalidSubjectTypeError, UsersetNotAllowedError).
+ *   InvalidSubjectTypeError, InvalidConditionalTupleError).
  *
  * Depth accounting: only steps that move to a *different object*
  * — userset expansion and tuple-to-userset expansion — cost

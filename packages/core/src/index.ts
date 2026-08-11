@@ -35,9 +35,9 @@ export interface TsfgaClient {
    *   reaches. A missing config used to read as *unrestricted*, so
    *   a row that outlived its config granted; upstream answers an
    *   HTTP 400 validation error for the same request.
-   * @throws RelationConfigNotFoundError or InvalidSubjectTypeError
-   *   when a contextual tuple fails the same validation `addTuple`
-   *   applies.
+   * @throws RelationConfigNotFoundError, InvalidSubjectTypeError
+   *   or InvalidConditionalTupleError when a contextual tuple
+   *   fails the same validation `addTuple` applies.
    */
   check(request: CheckRequest): Promise<boolean>;
   /**
