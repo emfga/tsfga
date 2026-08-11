@@ -28,11 +28,23 @@ scripts/bump.sh packages/kysely minor
 ```
 
 The script updates the `version` field in `package.json` and
-`bun.lock`. It does not touch the `@tsfga/core` peer/dev
-range in `packages/kysely` — that stays `workspace:*` in the
-repo and is substituted at release time by the workflow's
-"Resolve workspace protocol" step. Commit the version bump,
-update the package's `CHANGELOG.md`, open a PR, and merge.
+`bun.lock`.
+
+It does not touch `@tsfga/kysely`'s `@tsfga/core` ranges, and
+the two are not alike. The **devDependency** stays
+`workspace:*`, so the adapter builds against the core beside
+it, and the workflow's "Resolve workspace protocol" step
+substitutes the real version at release time. The
+**peerDependency** is hand-written, ships verbatim, and is
+substituted by nothing — deriving it from the core version is
+what published `@tsfga/kysely@0.4.0` with `^0.4.0`, a range
+that below 1.0.0 admits no later minor, so core 0.5.0 orphaned
+it and no step failed. Bumping core's minor means deciding
+that range in the same PR; `scripts/check-peer-range.sh` fails
+CI while the two disagree.
+
+Commit the version bump, update the package's `CHANGELOG.md`,
+open a PR, and merge.
 
 ## 2. Trigger the release workflow
 
@@ -136,12 +148,17 @@ publishes whatever version is already in `package.json`,
 creates a git tag, and pushes the tag (not main).
 
 **Workspace protocol resolution:** For `@tsfga/kysely`,
-the workflow temporarily replaces `workspace:*` references
-to `@tsfga/core` with the actual version, then reverts the
-change. This happens before the packaging checks and on
-every dispatch, including validate-only ones, so publint,
-attw and `npm pack` inspect the manifest that actually
-ships rather than one still carrying `workspace:*`.
+the workflow temporarily replaces the `workspace:*`
+**devDependency** on `@tsfga/core` with the actual version,
+then reverts the change. This happens before the packaging
+checks and on every dispatch, including validate-only ones,
+so publint, attw and `npm pack` inspect the manifest that
+actually ships rather than one still carrying `workspace:*`.
+
+It does **not** touch `peerDependencies`. That range is
+hand-written and published as written, which is the point:
+the substitution used to cover it too, and nobody read what
+it produced until it was already on npm.
 
 **OIDC Trusted Publishing:** npm verifies the GitHub
 Actions workflow identity via Sigstore — no long-lived

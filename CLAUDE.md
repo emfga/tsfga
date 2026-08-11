@@ -57,19 +57,24 @@ tsfga/
 │   │   ├── src/
 │   │   │   ├── index.ts             barrel: createTsfga() + re-exports
 │   │   │   ├── check.ts             5-step recursive check algorithm
+│   │   │   ├── check-many.ts        batch over one resolution scope
 │   │   │   ├── list-objects.ts      listObjects candidate pool
-│   │   │   ├── conditions.ts        CEL condition evaluation
+│   │   │   ├── conditions.ts        CEL compile, coerce, evaluate
 │   │   │   ├── caching-store.ts     request-scoped config cache
 │   │   │   ├── contextual-store.ts  ContextualTupleStore wrapper
 │   │   │   ├── tuple-validation.ts  shared write/contextual checks
+│   │   │   ├── config-validation.ts relation-config write gate
 │   │   │   ├── types.ts             All shared types
 │   │   │   ├── errors.ts            Error hierarchy
 │   │   │   └── store-interface.ts   TupleStore interface definition
 │   │   ├── tests/
 │   │   │   ├── check.test.ts
 │   │   │   ├── conditions.test.ts
+│   │   │   ├── store-trust.test.ts  the clamp vs. a rogue store
+│   │   │   ├── ... (one file per area)
 │   │   │   └── helpers/
 │   │   │       └── mock-store.ts
+│   │   ├── bench/                   not shipped; in no workflow
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   └── tsup.config.ts
@@ -83,9 +88,13 @@ tsfga/
 │       │       ├── 001-initial.ts
 │       │       ├── 002-add-operators.ts
 │       │       ├── 003-drop-unused-indexes.ts
-│       │       └── 004-drop-metadata-columns.ts
+│       │       ├── 004-drop-metadata-columns.ts
+│       │       ├── 005-type-restrictions.ts
+│       │       └── index.ts         migrationProvider (subpath export)
 │       ├── tests/
 │       │   ├── kysely-adapter.test.ts
+│       │   ├── migration-provider.test.ts
+│       │   ├── stored-data.test.ts
 │       │   └── helpers/
 │       │       ├── db.ts
 │       │       ├── infrastructure.ts  PG-only health check
@@ -105,6 +114,9 @@ tsfga/
 │   ├── deno/                        bun:test shim for Deno test runner
 │   │   ├── bun-test-shim.ts        bun:test API via @std/testing + @std/expect
 │   │   └── deno.json               Import map: "bun:test" → shim
+│   ├── docs/                        README samples, compiled
+│   │   └── readme-samples.ts       authoritative; the prose quotes it
+│   ├── smoke/                       built package, plain runtime
 │   └── conformance/                 @tsfga/conformance (private)
 │       ├── helpers/
 │       │   ├── conformance.ts       expectConformance() helper
@@ -127,10 +139,18 @@ tsfga/
 ├── biome.json                       shared lint/format
 ├── compose.yaml                     PostgreSQL + OpenFGA services
 ├── .env.example                     environment variable template (copy to .env)
+├── scripts/                         bump, release notes, CI gates
+│   ├── check-peer-range.sh         adapter peer range vs. core version
+│   ├── check-readme-samples.mjs    README fences vs. tests/docs fixture
+│   └── check-schema-drift.sh       schema.ts vs. the migrations
 └── CLAUDE.md
 ```
 
 ## Core Types (`packages/core/src/types.ts`)
+
+`types.ts` is the source of truth; this is the shape, not the
+prose. Every field below is required unless marked optional —
+absent-versus-null was an accidental third state and is gone.
 
 ```typescript
 /** A relationship tuple with optional condition */
@@ -140,22 +160,36 @@ export interface Tuple {
   relation: string;
   subjectType: string;
   subjectId: string;
-  subjectRelation?: string;
-  conditionName?: string;
-  conditionContext?: Record<string, unknown>;
+  subjectRelation: string | null;
+  conditionName: string | null;
+  conditionContext: Record<string, unknown> | null;
+}
+
+/**
+ * One entry of a relation's type restriction, mirroring OpenFGA's
+ * `RelationReference`. The condition is part of the restriction,
+ * not an annotation on it, and is matched exactly in both
+ * directions.
+ */
+export interface TypeRestriction {
+  type: string;
+  relation?: string;   // team#member
+  wildcard?: true;     // user:*
+  condition?: string;  // user with weekday_only
 }
 
 /** Configuration for a relation on an object type */
 export interface RelationConfig {
   objectType: string;
   relation: string;
-  directlyAssignableTypes?: string[];
-  impliedBy?: string[];
-  computedUserset?: string;
-  tupleToUserset?: Array<{ tupleset: string; computedUserset: string }>;
-  excludedBy?: string;
-  intersection?: IntersectionOperand[];
-  allowsUsersetSubjects: boolean;
+  /** `[]` admits no direct assignment — a purely computed
+   *  relation issues no tuple read at all. */
+  directlyAssignable: TypeRestriction[];
+  impliedBy: string[] | null;
+  computedUserset: string | null;
+  tupleToUserset: Array<{ tupleset: string; computedUserset: string }> | null;
+  excludedBy: string | null;
+  intersection: IntersectionOperand[] | null;
 }
 
 /** Operand for intersection-based relations */
@@ -173,8 +207,9 @@ export interface ConditionDefinition {
   parameters: Record<string, ConditionParameterType>;
 }
 
-/** Supported CEL parameter types */
-export type ConditionParameterType =
+/** Supported CEL parameter types. A container names its element
+ *  type, as the model spells it: `list<string>`, `map<int>`. */
+export type ConditionParameterScalarType =
   | "string"
   | "int"
   | "uint"
@@ -182,9 +217,12 @@ export type ConditionParameterType =
   | "double"
   | "duration"
   | "timestamp"
-  | "list"
-  | "map"
   | "any";
+
+export type ConditionParameterType =
+  | ConditionParameterScalarType
+  | `list<${ConditionParameterScalarType}>`
+  | `map<${ConditionParameterScalarType}>`;
 
 /** Parameters for a check request */
 export interface CheckRequest {
@@ -194,6 +232,17 @@ export interface CheckRequest {
   subjectType: string;
   subjectId: string;
   context?: Record<string, unknown>;
+  contextualTuples?: AddTupleRequest[];
+}
+
+/** Parameters for a listObjects request */
+export interface ListObjectsRequest {
+  objectType: string;
+  relation: string;
+  subjectType: string;
+  subjectId: string;
+  context?: Record<string, unknown>;
+  contextualTuples?: AddTupleRequest[];
 }
 
 /** Options for the check algorithm */
@@ -207,6 +256,12 @@ export interface CheckOptions {
    * Infinity (unbounded).
    */
   maxBreadth?: number;
+  /**
+   * Maximum checks of one `checkMany` batch resolved
+   * concurrently (default: 50, matching
+   * OPENFGA_MAX_CONCURRENT_CHECKS_PER_BATCH_CHECK).
+   */
+  maxConcurrentChecks?: number;
 }
 
 /** Parameters for adding a tuple */
@@ -216,9 +271,9 @@ export interface AddTupleRequest {
   relation: string;
   subjectType: string;
   subjectId: string;
-  subjectRelation?: string;
-  conditionName?: string;
-  conditionContext?: Record<string, unknown>;
+  subjectRelation?: string | null;
+  conditionName?: string | null;
+  conditionContext?: Record<string, unknown> | null;
 }
 
 /** Parameters for removing a tuple */
@@ -228,7 +283,7 @@ export interface RemoveTupleRequest {
   relation: string;
   subjectType: string;
   subjectId: string;
-  subjectRelation?: string;
+  subjectRelation?: string | null;
 }
 ```
 
@@ -236,6 +291,17 @@ export interface RemoveTupleRequest {
 
 The `TupleStore` is the abstraction boundary between the core algorithm and any
 database backend. All methods return `Promise`.
+
+**A store's reply is a hint, never a trust boundary.** The query's
+`directRefs`, `wildcardRefs` and `usersetRefs` carry the
+restrictions the relation admits so a store can narrow, but
+`clampToQuery` re-applies the exact match — type, subject relation
+*and* condition — to whatever comes back. An adapter bug can lose
+grants; it cannot widen what the model admits. `listSubjects` is
+filtered in core for the same reason.
+
+There is no `listDirectSubjects`: it was a strict subset of
+`findTuplesByRelation`, which `listSubjects` now reads through.
 
 ```typescript
 export interface TupleStore {
@@ -282,13 +348,6 @@ export interface TupleStore {
     objectType: string,
   ): Promise<string[]>;
 
-  /** List direct subjects for an object + relation */
-  listDirectSubjects(
-    objectType: string,
-    objectId: string,
-    relation: string,
-  ): Promise<Array<{ subjectType: string; subjectId: string; subjectRelation?: string }>>;
-
   // === Config management ===
 
   /** Insert or update a relation config */
@@ -310,133 +369,60 @@ export interface TupleStore {
 This is the most critical file. It implements the 5-step recursive
 check algorithm for relationship-based access control.
 
+The public entry point takes no depth argument — depth, breadth,
+the config cache and the node memo all live in a `CheckScope`:
+
 ```typescript
 export async function check(
   store: TupleStore,
   request: CheckRequest,
-  options: CheckOptions = {},
-  depth: number = 0,
-): Promise<boolean> {
-  const maxDepth = options.maxDepth ?? 25;
+  options?: CheckOptions,
+): Promise<boolean>;
 
-  // Prevent infinite recursion. Only dispatches to another object
-  // (steps 2 and 5) spend the budget, so the guard trips on `>=`.
-  if (depth >= maxDepth) {
-    throw new DepthExceededError(...);
-  }
-
-  // Steps 1 and 2 read together. `findCheckTuples` returns the
-  // direct tuple, the wildcard tuple and the userset rows in one
-  // call, and takes the relation config's gates so a part the
-  // model cannot admit is never asked for.
-  const { direct: directTuple, usersets: usersetTuples } =
-    await store.findCheckTuples({ ...node, ...gatesFrom(config) });
-
-  // Step 1: Direct tuple check
-  // Exact match on (objectType, objectId, relation, subjectType,
-  // subjectId) where subject_relation IS NULL.
-  // If the tuple has a conditionName, evaluate the CEL condition.
-  // Return true only if no condition or condition evaluates to true.
-  if (directTuple) {
-    if (await evaluateTupleCondition(store, directTuple, request.context)) {
-      return true;
-    }
-  }
-
-  // Step 2: Userset expansion
-  // The rows with subject_relation IS NOT NULL, read above.
-  // e.g., (channel:proj, writer, workspace:sandcastle#member)
-  // For each, recursively check if the user has the subject_relation
-  // on the referenced subject object.
-  // If the userset tuple has a conditionName, evaluate before recursing.
-  for (const userset of usersetTuples) {
-    if (!await evaluateTupleCondition(store, userset, request.context)) {
-      continue;
-    }
-    const hasRelation = await check(store, {
-      objectType: userset.subjectType,
-      objectId: userset.subjectId,
-      relation: userset.subjectRelation!,
-      subjectType: request.subjectType,
-      subjectId: request.subjectId,
-      context: request.context,
-    }, options, depth + 1);
-    if (hasRelation) {
-      return true;
-    }
-  }
-
-  // Fetch once for steps 3-5
-  const config = await store.findRelationConfig(
-    request.objectType, request.relation,
-  );
-
-  // Step 3: Relation inheritance (implied_by)
-  // e.g., checking "member" and config says implied_by: ["channels_admin"]
-  // → recursively check if user has "channels_admin" on the same object
-  if (config?.impliedBy) {
-    for (const impliedRelation of config.impliedBy) {
-      // Same object: a rewrite, not a dispatch — no depth cost
-      const hasRelation = await check(store, {
-        ...request,
-        relation: impliedRelation,
-      }, options, depth);
-      if (hasRelation) {
-        return true;
-      }
-    }
-  }
-
-  // Step 4: Computed userset
-  // e.g., for branch.can_merge, computed_userset = "can_push" means
-  // users who can push can also merge (on the same object)
-  if (config?.computedUserset) {
-    // Same object: a rewrite, not a dispatch — no depth cost
-    const hasRelation = await check(store, {
-      ...request,
-      relation: config.computedUserset,
-    }, options, depth);
-    if (hasRelation) {
-      return true;
-    }
-  }
-
-  // Step 5: Tuple-to-userset (array — supports multiple TTU paths per relation)
-  // e.g., for project.editor with tupleToUserset:
-  //   [{ tupleset: "owner", computedUserset: "project_editor" },
-  //    { tupleset: "partner", computedUserset: "project_editor" }]
-  // For each TTU entry, find tuples via tupleset, then check computedUserset
-  // on the linked object.
-  if (config?.tupleToUserset) {
-    for (const { tupleset, computedUserset } of config.tupleToUserset) {
-      const linkedTuples = await store.findTuplesByRelation(
-        request.objectType, request.objectId, tupleset,
-      );
-      for (const linked of linkedTuples) {
-        const hasRelation = await check(store, {
-          objectType: linked.subjectType,
-          objectId: linked.subjectId,
-          relation: computedUserset,
-          subjectType: request.subjectType,
-          subjectId: request.subjectId,
-          context: request.context,
-        }, options, depth + 1);
-        if (hasRelation) {
-          return true;
-        }
-      }
-    }
-  }
-
-  return false;
-}
+/** A scope one or more checks share. `listObjects` and
+ *  `checkMany` build one and run every request in it, so the
+ *  config cache and the node memo span the whole call. */
+export function createCheckScope(
+  store: TupleStore,
+  options?: CheckOptions,
+): CheckScope;
+export function runCheck(
+  scope: CheckScope,
+  request: CheckRequest,
+): Promise<boolean>;
 ```
+
+Internally a node resolves to `{ allowed, cycleDetected }`, and
+the five steps run against one relation config fetched once:
+
+1. **Direct tuple** — the subject's own row with no subject
+   relation. Evaluate its condition before granting.
+2. **Userset expansion** — rows with a subject relation
+   (`workspace:sandcastle#member`). Evaluate the row's condition,
+   then dispatch onto the referenced object.
+3. **Relation inheritance** (`impliedBy`) — the same object, a
+   different relation.
+4. **Computed userset** — the same object, one named relation.
+5. **Tuple-to-userset** — an array, so one relation may have
+   several TTU paths. The tupleset rows are condition-checked and
+   type-gated before dispatching onto the linked object.
+
+Steps 1 and 2 read together: `findCheckTuples` returns the direct
+tuple, the wildcard tuple and the userset rows in one call, and
+carries the relation config's restrictions so a row the model
+cannot admit is never asked for. `clampToQuery` re-applies the
+exact match to the reply regardless.
 
 **Critical implementation notes:**
 - Steps 3, 4, 5 all use the SAME `config` fetched once
 - Do NOT merge `impliedBy` and `computedUserset` into one concept; they are
   distinct OpenFGA features
-- The `depth` parameter is internal; it is not exposed in the public API
+- **A relation with no config is refused, not unrestricted.**
+  `check`, `checkMany`, `listObjects` and `listSubjects` raise
+  `RelationConfigNotFoundError`, as `addTuple` always did. The one
+  exception is a tuple-to-userset whose computed relation is
+  undefined on the linked object's type: upstream accepts such a
+  model and answers `false` for that row, so tsfga does too
 - `maxDepth` defaults to 25 (matching OpenFGA's
   `OPENFGA_RESOLVE_NODE_LIMIT`) but is configurable via `CheckOptions`
 - **Only dispatches spend depth.** Userset expansion (step 2) and
@@ -453,125 +439,143 @@ export async function check(
   subtract side of `excludedBy` a cycle *denies*, so collapsing it to
   `false` would fail open. The flag is internal, exactly as OpenFGA's
   `CycleDetected` is absent from the wire response. See
-  `packages/core/README.md` for the table and for the one known
-  divergence (OpenFGA's recursive-relation resolvers)
+  `packages/core/README.md` for the table and for the known
+  divergences (OpenFGA's recursive-relation resolvers, and the
+  depth boundary on a chain whose leaf relation has no weight-2
+  arm)
+- **`maxBreadth` bounds one node's branches, not the call.**
+  Concurrent store reads therefore compound with dispatch depth;
+  `packages/kysely/README.md` carries the measured figures and
+  what they mean for pool sizing
 
 ## CEL Conditions (`packages/core/src/conditions.ts`)
 
-Uses `@marcbachmann/cel-js` to evaluate Common Expression Language conditions on
-tuples.
+Uses `@marcbachmann/cel-js` to evaluate Common Expression Language
+conditions on tuples.
 
 ```typescript
-import { Environment } from "@marcbachmann/cel-js";
-
-/** Cache compiled CEL environments by condition name */
-const envCache = new Map<string, Environment>();
-
 /**
- * Evaluate a tuple's condition. Returns true if:
- * - The tuple has no condition (unconditional access)
- * - The condition evaluates to true
- * Returns false if the condition evaluates to false.
- * Throws ConditionNotFoundError if conditionName references a missing definition.
- * Throws ConditionEvaluationError if CEL evaluation fails.
+ * Evaluate a tuple's condition. Returns true when the tuple has
+ * no condition (unconditional access) or the condition evaluates
+ * to true; false when it evaluates to false.
+ *
+ * @throws ConditionNotFoundError when conditionName names no
+ *   stored definition
+ * @throws ConditionEvaluationError when CEL evaluation fails
+ * @throws InvalidConditionalTupleError when a context value
+ *   cannot be read as its declared parameter type
  */
 export async function evaluateTupleCondition(
   store: TupleStore,
   tuple: Tuple,
   requestContext?: Record<string, unknown>,
-): Promise<boolean> {
-  if (!tuple.conditionName) {
-    return true; // No condition = unconditional access
-  }
+): Promise<boolean>;
 
-  const condDef = await store.findConditionDefinition(tuple.conditionName);
-  if (!condDef) {
-    throw new ConditionNotFoundError(tuple.conditionName);
-  }
-
-  // Merge contexts: request context wins over tuple context
-  const context = { ...tuple.conditionContext, ...requestContext };
-
-  let env = envCache.get(condDef.name);
-  if (!env) {
-    env = new Environment();
-    envCache.set(condDef.name, env);
-  }
-
-  try {
-    const result = env.evaluate(condDef.expression, context);
-    return result === true;
-  } catch (error) {
-    throw new ConditionEvaluationError(condDef.name, error);
-  }
-}
+/** Read a context object as its declared parameter types, a port
+ *  of OpenFGA's internal/condition/types/converters.go. Shared
+ *  with the write path so a tuple cannot be writable but
+ *  unevaluable. */
+export function coerceContext(
+  parameters: Record<string, ConditionParameterType> | null,
+  context: Record<string, unknown>,
+): { coerced: Record<string, unknown>; missing: string[] };
 ```
 
-**Context merge rule:** `tuple.conditionContext` properties override
-`requestContext` properties. This matches OpenFGA behavior where context
-values written in the relationship tuple take precedence.
+**Compilation happens at write time.** `writeConditionDefinition`
+compiles the expression and throws `ConditionCompileError` when it
+does not parse — cel-js's own `ParseError` is not a `TsfgaError`
+and used to escape `check()`. Compilation is parse-only; upstream
+additionally type-checks against the declared parameters.
+
+**Compiled expressions are cached by source text**, not by
+condition name, so redefining a condition takes effect on the next
+evaluation and identical expressions share one entry. The cache
+holds 1000 entries and evicts the least recently used.
+
+**Context merge rule:** `tuple.conditionContext` properties
+override `requestContext` properties. This matches OpenFGA
+behavior, where context values written in the relationship tuple
+take precedence.
+
+**Coercion follows OpenFGA's grammar, not JavaScript's.** `int`
+and `uint` reach CEL as `BigInt`, saturating at int64's bounds;
+numeric strings are parsed with upstream's `big.ParseFloat`
+grammar, which takes `1e3` and `.5` but not `0x10`, `1_000` or
+surrounding whitespace; `duration` and `timestamp` accept only
+strings, and RFC 3339 designators must be uppercase. `ipaddress`
+and `in_cidr` are unsupported — cel-js has neither.
+
+**A condition error does not abandon the rows beside it.** A read
+whose row conditions threw raises only if no row's condition
+evaluated true, matching upstream's filtered iterator. The
+decision is per read, not per node.
 
 ## Error Types (`packages/core/src/errors.ts`)
 
-```typescript
-export class TsfgaError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "TsfgaError";
-  }
-}
+Every error the library raises on the check and write paths
+extends `TsfgaError`. (The Kysely adapter still surfaces the
+driver's own error for a malformed id — a known, scoped gap.)
 
-export class RelationConfigNotFoundError extends TsfgaError {
-  constructor(objectType: string, relation: string) {
-    super(`No relation config found for ${objectType}.${relation}`);
-    this.name = "RelationConfigNotFoundError";
-  }
-}
+| Class | Raised when |
+|---|---|
+| `TsfgaError` | base class; nothing raises it directly |
+| `RelationConfigNotFoundError` | the relation is not defined — on `check`, `checkMany`, `listObjects`, `listSubjects` and `addTuple` |
+| `InvalidSubjectTypeError` | the subject ref is not in `directlyAssignable`, condition aside |
+| `InvalidConditionalTupleError` | the condition dimension of the same gate; discriminated by `cause` |
+| `ImplicitTupleError` | a tuple that says only what the model already says (`doc:1#blocked@doc:1#blocked`); write path only |
+| `InvalidRelationConfigError` | `writeRelationConfig` given a shape OpenFGA rejects; discriminated by `cause` |
+| `ConditionNotFoundError` | a tuple names a condition the store does not define |
+| `ConditionCompileError` | `writeConditionDefinition` given an expression that does not parse |
+| `ConditionEvaluationError` | CEL evaluation fails |
+| `DepthExceededError` | the recursion budget is exhausted |
+| `InvalidStoredDataError` | a JSON column holds a shape the adapter cannot read |
 
-export class InvalidSubjectTypeError extends TsfgaError {
-  constructor(subjectType: string, objectType: string, relation: string, allowed: string[]) {
-    super(
-      `Subject type '${subjectType}' is not allowed for ${objectType}.${relation}. Allowed: ${allowed.join(", ")}`,
-    );
-    this.name = "InvalidSubjectTypeError";
-  }
-}
+**`InvalidSubjectTypeError` does not name the allow-list.** The
+message names the offending subject and the relation, as OpenFGA
+does; the list is on the error as `allowed`, beside `subject`,
+`objectType` and `relation`. `addTuple`'s errors are the ones a
+service is most likely to hand back to whoever attempted the
+write, and the list describes the authorization model.
 
-export class UsersetNotAllowedError extends TsfgaError {
-  constructor(objectType: string, relation: string) {
-    super(`Userset subjects are not allowed for ${objectType}.${relation}`);
-    this.name = "UsersetNotAllowedError";
-  }
-}
+**`InvalidConditionalTupleError.cause`** is one of `condition is
+missing`, `invalid condition for type restriction`, `undefined
+condition`, `parameter type error`, `invalid context parameter`.
+**`InvalidRelationConfigError.cause`** is one of `intersection
+has fewer than two operands`, `undefined condition`, `tupleset
+relation admits a userset`, `tupleset relation admits a
+wildcard`. Upstream raises one error per family and discriminates
+by cause string, so tsfga does too.
 
-export class ConditionNotFoundError extends TsfgaError {
-  constructor(conditionName: string) {
-    super(`Condition definition not found: ${conditionName}`);
-    this.name = "ConditionNotFoundError";
-  }
-}
-
-export class ConditionEvaluationError extends TsfgaError {
-  cause: unknown;
-  constructor(conditionName: string, cause: unknown) {
-    super(`Failed to evaluate condition '${conditionName}': ${cause}`);
-    this.name = "ConditionEvaluationError";
-    this.cause = cause;
-  }
-}
-```
+There is no `UsersetNotAllowedError`. A userset on a relation
+admitting none is an `InvalidSubjectTypeError` naming the
+offending ref.
 
 ## Kysely Adapter (`packages/kysely/src/`)
 
 ### Migration (`packages/kysely/src/migrations/001-initial.ts`)
 
 Creates the `tsfga` schema with 3 tables and 7 indexes on
-`tsfga.tuples`; migration `003-drop-unused-indexes` later removes
-three of them, leaving 4, and `004-drop-metadata-columns` removes
-the unreachable `metadata` column from `tsfga.tuples` and
-`tsfga.relation_configs`. Uses Kysely's DDL schema builder API
-where possible; raw `sql` only for indexes the builder cannot
-express.
+`tsfga.tuples`. Later migrations: `002-add-operators` adds
+`excluded_by` and `intersection`; `003-drop-unused-indexes`
+removes three indexes, leaving 4; `004-drop-metadata-columns`
+removes the unreachable `metadata` column from `tsfga.tuples` and
+`tsfga.relation_configs`; `005-type-restrictions` replaces
+`directly_assignable_types` and `allows_userset_subjects` with a
+single `directly_assignable` (jsonb, NOT NULL) holding structured
+type restrictions. Uses Kysely's DDL schema builder API where
+possible; raw `sql` only for indexes the builder cannot express.
+
+`005` is destructive and deliberately not data-preserving: no
+honest conversion exists, and a guessed one would invent a model
+in the granting direction. Both directions fail closed — `up`
+defaults the new column to `'[]'` and `down` defaults the
+restored one to `'{}'`, each then dropping the default, because
+an empty list admits nothing while a `NULL` used to mean
+*unrestricted*.
+
+`scripts/check-schema-drift.sh` regenerates `schema.ts` against a
+HEAD-migrated database and fails on any difference. It runs in
+the CI job that already has Postgres.
 
 **Every column must be reachable through the library.** A column
 no `@tsfga/core` type carries and no adapter method reads or
@@ -635,10 +639,22 @@ The generation workflow:
 
 ```typescript
 export class KyselyTupleStore implements TupleStore {
-  constructor(private db: Kysely<DB>) {}
+  constructor(db: Kysely<DB>) {
+    // Plugins are stripped: a consumer's CamelCasePlugin renames
+    // every result key regardless of how the query was built, and
+    // `row.subject_relation` reading `undefined` filed every
+    // direct row as a userset. `tsfga.*` is the adapter's own
+    // schema and `schema.ts` names its columns as the database
+    // does, so no consumer plugin has business here.
+    this.db = db.withoutPlugins();
+  }
   // ... implements all TupleStore methods
 }
 ```
+
+A `Transaction<DB>` is a subtype of `Kysely<DB>`, so a store — and
+a whole client — can be scoped to a transaction with no extra API.
+`withoutPlugins()` preserves that.
 
 **UUID mapping:** The DB stores `object_id` and `subject_id` as `uuid`. The
 `TupleStore` interface uses `string`. The adapter handles conversion in both
@@ -657,20 +673,40 @@ export function createTsfga(store: TupleStore, options?: CheckOptions): TsfgaCli
 
 export interface TsfgaClient {
   check(request: CheckRequest): Promise<boolean>;
+  /** A batch in one resolution scope: the config cache and the
+   *  node memo span it, so a shared subtree resolves once. A
+   *  failing check reports its error in its own outcome. */
+  checkMany(requests: readonly CheckRequest[]): Promise<CheckOutcome[]>;
   addTuple(request: AddTupleRequest): Promise<void>;
   removeTuple(request: RemoveTupleRequest): Promise<boolean>;
-  listObjects(objectType: string, relation: string, subjectType: string, subjectId: string, context?: Record<string, unknown>): Promise<string[]>;
-  listSubjects(objectType: string, objectId: string, relation: string): Promise<Array<{ subjectType: string; subjectId: string; subjectRelation?: string }>>;
+  listObjects(request: ListObjectsRequest): Promise<string[]>;
+  /** Direct subjects only, filtered by the relation's
+   *  `directlyAssignable` — condition included. */
+  listSubjects(
+    objectType: string,
+    objectId: string,
+    relation: string,
+  ): Promise<Array<{
+    subjectType: string;
+    subjectId: string;
+    subjectRelation: string | null;
+  }>>;
   writeRelationConfig(config: RelationConfig): Promise<void>;
   deleteRelationConfig(objectType: string, relation: string): Promise<boolean>;
+  /** Compiles the expression; throws ConditionCompileError. */
   writeConditionDefinition(condition: ConditionDefinition): Promise<void>;
   deleteConditionDefinition(name: string): Promise<boolean>;
 }
 ```
 
-**Re-exports:** `packages/core/src/index.ts` re-exports all types, errors,
-the `TupleStore` interface, `check`, `evaluateTupleCondition`, and
-`ContextualTupleStore`. `KyselyTupleStore` is exported from `@tsfga/kysely`.
+**Re-exports:** `packages/core/src/index.ts` re-exports all types
+and errors, the `TupleStore` interface, `check`, `checkMany`,
+`evaluateTupleCondition`, `coerceContext`, `ContextualTupleStore`,
+and the validation helpers a store author needs —
+`admitsSubjectRef`, `admitsSubjectShape`, `directSubjectRef`,
+`subjectShape`, `formatRestriction`, `isSelfDefining`,
+`validateTupleWrite` and `validateRelationConfigWrite`.
+`KyselyTupleStore` is exported from `@tsfga/kysely`.
 
 ## API Stability Policy (pre-v1)
 
@@ -861,40 +897,37 @@ export async function fgaCheck(storeId: string, params: CheckParams): Promise<bo
 ### Conformance Helper (`tests/conformance/helpers/conformance.ts`)
 
 ```typescript
-import { expect } from "bun:test";
+/**
+ * What a check may do: answer, or decline to answer.
+ *
+ * "refused" is an outcome rather than a failure because several
+ * parity shapes are ones where *both* engines refuse — most of
+ * the coercion matrix is "OpenFGA refuses and tsfga answers", and
+ * a check on a relation the model does not define is a refusal
+ * upstream. Collapsing that into a thrown error made those cases
+ * unassertable: a refusal could only fail a test, never satisfy
+ * one.
+ */
+export type CheckOutcome = boolean | "refused";
 
 /**
- * Assert that tsfga and OpenFGA return the same result for a permission check.
- * Runs both checks in parallel for speed.
+ * Assert that tsfga and OpenFGA answer a check the same way, and
+ * that they answer what the test expected. Both run in parallel.
  */
 export async function expectConformance(
   storeId: string,
   authorizationModelId: string,
   tsfgaClient: TsfgaClient,
   params: CheckRequest,
-  expected: boolean,
-): Promise<void> {
-  const [tsfgaResult, openFgaResult] = await Promise.all([
-    tsfgaClient.check(params),
-    fgaCheck(storeId, {
-      objectType: params.objectType,
-      objectId: params.objectId,
-      relation: params.relation,
-      subjectType: params.subjectType,
-      subjectId: params.subjectId,
-    }),
-  ]);
-
-  if (openFgaResult === null) {
-    throw new Error("OpenFGA returned an error");
-  }
-
-  // Both systems must agree
-  expect(tsfgaResult).toBe(openFgaResult);
-  // And match expected value
-  expect(tsfgaResult).toBe(expected);
-}
+  expected: CheckOutcome,
+): Promise<void>;
 ```
+
+A tsfga refusal counts only when it is a `TsfgaError`; anything
+else is a bug, not an outcome. The helper also carries
+`expectListObjectsConformance` and a fixture recorder that derives
+relation configs from the DSL model rather than hand-keeping them,
+so the model and the configs cannot drift apart.
 
 ### Conformance Test Pattern
 
@@ -978,6 +1011,12 @@ bun run db:generate                      # Regenerate Kysely types from DB
 bun run biome:check                      # Lint + format check
 bun run biome:lint                       # Lint only
 bun run biome:format                     # Format fix
+
+# CI gates that are not tests (each also runs in CI)
+bun run check:peer-range                 # Adapter peer range vs. core version
+bun run check:schema-drift               # schema.ts vs. the migrations (PG required)
+node scripts/check-readme-samples.mjs    # README fences vs. tests/docs fixture
+node tests/smoke/smoke-test.mjs          # Built package from a plain runtime
 
 # Versioning
 scripts/bump.sh <package-dir> [patch|minor|major]  # Bump a version

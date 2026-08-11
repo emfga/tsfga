@@ -24,6 +24,38 @@ releases may contain breaking changes).
   Relation configs written under the previous payload must be
   rewritten from the authorization model. Tuples are untouched.
 
+- **BREAKING: a condition parameter of container type names its
+  element type.** `parseConditionParameters` reads `list<string>`
+  and `map<int>` — as the model spells them, and as core 0.6.0's
+  `ConditionParameterType` now requires — and rejects a stored
+  bare `list` or `map` as invalid data. A row written under the
+  previous spelling must be rewritten from the model, which is
+  also the only place that says what the elements are.
+
+- **BREAKING: peer range on `@tsfga/core` is now
+  `>=0.6.0 <0.7.0`.** The floor is raised rather than the ceiling
+  widened: core 0.6.0 changes the `TupleStore` interface itself,
+  so this adapter does not work with earlier cores and earlier
+  adapters do not work with this core.
+
+- **BREAKING: migration `005-type-restrictions`.** Replaces
+  `directly_assignable_types` and `allows_userset_subjects` on
+  `tsfga.relation_configs` with a single `directly_assignable`
+  (jsonb, NOT NULL) holding OpenFGA type restrictions.
+
+  **Destructive, and deliberately not data-preserving.** There is
+  no honest conversion: `allows_userset_subjects = true` does not
+  record which usersets the model intended, and `NULL` does not
+  record which types. Inventing either would write a model nobody
+  authored, in the granting direction. Rewrite relation configs
+  from your authorization model after migrating; **tuples are
+  untouched**. Old and new adapters cannot read each other's
+  columns, so plan a coordinated deploy.
+
+- **BREAKING: `listDirectSubjects` is removed** from the adapter,
+  following its removal from `TupleStore`. Use
+  `findTuplesByRelation`, of which it was already a strict subset.
+
 - **`findCheckTuples` narrows on the condition too.** The query
   carries `directRefs`, `wildcardRefs` and `usersetRefs`, and the
   adapter emits one disjunct per admitted restriction with a
@@ -36,18 +68,14 @@ releases may contain breaking changes).
   part. An adapter reading `[]` as "no filter" answers a query
   that asked for nothing with a full scan.
 
-- **BREAKING: a condition parameter of container type names its
-  element type.** `parseConditionParameters` reads `list<string>`
-  and `map<int>` — as the model spells them, and as core 0.6.0's
-  `ConditionParameterType` now requires — and rejects a stored
-  bare `list` or `map` as invalid data. A row written under the
-  previous spelling must be rewritten from the model, which is
-  also the only place that says what the elements are.
-
 - `parseDirectlyAssignable` validates the structured shape at the
   adapter boundary and normalizes `wildcard` to `true`-or-absent,
   so a stored `{"wildcard": false}` cannot compare unequal to an
   in-memory restriction and silently drop rows at the clamp.
+
+- The userset scan is narrowed to the `(subject_type,
+  subject_relation)` pairs the relation admits, rather than
+  scanning every row with a subject relation.
 
 ### Fixed
 
@@ -86,36 +114,6 @@ releases may contain breaking changes).
   other test in the package shares one pooled connection wrapped
   in a raw `BEGIN` and so could not observe a store escaping its
   transaction.
-
-### Changed
-
-- **BREAKING: peer range on `@tsfga/core` is now
-  `>=0.6.0 <0.7.0`.** The floor is raised rather than the ceiling
-  widened: core 0.6.0 changes the `TupleStore` interface itself,
-  so this adapter does not work with earlier cores and earlier
-  adapters do not work with this core.
-
-- **BREAKING: migration `005-type-restrictions`.** Replaces
-  `directly_assignable_types` and `allows_userset_subjects` on
-  `tsfga.relation_configs` with a single `directly_assignable`
-  (jsonb, NOT NULL) holding OpenFGA type restrictions.
-
-  **Destructive, and deliberately not data-preserving.** There is
-  no honest conversion: `allows_userset_subjects = true` does not
-  record which usersets the model intended, and `NULL` does not
-  record which types. Inventing either would write a model nobody
-  authored, in the granting direction. Rewrite relation configs
-  from your authorization model after migrating; **tuples are
-  untouched**. Old and new adapters cannot read each other's
-  columns, so plan a coordinated deploy.
-
-- **BREAKING: `listDirectSubjects` is removed** from the adapter,
-  following its removal from `TupleStore`. Use
-  `findTuplesByRelation`, of which it was already a strict subset.
-
-- The userset scan is narrowed to the `(subject_type,
-  subject_relation)` pairs the relation admits, rather than
-  scanning every row with a subject relation.
 
 ### Documented
 

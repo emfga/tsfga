@@ -7,88 +7,20 @@ releases may contain breaking changes).
 
 ## 0.6.0 — 2026-08
 
-### Fixed
+### Added
 
-- **A store row whose `subjectRelation` is absent reads as null.**
-  `clampToQuery` tested `=== null`, so an `undefined` failed the
-  direct and wildcard slots, passed the userset test on `!== null`
-  and was then dropped by the falsy guard in `checkBase`: the same
-  store and the same row granted with `null` and denied with
-  `undefined`, silently either way. Not reachable through shipped
-  code — the field is required, `ContextualTupleStore` normalizes
-  it and the Kysely adapter maps a real `NULL` — but `TupleStore`
-  is the documented extension point, and a hand-written or
-  JavaScript adapter has nothing stopping it.
+- **`admitsSubjectRef` and `directSubjectRef` are exported.** A
+  consumer narrowing their own query can apply the gate tsfga
+  applies instead of reimplementing it and drifting out of step.
 
-- **`int` and `uint` context values reach CEL as integers.** They
-  were passed to cel-js as JS numbers, which CEL reads as
-  `double`. Every arithmetic binary operator — `+ - * / %` —
-  raised `no such overload` where OpenFGA answers, and every
-  comparison past 2^53 answered the *opposite boolean with no
-  error*. Under a `but not`, a wrong `false` on the subtract side
-  does not exclude, so it grants. This was the only place tsfga
-  was confidently wrong rather than loud.
-
-  The value usually arrives as a string, so it is now parsed
-  directly to `bigint`: routing it through `Number()` first loses
-  the precision before a `BigInt` could preserve it. The integer
-  path takes a strict decimal grammar — `BigInt`'s own string
-  grammar accepts `0x10`, `" 42 "` and `""` as readily as
-  `Number`'s did. Magnitudes outside int64 saturate to its
-  bounds, because upstream converts through `bigFloat.Int64()`
-  and answers on the clamped value.
-
-  Overflow parity comes with it: past the int64 ceiling both
-  engines now raise an integer overflow.
-
-  Not a regression from 0.5.0's coercion work. CEL `==` is total
-  across types, so the precision comparison already answered a
-  silent `false` before it; that commit closed a much larger
-  class of silent-wrongs and only the ordering and arithmetic
-  operators moved from an error to a wrong answer.
-
-  Two `uint` cells remain divergent and are documented in the
-  README: cel-js has no `uint`, so `type(n) == uint` is `false`
-  and a bare `u`-suffixed literal finds no overload.
-
-- **Context values are read by OpenFGA's grammar, everywhere it
-  differs from JavaScript's.** An exhaustive sweep of the coercion
-  surface against v1.18.2 found 39 diverging cells of 70 — 16
-  fail-open, 19 fail-closed, 4 answering a different boolean. All
-  70 now agree.
-
-  The largest cause was `asNumber` accepting the whole `Number()`
-  grammar. Upstream parses every numeric type with
-  `big.ParseFloat(value, 10, 64, 0)`, which takes none of the
-  prefixed literal forms (`0x10`, `0o10`, `0b10`, `1_000`) and no
-  surrounding whitespace, but does take the exponent and
-  zero-fraction spellings (`1e3`, `4.0`, `5.`, `.5`, and `1p3`
-  with a binary exponent) that a bare-digit grammar refused. It
-  reads `Inf`, `+Inf`, `-Inf` and `inf` — and not `Infinity` or
-  `NaN`. A `double` additionally refuses any decimal that is not
-  exactly a `float64`, so `"0.1"` as a string is an error where
-  `0.1` as a number is not.
-
-  Also: a `uint` saturates at **int64**'s ceiling rather than
-  uint64's, matching upstream's single `Int64()` conversion; a
-  bare `"0"` is a duration; RFC 3339 designators must be
-  uppercase, where the lowercase forms used to be read and
-  answered on; and fractional seconds past nine digits are read
-  rather than refused — cel-js's `timestamp()` declines them by
-  string length, so the `Date` is built directly.
-
-  Under an exclusion each of these inverts into a grant, which is
-  why they are one item: a value upstream refuses to read at all
-  coerced cleanly here, the exclusion did not fire, and access
-  followed.
-
-  `coerceValue`'s fallback branch returned the parameter type's
-  own **name** in place of the caller's value. It refuses now.
-
-  `ipaddress` and `in_cidr` remain unsupported. cel-js has
-  neither, and adding them means moving the compile path onto a
-  configured `Environment` with a registered host type — a change
-  of architecture rather than of grammar.
+  Both take a `RelationConfig`, never `null`: a missing config is
+  the caller's to handle, because in a consumer's `WHERE` clause
+  it usually means a misspelled relation name, and the permissive
+  answer these once gave for `null` admitted everything. One
+  hazard is documented rather than designed away: the predicate
+  filters tuple *shapes* only, knowing nothing of `excludedBy` or
+  `intersection`, so a row it admits is one `check` will consider,
+  not one `check` will allow.
 
 ### Changed
 
@@ -265,29 +197,6 @@ releases may contain breaking changes).
   `isSelfDefining` and `validateRelationConfigWrite` are exported
   for store authors applying the same gates.
 
-### Documented
-
-- **Sub-millisecond timestamps are a known divergence.** Go's
-  `time.Time` is nanosecond-resolution and cel-js maps a CEL
-  timestamp onto a JS `Date`, which is millisecond, so finer
-  precision is discarded from the context value and from the
-  `timestamp('…')` literal alike. Both engines answer and the
-  booleans differ in four cells, two of them granting: under an
-  equality predicate a truncated value compares equal here and
-  unequal upstream.
-
-  Not reachable through `@marcbachmann/cel-js` 8.0.0. A
-  nanosecond carrier can be registered as a host type, but the
-  built-in `timestamp(string)` overload cannot be displaced and
-  the standard library cannot be declined, so the literal side of
-  every comparison truncates regardless. Recorded in the README
-  beside the other known divergences and pinned two-sided in the
-  conformance suite, so a cel-js release that changes the
-  resolution is a failing test rather than a silent change of
-  answer.
-
-### Changed
-
 - **`InvalidSubjectTypeError` no longer names what the relation
   admits.** Its message rendered the relation's whole type
   restriction list — every admitted type, every userset relation
@@ -309,10 +218,171 @@ releases may contain breaking changes).
   so the message changed when a config was rewritten with the same
   restrictions in a different order.
 
-  **Breaking** if you matched on the message text. Nothing in this
-  repo did; every assertion on this class is an `instanceof`.
+  **BREAKING** twice over: the fourth constructor argument is a
+  `TypeRestriction[]` rather than a `string[]`, and the message
+  text changed. Nothing in this repo matched on the text; every
+  assertion on this class is an `instanceof`.
+
+- **BREAKING: `RelationConfig.directlyAssignableTypes` and
+  `.allowsUsersetSubjects` are replaced by one required
+  `directlyAssignable: TypeRestriction[]`**, matching OpenFGA's
+  `directly_related_user_types` one for one. Each entry mirrors
+  a `RelationReference` field for field:
+
+  ```ts
+  { type: "user" }                                  // user
+  { type: "user", wildcard: true }                  // user:*
+  { type: "team", relation: "member" }              // team#member
+  { type: "user", condition: "weekday_only" }       // user with weekday_only
+  ```
+
+  Structured rather than a `"user with weekday_only"` string
+  because every consumer needs a different projection: the read
+  gate is condition-blind, the clamp is exact, and the Kysely
+  adapter wants `type` and `relation` as separate columns. A
+  joined string would be re-parsed at each, and
+  `CachingTupleStore` already refuses one on that ground.
+
+  This also retires an overloaded `null`, which meant both
+  *unrestricted* and *purely computed*. `[]` now says "admits no
+  direct assignment" precisely, so a purely computed relation
+  issues no tuple read at all — which upstream does and tsfga
+  previously could not express.
+
+  Migration `005` is unchanged as DDL — the column was and stays
+  `jsonb NOT NULL` — but the payload shape changes, so relation
+  configs must be rewritten from your authorization model. There
+  is no automatic conversion, and a guessed one would err in the
+  granting direction. Tuples are untouched.
+
+- **BREAKING: `CheckTuplesQuery`'s three `include*` booleans are
+  replaced by `directRefs`, `wildcardRefs` and `usersetRefs`**,
+  each `readonly TypeRestriction[] | null` — the restrictions the
+  relation admits for that part, so a store can narrow its query
+  by type, userset relation and condition rather than only by
+  which parts are wanted. For all three, `null` declines to narrow
+  and `[]` excludes the part — they are opposites, and a wrapper
+  that forwards `null` where it meant "already answered" opens the
+  gate rather than closing it.
+
+  Still a hint, not a trust boundary: `clampToQuery` re-clamps
+  every reply against the query it sent, so a store that
+  over-returns loses rows rather than smuggling them past the
+  model.
+
+- **BREAKING: `listSubjects` is now condition-exact.** A row
+  carrying a condition the relation does not admit is no longer
+  reported, exactly as a row of an unadmitted type is not.
+
+- **`InvalidSubjectTypeError` is condition-blind and raised
+  first**; the condition dimension raises the new
+  `InvalidConditionalTupleError`, which carries a `cause`
+  discriminator. OpenFGA raises one error for all condition
+  causes and discriminates by cause string, so tsfga does the
+  same. Folding the two together would have produced
+  `Subject type 'user with weekday_only' is not allowed`, naming
+  a type nobody wrote.
+
+- `TypeRestriction`, `SubjectShape`, `subjectShape`,
+  `admitsSubjectShape` and `formatRestriction` are exported.
+  `admitsSubjectShape` is the read gate; `admitsSubjectRef`
+  remains the exact match used by the clamp and the write path.
+  A consumer narrowing a `WHERE` clause wants the first to decide
+  what to fetch and the second to filter what it holds.
+
+- **BREAKING: `TupleStore.listDirectSubjects` is removed.** It was
+  already a strict subset of `findTuplesByRelation` — the same
+  columns off the same predicate, minus the condition fields.
+  `listSubjects` reads through `findTuplesByRelation` and
+  projects.
+
+- **BREAKING: `UsersetNotAllowedError` is removed.** A userset on
+  a relation that admits none is now an `InvalidSubjectTypeError`
+  naming the offending ref, which is the single error upstream
+  raises for every type-restriction violation.
 
 ### Fixed
+
+- **A store row whose `subjectRelation` is absent reads as null.**
+  `clampToQuery` tested `=== null`, so an `undefined` failed the
+  direct and wildcard slots, passed the userset test on `!== null`
+  and was then dropped by the falsy guard in `checkBase`: the same
+  store and the same row granted with `null` and denied with
+  `undefined`, silently either way. Not reachable through shipped
+  code — the field is required, `ContextualTupleStore` normalizes
+  it and the Kysely adapter maps a real `NULL` — but `TupleStore`
+  is the documented extension point, and a hand-written or
+  JavaScript adapter has nothing stopping it.
+
+- **`int` and `uint` context values reach CEL as integers.** They
+  were passed to cel-js as JS numbers, which CEL reads as
+  `double`. Every arithmetic binary operator — `+ - * / %` —
+  raised `no such overload` where OpenFGA answers, and every
+  comparison past 2^53 answered the *opposite boolean with no
+  error*. Under a `but not`, a wrong `false` on the subtract side
+  does not exclude, so it grants. This was the only place tsfga
+  was confidently wrong rather than loud.
+
+  The value usually arrives as a string, so it is now parsed
+  directly to `bigint`: routing it through `Number()` first loses
+  the precision before a `BigInt` could preserve it. The integer
+  path takes a strict decimal grammar — `BigInt`'s own string
+  grammar accepts `0x10`, `" 42 "` and `""` as readily as
+  `Number`'s did. Magnitudes outside int64 saturate to its
+  bounds, because upstream converts through `bigFloat.Int64()`
+  and answers on the clamped value.
+
+  Overflow parity comes with it: past the int64 ceiling both
+  engines now raise an integer overflow.
+
+  Not a regression from 0.5.0's coercion work. CEL `==` is total
+  across types, so the precision comparison already answered a
+  silent `false` before it; that commit closed a much larger
+  class of silent-wrongs and only the ordering and arithmetic
+  operators moved from an error to a wrong answer.
+
+  Two `uint` cells remain divergent and are documented in the
+  README: cel-js has no `uint`, so `type(n) == uint` is `false`
+  and a bare `u`-suffixed literal finds no overload.
+
+- **Context values are read by OpenFGA's grammar, everywhere it
+  differs from JavaScript's.** An exhaustive sweep of the coercion
+  surface against v1.18.2 found 39 diverging cells of 70 — 16
+  fail-open, 19 fail-closed, 4 answering a different boolean. All
+  70 now agree.
+
+  The largest cause was `asNumber` accepting the whole `Number()`
+  grammar. Upstream parses every numeric type with
+  `big.ParseFloat(value, 10, 64, 0)`, which takes none of the
+  prefixed literal forms (`0x10`, `0o10`, `0b10`, `1_000`) and no
+  surrounding whitespace, but does take the exponent and
+  zero-fraction spellings (`1e3`, `4.0`, `5.`, `.5`, and `1p3`
+  with a binary exponent) that a bare-digit grammar refused. It
+  reads `Inf`, `+Inf`, `-Inf` and `inf` — and not `Infinity` or
+  `NaN`. A `double` additionally refuses any decimal that is not
+  exactly a `float64`, so `"0.1"` as a string is an error where
+  `0.1` as a number is not.
+
+  Also: a `uint` saturates at **int64**'s ceiling rather than
+  uint64's, matching upstream's single `Int64()` conversion; a
+  bare `"0"` is a duration; RFC 3339 designators must be
+  uppercase, where the lowercase forms used to be read and
+  answered on; and fractional seconds past nine digits are read
+  rather than refused — cel-js's `timestamp()` declines them by
+  string length, so the `Date` is built directly.
+
+  Under an exclusion each of these inverts into a grant, which is
+  why they are one item: a value upstream refuses to read at all
+  coerced cleanly here, the exclusion did not fire, and access
+  followed.
+
+  `coerceValue`'s fallback branch returned the parameter type's
+  own **name** in place of the caller's value. It refuses now.
+
+  `ipaddress` and `in_cidr` remain unsupported. cel-js has
+  neither, and adding them means moving the compile path onto a
+  configured `Environment` with a registered host type — a change
+  of architecture rather than of grammar.
 
 - **`addTuple` validates the condition, all five ways OpenFGA
   does.** Type restrictions are enforced twice upstream — on write
@@ -420,60 +490,6 @@ releases may contain breaking changes).
   commit 6 of its 11 cases fail, all of them in the granting
   direction; the other 5 hold before and after.
 
-### Changed
-
-- **BREAKING: `RelationConfig.directlyAssignable` is now
-  `TypeRestriction[]`, not `string[]`.** Each entry mirrors
-  OpenFGA's `RelationReference` field for field:
-
-  ```ts
-  { type: "user" }                                  // user
-  { type: "user", wildcard: true }                  // user:*
-  { type: "team", relation: "member" }              // team#member
-  { type: "user", condition: "weekday_only" }       // user with weekday_only
-  ```
-
-  Structured rather than a `"user with weekday_only"` string
-  because every consumer needs a different projection: the read
-  gate is condition-blind, the clamp is exact, and the Kysely
-  adapter wants `type` and `relation` as separate columns. A
-  joined string would be re-parsed at each, and
-  `CachingTupleStore` already refuses one on that ground.
-
-  Migration `005` is unchanged as DDL — the column was and stays
-  `jsonb NOT NULL` — but the payload shape changes, so relation
-  configs must be rewritten. Tuples are untouched.
-
-- **BREAKING: `CheckTuplesQuery`'s `includeDirect` and
-  `includeWildcard` booleans are now `directRefs` and
-  `wildcardRefs`**, joining `usersetRefs` as
-  `readonly TypeRestriction[] | null`. For all three, `null`
-  declines to narrow and `[]` excludes the part — they are
-  opposites, and a wrapper that forwards `null` where it meant
-  "already answered" opens the gate rather than closing it.
-
-- **BREAKING: `listSubjects` is now condition-exact.** A row
-  carrying a condition the relation does not admit is no longer
-  reported, exactly as a row of an unadmitted type is not.
-
-- **`InvalidSubjectTypeError` is condition-blind and raised
-  first**; the condition dimension raises the new
-  `InvalidConditionalTupleError`, which carries a `cause`
-  discriminator. OpenFGA raises one error for all condition
-  causes and discriminates by cause string, so tsfga does the
-  same. Folding the two together would have produced
-  `Subject type 'user with weekday_only' is not allowed`, naming
-  a type nobody wrote.
-
-- `TypeRestriction`, `SubjectShape`, `subjectShape`,
-  `admitsSubjectShape` and `formatRestriction` are exported.
-  `admitsSubjectShape` is the read gate; `admitsSubjectRef`
-  remains the exact match used by the clamp and the write path.
-  A consumer narrowing a `WHERE` clause wants the first to decide
-  what to fetch and the second to filter what it holds.
-
-### Fixed
-
 - **Userset type restrictions are now recorded and enforced.**
   `RelationConfig` kept a type array plus a bare boolean —
   *whether* userset subjects were allowed, never *which*. A
@@ -508,57 +524,26 @@ releases may contain breaking changes).
   candidate through the gated path, so over-returning candidates
   costs work and cannot grant.
 
-### Changed
+### Documented
 
-- **BREAKING: `RelationConfig.directlyAssignableTypes` and
-  `.allowsUsersetSubjects` are replaced by one required
-  `directlyAssignable: string[]`**, matching OpenFGA's
-  `directly_related_user_types` one for one: `"user"`, `"user:*"`,
-  `"team#member"`.
+- **Sub-millisecond timestamps are a known divergence.** Go's
+  `time.Time` is nanosecond-resolution and cel-js maps a CEL
+  timestamp onto a JS `Date`, which is millisecond, so finer
+  precision is discarded from the context value and from the
+  `timestamp('…')` literal alike. Both engines answer and the
+  booleans differ in four cells, two of them granting: under an
+  equality predicate a truncated value compares equal here and
+  unequal upstream.
 
-  This also retires an overloaded `null`, which meant both
-  *unrestricted* and *purely computed*. `[]` now says "admits no
-  direct assignment" precisely, so a purely computed relation
-  issues no tuple read at all — which upstream does and tsfga
-  previously could not express.
-
-  Migrating: enumerate what each relation admits, from your
-  authorization model. There is no automatic conversion, and a
-  guessed one would err in the granting direction.
-
-- **BREAKING: `CheckTuplesQuery.includeUsersets` is replaced by
-  `usersetRefs: readonly string[] | null`** — the `type#relation`
-  refs the relation admits, so a store can narrow its scan.
-  `null` declines to narrow, `[]` excludes the userset part.
-  Still a hint: `clampToQuery` re-clamps the reply against the
-  same list, so a store that over-returns loses rows rather than
-  smuggling them past the model.
-
-- **BREAKING: `TupleStore.listDirectSubjects` is removed.** It was
-  already a strict subset of `findTuplesByRelation` — the same
-  columns off the same predicate, minus the condition fields.
-  `listSubjects` reads through `findTuplesByRelation` and
-  projects.
-
-- **BREAKING: `UsersetNotAllowedError` is removed.** A userset on
-  a relation that admits none is now an `InvalidSubjectTypeError`
-  naming the offending ref, which is the single error upstream
-  raises for every type-restriction violation.
-
-### Added
-
-- **`admitsSubjectRef` and `directSubjectRef` are exported.** A
-  consumer narrowing their own query can apply the gate tsfga
-  applies instead of reimplementing it and drifting out of step.
-
-  `null` config stays permissive, because that is what `check`
-  does and agreement is the point. Two hazards are documented
-  rather than designed away: a `null` config in a consumer's
-  `WHERE` clause usually means a misspelled relation name, where
-  it silently admits everything; and the predicate filters tuple
-  *shapes* only, knowing nothing of `excludedBy` or
-  `intersection`, so a row it admits is one `check` will consider,
-  not one `check` will allow.
+  Not reachable through `@marcbachmann/cel-js` 8.0.0. A
+  nanosecond carrier can be registered as a host type, but the
+  built-in `timestamp(string)` overload cannot be displaced and
+  the standard library cannot be declined, so the literal side of
+  every comparison truncates regardless. Recorded in the README
+  beside the other known divergences and pinned two-sided in the
+  conformance suite, so a cel-js release that changes the
+  resolution is a failing test rather than a silent change of
+  answer.
 
 ## 0.5.0 — 2026-08
 
