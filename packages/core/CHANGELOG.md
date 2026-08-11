@@ -96,6 +96,26 @@ releases may contain breaking changes).
   spelling it that way as invalid data. Rewrite it as the
   model spells it.
 
+- **A condition that cannot be evaluated no longer abandons its
+  siblings.** A tupleset row or userset row whose condition threw
+  ended the whole branch with that error, whatever the rows beside
+  it said. OpenFGA reads such a set through one filtered iterator,
+  which stashes the first error and raises it at the end **only if
+  no row's condition evaluated true**.
+
+  So a granting sibling rescues the branch, and so does a sibling
+  whose condition held but whose subtree denied — that one is the
+  case tsfga got wrong most visibly, answering an error where
+  upstream answers `false`. A sibling whose condition evaluated
+  *false* does **not** rescue it: the predicate is "some condition
+  was satisfied", not "some row was admitted", and the looser
+  reading would answer `false` where upstream refuses to answer.
+
+  The decision is per read, not per node. A userset row whose
+  condition held does not rescue a broken *direct* row on the same
+  relation, and two tuple-to-userset entries on one relation keep
+  two decisions — measured both ways against v1.18.2.
+
 ### Documented
 
 - **Sub-millisecond timestamps are a known divergence.** Go's

@@ -1055,6 +1055,15 @@ async function checkBase(
 
   // Step 2: Userset expansion handlers. This moves to another
   // object, so it is a dispatch and costs one depth.
+  //
+  // The userset rows are one read upstream, so they share one
+  // swallow decision — see `raiseUnlessOneHeld`. The scope is the
+  // rows of this read and no wider: measured on v1.18.2, a broken
+  // *direct* row beside a userset row whose condition held is still
+  // a refusal, because the direct row is read separately and
+  // carries its own decision.
+  const usersetStash: ErrorStash = { error: null };
+  let usersetHeld = false;
   for (const userset of usersetTuples) {
     if (!userset.subjectRelation) continue;
     const relation = userset.subjectRelation;
@@ -1062,9 +1071,19 @@ async function checkBase(
       // The condition can cost a condition-definition fetch, so it
       // is behind the same gate as a node read.
       if (branch.abandoned) throw new BranchAbandoned();
-      if (!(await evaluateTupleCondition(store, userset, request.context))) {
+      let held: boolean;
+      try {
+        held = await evaluateTupleCondition(store, userset, request.context);
+      } catch (error) {
+        // Held, not raised: whether it becomes the answer depends
+        // on what the sibling rows do, which is not known yet.
+        stashError(usersetStash, error);
         return DENIED;
       }
+      if (!held) {
+        return DENIED;
+      }
+      usersetHeld = true;
       return checkNode(
         scope,
         {
@@ -1155,7 +1174,12 @@ async function checkBase(
     });
   }
 
-  return resolveUnion(handlers, maxBreadth, frame.branch);
+  // A rejection from any other handler still wins: `resolveUnion`
+  // raises it and the stash is never consulted, which is what makes
+  // the direct row's own error survive a userset row that held.
+  const result = await resolveUnion(handlers, maxBreadth, frame.branch);
+  raiseUnlessOneHeld(usersetStash, result.allowed || usersetHeld);
+  return result;
 }
 
 /**
@@ -1292,12 +1316,56 @@ async function resolveTupleset(
   // first rather than the first row in order — the same
   // determinism the union handlers keep.
   const satisfied: Tuple[] = [];
+  const stash: ErrorStash = { error: null };
   for (const tuple of admitted) {
-    if (await evaluateTupleCondition(store, tuple, request.context)) {
-      satisfied.push(tuple);
+    try {
+      if (await evaluateTupleCondition(store, tuple, request.context)) {
+        satisfied.push(tuple);
+      }
+    } catch (error) {
+      stashError(stash, error);
     }
   }
+  raiseUnlessOneHeld(stash, satisfied.length > 0);
   return satisfied;
+}
+
+/**
+ * The first condition-evaluation error a set of sibling rows
+ * produced, held until the set is known to have produced nothing.
+ */
+interface ErrorStash {
+  error: { readonly cause: unknown } | null;
+}
+
+/** Keep the first error only, so the raised one is deterministic. */
+function stashError(stash: ErrorStash, error: unknown): void {
+  if (!stash.error) stash.error = { cause: error };
+}
+
+/**
+ * Raise a stashed condition error unless some sibling row's
+ * condition evaluated **true**.
+ *
+ * OpenFGA reads a set of sibling rows through a
+ * `ConditionsFilteredTupleKeyIterator`, which stashes the first
+ * evaluation error and returns it at the end of the iterator only
+ * if `onceValid` was never set — and `onceValid` is set on the path
+ * where the filter returned `(true, nil)`, i.e. where a row's
+ * condition **held**.
+ *
+ * So the predicate is "some condition was satisfied", not "some row
+ * was admitted". The looser reading answers `false` for a broken
+ * row beside a condition-*false* row, where upstream refuses to
+ * answer at all; measured on v1.18.2, both on a tupleset relation
+ * and on a userset scan.
+ *
+ * Ref: https://github.com/openfga/openfga/blob/560d5d3dd46b5adda9ecfb29efeb4f4f70c96327/pkg/storage/tuple_iterators.go
+ */
+function raiseUnlessOneHeld(stash: ErrorStash, oneHeld: boolean): void {
+  if (stash.error && !oneHeld) {
+    throw stash.error.cause;
+  }
 }
 
 /**

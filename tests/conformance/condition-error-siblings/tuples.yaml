@@ -26,3 +26,231 @@
   object: document:2
   condition:
     name: valid_ip
+
+# === The sibling matrix ===
+#
+# Three row flavours, all on the same condition:
+#   broken  — no stored context, so a context-free check cannot
+#             evaluate it at all
+#   cfalse  — stored context that evaluates FALSE
+#   good    — stored context that evaluates TRUE
+#
+# The subtree behind a `good` row is what separates "grants" from
+# "valid but denies": anne views fga and fgb, and is a member of
+# tga and tgb, but neither fdeny nor tdeny reaches her.
+
+- user: user:anne
+  relation: viewer
+  object: folder:fga
+- user: user:anne
+  relation: viewer
+  object: folder:fgb
+- user: user:bob
+  relation: viewer
+  object: folder:fdeny
+
+- user: user:anne
+  relation: member
+  object: team:tga
+- user: user:anne
+  relation: member
+  object: team:tgb
+- user: user:bob
+  relation: member
+  object: team:tdeny
+
+# --- tupleset rows: document.parent, read by ttu_viewer ---
+
+# 1: broken only
+- user: folder:fga
+  relation: parent
+  object: document:t1
+  condition:
+    name: valid_ip
+
+# 2: broken + good(grants)
+- user: folder:fga
+  relation: parent
+  object: document:t2
+  condition:
+    name: valid_ip
+- user: folder:fgb
+  relation: parent
+  object: document:t2
+  condition:
+    name: valid_ip
+    context:
+      user_ip: 192.168.0.1
+
+# 2r: good(grants) + broken
+- user: folder:fgb
+  relation: parent
+  object: document:t2r
+  condition:
+    name: valid_ip
+    context:
+      user_ip: 192.168.0.1
+- user: folder:fga
+  relation: parent
+  object: document:t2r
+  condition:
+    name: valid_ip
+
+# 3: broken + condition-FALSE sibling
+- user: folder:fga
+  relation: parent
+  object: document:t3
+  condition:
+    name: valid_ip
+- user: folder:fgb
+  relation: parent
+  object: document:t3
+  condition:
+    name: valid_ip
+    context:
+      user_ip: 10.0.0.1
+
+# 3r: condition-FALSE + broken
+- user: folder:fgb
+  relation: parent
+  object: document:t3r
+  condition:
+    name: valid_ip
+    context:
+      user_ip: 10.0.0.1
+- user: folder:fga
+  relation: parent
+  object: document:t3r
+  condition:
+    name: valid_ip
+
+# 4: broken + valid-but-denies
+- user: folder:fga
+  relation: parent
+  object: document:t4
+  condition:
+    name: valid_ip
+- user: folder:fdeny
+  relation: parent
+  object: document:t4
+  condition:
+    name: valid_ip
+    context:
+      user_ip: 192.168.0.1
+
+# 4r: valid-but-denies + broken
+- user: folder:fdeny
+  relation: parent
+  object: document:t4r
+  condition:
+    name: valid_ip
+    context:
+      user_ip: 192.168.0.1
+- user: folder:fga
+  relation: parent
+  object: document:t4r
+  condition:
+    name: valid_ip
+
+# 5: broken + cfalse + valid-but-denies
+- user: folder:fga
+  relation: parent
+  object: document:t5
+  condition:
+    name: valid_ip
+- user: folder:fgb
+  relation: parent
+  object: document:t5
+  condition:
+    name: valid_ip
+    context:
+      user_ip: 10.0.0.1
+- user: folder:fdeny
+  relation: parent
+  object: document:t5
+  condition:
+    name: valid_ip
+    context:
+      user_ip: 192.168.0.1
+
+# --- userset rows: document.viewer ---
+
+# u1: broken only
+- user: team:tga#member
+  relation: viewer
+  object: document:u1
+  condition:
+    name: valid_ip
+
+# u2: broken + good(grants)
+- user: team:tga#member
+  relation: viewer
+  object: document:u2
+  condition:
+    name: valid_ip
+- user: team:tgb#member
+  relation: viewer
+  object: document:u2
+  condition:
+    name: valid_ip
+    context:
+      user_ip: 192.168.0.1
+
+# u3: broken + condition-FALSE sibling
+- user: team:tga#member
+  relation: viewer
+  object: document:u3
+  condition:
+    name: valid_ip
+- user: team:tgb#member
+  relation: viewer
+  object: document:u3
+  condition:
+    name: valid_ip
+    context:
+      user_ip: 10.0.0.1
+
+# u4: broken + valid-but-denies
+- user: team:tga#member
+  relation: viewer
+  object: document:u4
+  condition:
+    name: valid_ip
+- user: team:tdeny#member
+  relation: viewer
+  object: document:u4
+  condition:
+    name: valid_ip
+    context:
+      user_ip: 192.168.0.1
+
+# u5: broken userset + granting direct row
+- user: team:tga#member
+  relation: viewer
+  object: document:u5
+  condition:
+    name: valid_ip
+- user: user:anne
+  relation: viewer
+  object: document:u5
+  condition:
+    name: valid_ip
+    context:
+      user_ip: 192.168.0.1
+
+# u6: broken DIRECT row + a userset row that holds but denies.
+# Not one of the five shapes the review measured: it asks whether
+# the direct row and the userset rows share one swallow decision or
+# keep two, which decides how the flag is scoped.
+- user: user:anne
+  relation: viewer
+  object: document:u6
+  condition:
+    name: valid_ip
+- user: team:tdeny#member
+  relation: viewer
+  object: document:u6
+  condition:
+    name: valid_ip
+    context:
+      user_ip: 192.168.0.1

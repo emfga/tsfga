@@ -129,6 +129,14 @@ node plus `maxDepth - 1` dispatches.
   OpenFGA's check behavior. A silently-unmet condition would fail
   open through an exclusion branch.
 
+  That error is held rather than raised while its **sibling rows**
+  are still being read, and dropped if any of them had a condition
+  that evaluated `true` — matching OpenFGA's filtered tuple
+  iterator. A sibling whose condition evaluated `false` does not
+  drop it; a sibling whose condition held but whose subtree denied
+  does. Each read keeps its own decision, so a userset row that
+  held does not rescue a broken direct row on the same relation.
+
   Values are coerced by a port of OpenFGA's converter table, not
   by a `typeof` check, which diverges on six cases. The numeric
   types accept numeric **strings** — JSON has no integer type, so
