@@ -17,7 +17,7 @@
     "infra:up": "docker compose up -d --wait",
     "build": "turbo run build",
     "tsc": "turbo run tsc tsc:harness",
-    "tsc:harness": "tsc -p tsconfig.harness.json && deno check --no-lock tests/deno/bun-test-shim.ts",
+    "tsc:harness": "tsc -p tsconfig.harness.json && deno check --no-lock tests/deno/bun-test-shim.ts && node scripts/check-readme-samples.mjs",
     "turbo:test": "turbo run test",
     "turbo:test:conformance": "turbo run test --filter=@tsfga/conformance",
     "turbo:test:core": "turbo run test --filter=@tsfga/core",

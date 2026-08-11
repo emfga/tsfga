@@ -18,6 +18,10 @@ import { createTsfga, type TupleStore } from "@tsfga/core";
 
 // Use any TupleStore implementation (e.g. @tsfga/kysely)
 const store: TupleStore = /* your store */;
+```
+
+<!-- sample: core-quick-start -->
+```typescript
 const fga = createTsfga(store);
 
 // Write a relation config
@@ -30,6 +34,14 @@ await fga.writeRelationConfig({
   // for a userset, and `condition` on any of them. `[]` means the
   // relation admits no direct assignment at all.
   directlyAssignable: [{ type: "user" }],
+  // The rewrite fields. A relation that is only directly
+  // assignable names none of them, but all are required, so a
+  // config cannot silently omit one it meant to set.
+  impliedBy: null,
+  computedUserset: null,
+  tupleToUserset: null,
+  excludedBy: null,
+  intersection: null,
 });
 
 // Add a tuple
@@ -49,7 +61,6 @@ const allowed = await fga.check({
   subjectType: "user",
   subjectId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
 });
-// → true
 ```
 
 ## API
@@ -410,9 +421,16 @@ applies rather than reimplementing it and drifting out of step.
 
 ```typescript
 import { admitsSubjectRef, directSubjectRef } from "@tsfga/core";
+```
 
+<!-- sample: gate-predicate -->
+```typescript
 const config = await store.findRelationConfig("document", "viewer");
-admitsSubjectRef(config, directSubjectRef("team", "eng", "member"));
+// The fourth argument is the condition name. Passing null asks
+// whether the relation admits `team#member` *unconditioned* --
+// a relation admitting only `team#member with in_hours` will
+// say no, which is the answer `check` gives too.
+admitsSubjectRef(config, directSubjectRef("team", "eng", "member", null));
 ```
 
 Two things to know before relying on it:

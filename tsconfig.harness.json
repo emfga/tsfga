@@ -14,7 +14,15 @@
     // workspace.
     "moduleResolution": "nodenext",
     "module": "nodenext",
-    "allowImportingTsExtensions": false
+    "allowImportingTsExtensions": false,
+    // The doc samples must read the way a consumer types them, so
+    // they import by package name. tests/docs is not a workspace
+    // and has no node_modules of its own; map the names onto the
+    // built entry points a consumer would actually resolve.
+    "paths": {
+      "@tsfga/core": ["./packages/core/dist/index.d.ts"],
+      "@tsfga/kysely": ["./packages/kysely/dist/index.d.ts"]
+    }
   },
   "include": ["tests/node/**/*.mjs", "tests/smoke/**/*.mjs", "tests/docs/**/*.ts"]
 }
