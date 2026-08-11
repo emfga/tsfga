@@ -40,6 +40,8 @@
     "LICENSE"
   ],
   "scripts": {
+    "bench:breadth": "bun run bench/breadth-equivalence.ts",
+    "bench:batch": "bun run bench/batch-equivalence.ts",
     "build": "tsup",
     "test": "bun test",
     "test:node": "node --import tsx --import ../../tests/node/register.mjs --test 'tests/*.test.ts'",

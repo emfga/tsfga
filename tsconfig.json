@@ -3,6 +3,7 @@
   "include": [
     "packages/core/src/**/*.ts",
     "packages/core/tests/**/*.ts",
+    "packages/core/bench/**/*.ts",
     "packages/kysely/src/**/*.ts",
     "packages/kysely/tests/**/*.ts",
     "tests/conformance/**/*.ts"
