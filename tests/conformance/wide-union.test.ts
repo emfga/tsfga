@@ -183,6 +183,56 @@ describe("Wide Union Conformance", () => {
     );
   });
 
+  describe("breadth does not change the answer", () => {
+    // The first conformance test to vary `maxBreadth`, and the
+    // reason this model is where it belongs: 12 userset branches
+    // straddle the default limit of 10, so breadth 1, 2, 10 and
+    // unbounded genuinely differ in how many run at once.
+    //
+    // A pure union's answer must be identical at every setting,
+    // and must equal OpenFGA's — which runs its own concurrency
+    // limit and is likewise not allowed to let it show. The
+    // randomized harness in `packages/core/bench` covers this
+    // across generated graphs; this pins it against the real
+    // service on a shape whose branch count is known.
+    //
+    // Deliberately *not* claimed here: that breadth never changes
+    // any answer. It can, once a cycle-truncated operand races a
+    // definitive `false` under an intersection — see
+    // `intersection-cycle-precedence`, where upstream behaves the
+    // same way. This model has no intersection, so the invariant
+    // holds strictly.
+    const BREADTHS = [1, 2, 10, Number.POSITIVE_INFINITY];
+
+    for (const maxBreadth of BREADTHS) {
+      test(`maxBreadth ${maxBreadth}`, async () => {
+        const store = new KyselyTupleStore(db);
+        const client = createTsfga(store, { maxBreadth });
+        for (const [subject, expected] of [
+          // A grant inside the launch window, one past it, and a
+          // miss that has to traverse all 12.
+          ["anne", true],
+          ["bob", true],
+          ["carl", false],
+        ] as const) {
+          await expectConformance(
+            storeId,
+            authorizationModelId,
+            client,
+            {
+              objectType: "document",
+              objectId: uuid("1"),
+              relation: "viewer",
+              subjectType: "user",
+              subjectId: uuid(subject),
+            },
+            expected,
+          );
+        }
+      });
+    }
+  });
+
   test("the relation configs say what the model says", () => {
     expectConfigsMatchModel("./wide-union/model.dsl", fixture, {
       coverage: "complete",

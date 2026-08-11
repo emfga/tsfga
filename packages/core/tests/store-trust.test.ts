@@ -311,3 +311,143 @@ describe("a store cannot widen what the model admits", () => {
     });
   });
 });
+
+/**
+ * The condition dimension of the clamp, under *partial* admission.
+ *
+ * These are the cases a hand-written scenario is least likely to
+ * contain and a store is most likely to produce: a relation that
+ * admits a ref under one condition and not another, with a stored
+ * row carrying the wrong one. The row passes the read gate — which
+ * is condition-blind by necessity — and must die at the clamp.
+ *
+ * Every case must DENY. A grant means a row the model does not
+ * admit granted access.
+ */
+describe("the clamp matches the condition, not just the shape", () => {
+  let store: RogueStore;
+
+  function checkWith(config: Partial<RelationConfig>) {
+    store.relationConfigs.push(
+      makeConfig({ objectType: "doc", relation: "viewer", ...config }),
+      makeConfig({
+        objectType: "team",
+        relation: "member",
+        directlyAssignable: [{ type: "user" }],
+      }),
+    );
+    store.tuples.push(
+      makeTuple({
+        objectType: "team",
+        objectId: "eng",
+        relation: "member",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    );
+    store.resetCounts();
+    return check(store, request);
+  }
+
+  test("a conditioned direct row where only the bare ref is admitted", async () => {
+    store = new RogueStore({
+      direct: makeTuple({ ...request, conditionName: "weekday_only" }),
+    });
+
+    expect(await checkWith({ directlyAssignable: [{ type: "user" }] })).toBe(
+      false,
+    );
+  });
+
+  test("a bare direct row where only the conditioned ref is admitted", async () => {
+    // The fail-open direction, and the unintuitive one: the row
+    // carries no condition, so nothing evaluates and the old code
+    // read it as unconditional access.
+    store = new RogueStore({ direct: makeTuple({ ...request }) });
+
+    expect(
+      await checkWith({
+        directlyAssignable: [{ type: "user", condition: "weekday_only" }],
+      }),
+    ).toBe(false);
+  });
+
+  test("a row carrying a different condition than the one admitted", async () => {
+    store = new RogueStore({
+      direct: makeTuple({ ...request, conditionName: "other_cond" }),
+    });
+
+    expect(
+      await checkWith({
+        directlyAssignable: [{ type: "user", condition: "weekday_only" }],
+      }),
+    ).toBe(false);
+  });
+
+  test("a conditioned wildcard row where only the bare wildcard is admitted", async () => {
+    store = new RogueStore({
+      wildcard: makeTuple({
+        ...request,
+        subjectId: "*",
+        conditionName: "weekday_only",
+      }),
+    });
+
+    expect(
+      await checkWith({
+        directlyAssignable: [{ type: "user", wildcard: true }],
+      }),
+    ).toBe(false);
+  });
+
+  test("a conditioned userset row where only the bare userset is admitted", async () => {
+    // The dangerous one: a userset dispatches to another node, so
+    // a grant here is reachable from a row the model refuses.
+    store = new RogueStore({
+      usersets: [
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "team",
+          subjectId: "eng",
+          subjectRelation: "member",
+          conditionName: "weekday_only",
+        }),
+      ],
+    });
+
+    expect(
+      await checkWith({
+        directlyAssignable: [{ type: "team", relation: "member" }],
+      }),
+    ).toBe(false);
+  });
+
+  test("partial admission keeps the admitted half", async () => {
+    // The control. A relation admitting the ref both bare and
+    // conditioned still grants on the conditioned row — the clamp
+    // narrows, it does not simply deny anything conditioned.
+    store = new RogueStore({
+      usersets: [
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "team",
+          subjectId: "eng",
+          subjectRelation: "member",
+        }),
+      ],
+    });
+
+    expect(
+      await checkWith({
+        directlyAssignable: [
+          { type: "team", relation: "member" },
+          { type: "team", relation: "member", condition: "weekday_only" },
+        ],
+      }),
+    ).toBe(true);
+  });
+});

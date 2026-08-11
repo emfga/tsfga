@@ -151,6 +151,75 @@ describe("structurally impossible reads are skipped", () => {
     });
   });
 
+  describe("the query carries the conditions, not just the shapes", () => {
+    // The read gate is condition-blind — it runs before the row
+    // exists — so it asks for *every* restriction of the right
+    // shape and lets the clamp do the exact match. What it sends
+    // is therefore the admitted refs themselves, and a store can
+    // narrow on them.
+    test("both variants of a partially conditioned ref are sent", async () => {
+      await checkWith({
+        directlyAssignable: [
+          { type: "user" },
+          { type: "user", condition: "weekday_only" },
+        ],
+      });
+
+      expect(nodeQuery()?.directRefs).toEqual([
+        { type: "user" },
+        { type: "user", condition: "weekday_only" },
+      ]);
+    });
+
+    test("a conditioned-only ref still asks — it does not skip", async () => {
+      // The gate cannot decide this one: whether the row qualifies
+      // depends on the row. Skipping the read would lose the
+      // conditioned rows that *are* admitted.
+      await checkWith({
+        directlyAssignable: [{ type: "user", condition: "weekday_only" }],
+      });
+
+      expect(nodeQuery()?.directRefs).toEqual([
+        { type: "user", condition: "weekday_only" },
+      ]);
+    });
+
+    test("refs of another shape are not sent to the direct slot", async () => {
+      await checkWith({
+        directlyAssignable: [
+          { type: "user", condition: "weekday_only" },
+          { type: "user", wildcard: true, condition: "weekday_only" },
+          { type: "team", relation: "member", condition: "weekday_only" },
+        ],
+      });
+
+      expect(nodeQuery()?.directRefs).toEqual([
+        { type: "user", condition: "weekday_only" },
+      ]);
+      expect(nodeQuery()?.wildcardRefs).toEqual([
+        { type: "user", wildcard: true, condition: "weekday_only" },
+      ]);
+      expect(nodeQuery()?.usersetRefs).toEqual([
+        { type: "team", relation: "member", condition: "weekday_only" },
+      ]);
+    });
+
+    test("the userset scan is narrowed on the condition too", async () => {
+      await checkWith({
+        directlyAssignable: [
+          { type: "user" },
+          { type: "team", relation: "member" },
+          { type: "team", relation: "owner", condition: "weekday_only" },
+        ],
+      });
+
+      expect(nodeQuery()?.usersetRefs).toEqual([
+        { type: "team", relation: "member" },
+        { type: "team", relation: "owner", condition: "weekday_only" },
+      ]);
+    });
+  });
+
   describe("only a positive exclusion skips a read", () => {
     test("a list naming the subject asks for both probes", async () => {
       // The probes are gated on their own refs, so a list that
