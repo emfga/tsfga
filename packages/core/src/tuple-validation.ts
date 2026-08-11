@@ -98,17 +98,18 @@ function sameShape(restriction: TypeRestriction, shape: SubjectShape): boolean {
  * row. The invariant is `readGate ⊇ writeGate ∧ clamp ≡ writeGate`
  * — *not* that the two gates agree, which they cannot.
  *
- * A `null` config is unrestricted, which satisfies that invariant
- * trivially rather than strongly.
+ * The config is required rather than nullable. It used to admit
+ * `null` and answer `true` for it, which made a relation nobody
+ * had configured the widest gate in the library instead of the
+ * narrowest; every caller now establishes the config exists before
+ * asking, and a relation without one is refused rather than
+ * unrestricted.
  */
 export function admitsSubjectShape(
-  config: RelationConfig | null,
+  config: RelationConfig,
   shape: SubjectShape,
 ): boolean {
-  return (
-    config === null ||
-    config.directlyAssignable.some((r) => sameShape(r, shape))
-  );
+  return config.directlyAssignable.some((r) => sameShape(r, shape));
 }
 
 /**
@@ -116,20 +117,19 @@ export function admitsSubjectShape(
  * userset relation, wildcard **and** condition.
  *
  * Used by the clamp and by the write path, which are the two
- * places holding a real row. A `null` config is unrestricted, as
- * for the shape gate.
+ * places holding a real row.
  *
  * Exported so a consumer narrowing their own query can apply the
  * gate tsfga applies rather than reimplementing it and drifting.
  * Three hazards come with that, and they are why this is
  * documented rather than merely exposed:
  *
- * - **`null` is permissive.** It has to be, or this would not
- *   match `check()`. But inside `check()` a `null` config means
- *   the relation is unconstrained; in a consumer's `WHERE` clause
- *   it usually means the relation name was misspelled, and the
- *   filter then silently admits everything. Look the config up
- *   yourself and fail on `null` if that is what you meant.
+ * - **The config is not optional.** This used to accept `null` and
+ *   answer `true` for it, matching a `check()` that read a missing
+ *   config as unrestricted. Both are gone: `check()` now raises
+ *   `RelationConfigNotFoundError` on a relation with no config, so
+ *   the misspelled relation name that used to silently admit
+ *   everything is a `null` the compiler makes you handle.
  * - **This is not the read gate.** Narrowing a query by this
  *   predicate is narrowing by the *exact* restriction, which is
  *   correct for filtering rows you already hold and wrong for
@@ -141,10 +141,9 @@ export function admitsSubjectShape(
  *   it is a row `check()` will *consider*, not one it will allow.
  */
 export function admitsSubjectRef(
-  config: RelationConfig | null,
+  config: RelationConfig,
   ref: TypeRestriction,
 ): boolean {
-  if (config === null) return true;
   return config.directlyAssignable.some(
     (r) => sameShape(r, ref) && r.condition === ref.condition,
   );
@@ -152,24 +151,25 @@ export function admitsSubjectRef(
 
 /**
  * The restrictions of this shape the relation admits, for the
- * store to narrow on; `null` when the relation declines to narrow.
+ * store to narrow on.
  *
  * `[]` is a positive answer — the relation admits nothing of this
- * shape — and the caller reads it as "do not ask".
+ * shape — and the caller reads it as "do not ask". There is no
+ * "declines to narrow" answer any more: every relation a check
+ * reaches has a config, so there is always something to narrow
+ * against.
  */
 export function admittedRefsForShape(
-  config: RelationConfig | null,
+  config: RelationConfig,
   shape: SubjectShape,
-): readonly TypeRestriction[] | null {
-  if (config === null) return null;
+): readonly TypeRestriction[] {
   return config.directlyAssignable.filter((r) => sameShape(r, shape));
 }
 
-/** The userset refs the relation admits; `null` when unrestricted. */
+/** The userset refs the relation admits. */
 export function admittedUsersetRefs(
-  config: RelationConfig | null,
-): readonly TypeRestriction[] | null {
-  if (config === null) return null;
+  config: RelationConfig,
+): readonly TypeRestriction[] {
   return config.directlyAssignable.filter((r) => r.relation !== undefined);
 }
 
@@ -179,6 +179,14 @@ export function admittedUsersetRefs(
  * `null` declines to narrow and so admits everything; `[]` admits
  * nothing. Shared by the clamp and the store-reply checks so the
  * two cannot read the same query differently.
+ *
+ * **Deliberately still permissive on `null`,** where the config
+ * gates above no longer are. This one reads a `CheckTuplesQuery`
+ * rather than a config, and that type keeps its nullable fields:
+ * they are how a wrapper says "I did not narrow this part", which
+ * is a statement about a query and not about a model. Core stopped
+ * emitting `null` in them — it always holds a config now — so what
+ * the clamp compares against is always the real restriction list.
  */
 export function refsAdmit(
   refs: readonly TypeRestriction[] | null,

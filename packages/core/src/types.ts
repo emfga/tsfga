@@ -63,12 +63,21 @@ export interface TypeRestriction {
  * model cannot admit is not requested at all.
  *
  * **For all three, `null` and `[]` are opposites.** `null` means
- * the relation declines to narrow — no config was found, so there
- * is nothing to restrict against, and every row qualifies. `[]`
- * means the relation positively admits nothing of that shape, so
- * the part is excluded. Reading one as the other is the difference
- * between a closed gate and an open one, so a wrapper forwarding
- * these must say which it means.
+ * the query declines to narrow that part, so every row of that
+ * shape qualifies. `[]` means the relation positively admits
+ * nothing of that shape, so the part is excluded. Reading one as
+ * the other is the difference between a closed gate and an open
+ * one, so a wrapper forwarding these must say which it means.
+ *
+ * **The check algorithm no longer sends `null`.** It used to, for
+ * a relation with no config, on the reading that there was nothing
+ * to restrict against — which made an unconfigured relation the
+ * widest query in the library. A relation with no config is now
+ * refused before any read, so every query core builds carries the
+ * relation's own restrictions. The fields stay nullable because
+ * `null` is a statement about a *query*, not about a model, and a
+ * wrapper that widens one still has to be able to say it; the
+ * clamp re-applies the real restrictions to the reply either way.
  *
  * They are a **narrowing hint, not a trust boundary**. A store
  * may use them to skip work — that is the point of sending them —

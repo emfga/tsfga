@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { check } from "../src/check.ts";
-import { InvalidSubjectTypeError } from "../src/errors.ts";
+import {
+  InvalidSubjectTypeError,
+  RelationConfigNotFoundError,
+} from "../src/errors.ts";
 import { validateTupleWrite } from "../src/tuple-validation.ts";
 import type { RelationConfig, Tuple } from "../src/types.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
@@ -239,16 +242,18 @@ describe("structurally impossible reads are skipped", () => {
       ]);
     });
 
-    test("no config at all reads everything", async () => {
+    test("no config at all reads nothing, because it raises", async () => {
       store.resetCounts();
 
-      await check(store, request);
-
-      // `null`, not `[]`: no config declines to narrow, which is
-      // the opposite of admitting nothing.
-      expect(nodeQuery()?.directRefs).toBeNull();
-      expect(nodeQuery()?.wildcardRefs).toBeNull();
-      expect(nodeQuery()?.usersetRefs).toBeNull();
+      // This used to send a query whose three ref sets were all
+      // `null` — "decline to narrow", so every stored row
+      // qualified. A relation the model does not define is now
+      // refused before anything is read, which is why no ref set
+      // core builds is nullable any more.
+      await expect(check(store, request)).rejects.toBeInstanceOf(
+        RelationConfigNotFoundError,
+      );
+      expect(nodeQuery()).toBeNull();
     });
   });
 

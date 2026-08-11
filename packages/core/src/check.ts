@@ -1,7 +1,11 @@
 import { CachingTupleStore } from "./caching-store.ts";
 import { evaluateTupleCondition } from "./conditions.ts";
 import { ContextualTupleStore } from "./contextual-store.ts";
-import { DepthExceededError, TsfgaError } from "./errors.ts";
+import {
+  DepthExceededError,
+  RelationConfigNotFoundError,
+  TsfgaError,
+} from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
 import {
   admitsSubjectRef,
@@ -276,6 +280,12 @@ function wouldDeadlock(entry: InflightEntry, waiter: WaitNode | null): boolean {
  * - Intersection (and)
  *
  * Error semantics:
+ * - Throws RelationConfigNotFoundError for a relation the model
+ *   does not define, at any node — the requested relation or one
+ *   a rewrite reaches. Upstream refuses the same request with an
+ *   HTTP 400 validation error rather than answering `false`. The
+ *   one exception is a tuple-to-userset's computed relation,
+ *   which upstream skips per row rather than refusing.
  * - Throws DepthExceededError when the recursion budget
  *   (`options.maxDepth`, default 25) is exhausted. Exhaustion is
  *   never converted to `false`: inside an exclusion or
@@ -752,6 +762,20 @@ async function resolveNode(
     request.objectType,
     request.relation,
   );
+  // A relation the model does not define cannot be answered, and
+  // upstream says so rather than answering `false`: `ResolveCheck`
+  // fails with "relation '%s' undefined for object type '%s'" and
+  // the server maps the request-level case to HTTP 400
+  // `validation_error` (`internal/graph/check.go`).
+  //
+  // Reading the missing config as *unrestricted* was the fail-open
+  // direction. The write path refuses such a tuple, so the only way
+  // to have one is for the row to outlive its config — a deleted
+  // config, an out-of-band writer, a partially applied fixture —
+  // and that row was then narrowed against nothing and granted.
+  if (config === null) {
+    throw new RelationConfigNotFoundError(request.objectType, request.relation);
+  }
 
   // Some paths never await the batch (config error, or an
   // intersection without a direct operand); the derived catch
@@ -762,7 +786,7 @@ async function resolveNode(
 
   // Base resolution: intersection replaces steps 1-5 when present
   const resolveBase = (): Promise<CheckResult> =>
-    config?.intersection
+    config.intersection
       ? checkIntersection(scope, request, config, reads, depth, visited, frame)
       : checkBase(scope, request, config, reads, depth, visited, frame);
 
@@ -781,7 +805,7 @@ async function resolveNode(
   // subtract side it behaves like `true` — the exclusion could not
   // be ruled out, so access is denied. Treating a cycle as a plain
   // `false` would grant `base:true butnot sub:cycle`, a fail-open.
-  if (config?.excludedBy) {
+  if (config.excludedBy) {
     const excludedBy = config.excludedBy;
     const [baseResult, exclusionResult] = await Promise.allSettled([
       resolveBase(),
@@ -849,7 +873,7 @@ async function resolveNode(
 async function readNodeTuples(
   store: TupleStore,
   request: CheckRequest,
-  config: RelationConfig | null,
+  config: RelationConfig,
 ): Promise<CheckTuples> {
   // Condition-blind, and it has to be: the gate decides what to
   // ask the store for, and a row's condition is on the row. So it
@@ -880,12 +904,13 @@ async function readNodeTuples(
   // computed, or purely an intersection of rewrites — has nothing
   // to ask for. Skip the round-trip rather than send a query that
   // cannot match; the node still resolves through its rewrites.
-  // `null` is *unrestricted*, not empty, so `null?.length === 0`
-  // is correctly false and such a relation still reads.
+  // Every one of the three is a real list now, so `[]` here means
+  // the config positively admits nothing rather than that nobody
+  // said.
   if (
-    directRefs?.length === 0 &&
-    wildcardRefs?.length === 0 &&
-    usersetRefs?.length === 0
+    directRefs.length === 0 &&
+    wildcardRefs.length === 0 &&
+    usersetRefs.length === 0
   ) {
     return NO_TUPLES;
   }
@@ -1029,7 +1054,7 @@ async function evaluateCondition(
 async function checkBase(
   scope: CheckScope,
   request: CheckRequest,
-  config: RelationConfig | null,
+  config: RelationConfig,
   reads: Promise<CheckTuples>,
   depth: number,
   path: ReadonlySet<string>,
@@ -1118,7 +1143,7 @@ async function checkBase(
   // Step 3: Relation inheritance (implied_by) handlers.
   // Same object, so no depth cost — see the depth-accounting note
   // on `check`.
-  if (config?.impliedBy) {
+  if (config.impliedBy) {
     for (const impliedRelation of config.impliedBy) {
       handlers.push((branch) =>
         checkNode(
@@ -1136,7 +1161,7 @@ async function checkBase(
   }
 
   // Step 4: Computed userset handler. Same object, no depth cost.
-  if (config?.computedUserset) {
+  if (config.computedUserset) {
     const computedUserset = config.computedUserset;
     handlers.push((branch) =>
       checkNode(scope, { ...request, relation: computedUserset }, depth, path, {
@@ -1148,15 +1173,15 @@ async function checkBase(
 
   // Step 5: Tuple-to-userset composite handler. Like step 2 this
   // moves to another object, so each child costs one depth.
-  if (config?.tupleToUserset) {
+  if (config.tupleToUserset) {
     const ttuEntries = config.tupleToUserset;
     handlers.push(async (branch) => {
       if (branch.abandoned) throw new BranchAbandoned();
       // Batch all tupleset lookups. Each returns only the rows
       // the tupleset relation admits whose condition holds.
       const linkedResults = await Promise.all(
-        ttuEntries.map(({ tupleset }) =>
-          resolveTupleset(store, request, tupleset),
+        ttuEntries.map(({ tupleset, computedUserset }) =>
+          resolveTupleset(store, request, tupleset, computedUserset),
         ),
       );
 
@@ -1253,6 +1278,7 @@ async function checkIntersection(
           store,
           request,
           operand.tupleset,
+          operand.computedUserset,
         );
         const ttuHandlers: Handler[] = [];
         for (const linked of linkedTuples) {
@@ -1302,16 +1328,36 @@ async function checkIntersection(
  * leaves the second granting. The second is the worse of the two:
  * an intersection operand satisfied through a switched-off link,
  * inside the subtrahend of an exclusion, grants rather than denies.
+ *
+ * A third gate is the `computedUserset`, and it is the one place a
+ * relation with no config is *not* an error. Upstream accepts a
+ * model whose tupleset admits several types when **at least one**
+ * of them defines the computed relation
+ * (`isUsersetRewriteValid`), and then drops the rows whose type
+ * does not, one by one, as it produces the dispatches
+ * (`produceTTUDispatches`). So `parent: [folder, org]` with
+ * `viewer from parent` is a legal model in which an `org` row
+ * simply contributes nothing. Raising here instead would answer a
+ * refusal where upstream answers `false` — the fail-closed
+ * mirror-image of the fail-open this gate exists to remove.
  */
 async function resolveTupleset(
   store: TupleStore,
   request: CheckRequest,
   tupleset: string,
+  computedUserset: string,
 ): Promise<Tuple[]> {
   const [linked, config] = await Promise.all([
     store.findTuplesByRelation(request.objectType, request.objectId, tupleset),
     store.findRelationConfig(request.objectType, tupleset),
   ]);
+  // The tupleset relation itself is a relation of *this* object,
+  // and upstream requires it to be defined for the model to be
+  // written at all. A missing config is a broken model rather than
+  // a row to skip, so it raises like any other node's would.
+  if (config === null) {
+    throw new RelationConfigNotFoundError(request.objectType, tupleset);
+  }
 
   const admitted = linked.filter((tuple) =>
     admitsSubjectRef(
@@ -1341,7 +1387,22 @@ async function resolveTupleset(
     }
   }
   raiseUnlessOneHeld(stash, satisfied.length > 0);
-  return satisfied;
+
+  // Skipped last, after the conditions have been evaluated, which
+  // is upstream's order: the condition filter sits in the iterator
+  // and the skip happens as each row is turned into a dispatch, so
+  // a row that is about to be skipped still contributes its
+  // condition error — and still counts as a row that held.
+  const types = [...new Set(satisfied.map((tuple) => tuple.subjectType))];
+  const defined = new Set<string>();
+  await Promise.all(
+    types.map(async (type) => {
+      if (await store.findRelationConfig(type, computedUserset)) {
+        defined.add(type);
+      }
+    }),
+  );
+  return satisfied.filter((tuple) => defined.has(tuple.subjectType));
 }
 
 /**

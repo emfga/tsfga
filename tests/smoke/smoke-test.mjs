@@ -21,6 +21,11 @@ assert(typeof check === "function", "check should be a function");
 // core re-clamps the reply, so returning a slot that was not asked
 // for just loses it. An empty list admits nothing; `null` is the
 // store declining to narrow, not a permission to widen.
+//
+// The config is a real one because a check refuses a relation the
+// model does not define. It used to answer `null` for everything,
+// which read as "unrestricted" and quietly made this the widest
+// model there is.
 /** @type {import("../../packages/core/dist/index.js").TupleStore} */
 const mockStore = {
   findCheckTuples: async (query) => ({
@@ -41,7 +46,16 @@ const mockStore = {
     usersets: [],
   }),
   findTuplesByRelation: async () => [],
-  findRelationConfig: async () => null,
+  findRelationConfig: async (objectType, relation) => ({
+    objectType,
+    relation,
+    directlyAssignable: [{ type: "user" }],
+    impliedBy: null,
+    computedUserset: null,
+    tupleToUserset: null,
+    excludedBy: null,
+    intersection: null,
+  }),
   findConditionDefinition: async () => null,
   insertTuple: async () => {},
   deleteTuple: async () => false,

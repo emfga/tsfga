@@ -142,6 +142,13 @@ describe("listObjects", () => {
           { type: "folder", relation: "member" },
         ],
       }),
+      // The tupleset relation is a relation like any other, and a
+      // check refuses one the model does not define.
+      makeConfig({
+        objectType: "doc",
+        relation: "parent",
+        directlyAssignable: [{ type: "folder" }],
+      }),
     );
     for (let i = 1; i <= candidates; i++) {
       store.tuples.push(

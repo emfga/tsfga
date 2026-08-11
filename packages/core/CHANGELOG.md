@@ -81,6 +81,45 @@ releases may contain breaking changes).
 
 ### Changed
 
+- **A relation with no config is refused, not unrestricted.**
+  `check` read a missing relation config as "nothing to restrict
+  against" and narrowed nothing, so a row already in the store on
+  such a relation granted. OpenFGA answers HTTP 400
+  `validation_error`, `invalid relation: relation 'doc#reviewer'
+  not found`, and answers it before reading anything. `check`,
+  `checkMany`, `listObjects` and `listSubjects` now all raise
+  `RelationConfigNotFoundError`, which `addTuple` already did —
+  which is why this went unnoticed, since the write path could not
+  create the state that exposes it. A row outliving its config
+  can: a deleted config, an out-of-band writer, a half-applied
+  fixture.
+
+  **Breaking, and wider than the check path on purpose.** Fixing
+  `check` alone would have left the library raising on one path
+  and silently admitting on another, which is worse than either
+  answer:
+
+  - `admitsSubjectRef` and `admitsSubjectShape` take a
+    `RelationConfig` rather than `RelationConfig | null`. They
+    answered `true` for `null`, so the misspelled relation name in
+    a consumer's `WHERE` clause quietly admitted everything; it is
+    now a `null` the compiler makes you handle.
+  - `listSubjects` raises instead of reporting every stored row.
+  - `CheckTuplesQuery`'s three ref fields stay nullable, but core
+    no longer sends `null` in them: every query it builds carries
+    the relation's own restrictions. `null` remains what a wrapper
+    says when it declines to narrow a query it forwards.
+
+  One place a missing relation deliberately does **not** raise: a
+  tuple-to-userset whose computed relation is undefined on the
+  linked object's type. Upstream accepts such a model when at
+  least one of the tupleset's admitted types defines the relation
+  (`isUsersetRewriteValid`) and then skips the rows whose type
+  does not (`produceTTUDispatches`), so `parent: [folder, org]`
+  with `viewer from parent` answers `false` for an `org` parent
+  rather than refusing. Raising there would have traded a
+  fail-open for a fail-closed.
+
 - **`ConditionParameterType` carries a container's element type.**
   `"list"` and `"map"` are no longer spellings; a container
   parameter is declared `"list<string>"` or `"map<int>"`, matching

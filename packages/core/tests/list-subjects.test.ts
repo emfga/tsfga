@@ -3,6 +3,7 @@ import {
   admitsSubjectRef,
   createTsfga,
   directSubjectRef,
+  RelationConfigNotFoundError,
 } from "../src/index.ts";
 import type { RelationConfig, Tuple, TypeRestriction } from "../src/types.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
@@ -160,13 +161,18 @@ describe("listSubjects applies the relation's type restrictions", () => {
     );
   });
 
-  test("no config at all stays unrestricted, as `check` does", async () => {
+  test("no config at all raises, as `check` does", async () => {
+    // It used to report the row, on the reading that a relation
+    // with no config is unrestricted. `check` no longer reads it
+    // that way, and the two paths agreeing is the point: a
+    // `listSubjects` that reported subjects `check` refuses to act
+    // on would be the granting direction of the same divergence.
     const store = new MockTupleStore();
     store.tuples.push(makeTuple({ subjectType: "service", subjectId: "bot" }));
 
-    expect(await createTsfga(store).listSubjects("doc", "1", "viewer")).toEqual(
-      [{ subjectType: "service", subjectId: "bot", subjectRelation: null }],
-    );
+    await expect(
+      createTsfga(store).listSubjects("doc", "1", "viewer"),
+    ).rejects.toBeInstanceOf(RelationConfigNotFoundError);
   });
 });
 
@@ -246,6 +252,7 @@ describe("the exported gate agrees with check()", () => {
       );
 
       const config = await store.findRelationConfig("doc", "viewer");
+      if (config === null) throw new Error("the fixture writes this config");
       const admitted = admitsSubjectRef(
         config,
         directSubjectRef(

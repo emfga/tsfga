@@ -2,7 +2,7 @@ import { check } from "./check.ts";
 import { type CheckOutcome, checkMany } from "./check-many.ts";
 import { compileCondition } from "./conditions.ts";
 import { validateRelationConfigWrite } from "./config-validation.ts";
-import { ImplicitTupleError } from "./errors.ts";
+import { ImplicitTupleError, RelationConfigNotFoundError } from "./errors.ts";
 import { listObjects } from "./list-objects.ts";
 import type { TupleStore } from "./store-interface.ts";
 import {
@@ -30,6 +30,11 @@ export interface TsfgaClient {
    *   resolves to `false` — a truncated exclusion branch must not
    *   grant access. A cycle in the resolution path is not an
    *   error: it resolves `false`, matching OpenFGA.
+   * @throws RelationConfigNotFoundError for a relation the model
+   *   does not define — the requested one, or one a rewrite
+   *   reaches. A missing config used to read as *unrestricted*, so
+   *   a row that outlived its config granted; upstream answers an
+   *   HTTP 400 validation error for the same request.
    * @throws RelationConfigNotFoundError or InvalidSubjectTypeError
    *   when a contextual tuple fails the same validation `addTuple`
    *   applies.
@@ -94,6 +99,10 @@ export interface TsfgaClient {
    * that *finds* such a row in order to delete it. Upstream keeps
    * `Read` unfiltered for exactly that reason and filters only
    * Expand and ListUsers. A maintenance read is owed.
+   *
+   * @throws RelationConfigNotFoundError when the relation has no
+   *   config. It used to report every stored row instead, which
+   *   made this the one path that admitted what `check` refuses.
    */
   listSubjects(
     objectType: string,
@@ -185,7 +194,19 @@ export function createTsfga(
       // does not admit, and would put adapter authors inside the
       // security boundary. `clampToQuery` already refused that
       // trade for the check reads; this is the same call.
+      //
+      // A relation with no config raises here for the same reason
+      // `check` raises: it used to read as unrestricted, and a
+      // filter that admits everything on the one input nobody
+      // meant to give it — a misspelled relation, a config that a
+      // row outlived — is the failure this gate exists to prevent.
+      // Reporting subjects `check` would refuse to act on would
+      // have been the two paths disagreeing in the granting
+      // direction, which is worse than either answer alone.
       const config = await store.findRelationConfig(objectType, relation);
+      if (config === null) {
+        throw new RelationConfigNotFoundError(objectType, relation);
+      }
       const tuples = await store.findTuplesByRelation(
         objectType,
         objectId,

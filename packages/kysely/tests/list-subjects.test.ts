@@ -10,6 +10,7 @@ import {
 import {
   createTsfga,
   type RelationConfig,
+  RelationConfigNotFoundError,
   type TsfgaClient,
   type TypeRestriction,
 } from "@tsfga/core";
@@ -207,11 +208,13 @@ describe("listSubjects over the adapter", () => {
     ).toEqual([]);
   });
 
-  test("reports every row when no config restricts the relation", async () => {
-    // A relation with no config reads as unrestricted rather than
-    // as an error, so nothing is filtered. Pinned because it is the
-    // one way this path reports a row `check` would not act on, and
-    // because it is what a missing config costs.
+  test("raises when no config defines the relation", async () => {
+    // It used to report every row here, on the reading that a
+    // relation with no config is unrestricted — the one way this
+    // path reported a row `check` would not act on. `check` now
+    // refuses such a relation, as OpenFGA does, and so does this:
+    // the two paths disagreeing in the granting direction is worse
+    // than either answer on its own.
     await store.insertTuple({
       objectType: "document",
       objectId: doc,
@@ -221,8 +224,8 @@ describe("listSubjects over the adapter", () => {
       subjectRelation: "owner",
     });
 
-    expect(
-      subjects(await client.listSubjects("document", doc, "unconfigured")),
-    ).toEqual([`group:${eng}#owner`]);
+    await expect(
+      client.listSubjects("document", doc, "unconfigured"),
+    ).rejects.toBeInstanceOf(RelationConfigNotFoundError);
   });
 });

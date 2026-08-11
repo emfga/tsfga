@@ -47,6 +47,13 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
       { type: "workspace", wildcard: true },
       { type: "blocklist" },
       { type: "blocklist", wildcard: true },
+      // `#member` is the only userset relation this file assigns,
+      // and a relation admits a userset ref only by naming it.
+      { type: "team", relation: "member" },
+      { type: "group", relation: "member" },
+      { type: "org", relation: "member" },
+      { type: "workspace", relation: "member" },
+      { type: "blocklist", relation: "member" },
     ],
     impliedBy: null,
     computedUserset: null,
@@ -55,6 +62,25 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
     intersection: null,
     ...overrides,
   };
+}
+
+/**
+ * Declare the relations a fixture's rows live on, as
+ * `objectType.relation`.
+ *
+ * `check` refuses a relation the model does not define, so a
+ * fixture has to state its model even where the test is about
+ * something else. These configs are as wide as `makeConfig`'s
+ * default list, which is what the fixtures assumed implicitly
+ * while a missing config read as unrestricted.
+ */
+function declareRelations(store: MockTupleStore, ...names: string[]): void {
+  for (const name of names) {
+    const [objectType, relation] = name.split(".");
+    store.relationConfigs.push(
+      makeConfig({ objectType: objectType ?? "", relation: relation ?? "" }),
+    );
+  }
 }
 
 describe("check algorithm", () => {
@@ -66,6 +92,7 @@ describe("check algorithm", () => {
 
   describe("Step 1: Direct tuple check", () => {
     test("returns true for direct tuple match", async () => {
+      declareRelations(store, "doc.viewer");
       store.tuples.push(
         makeTuple({
           objectType: "doc",
@@ -87,6 +114,7 @@ describe("check algorithm", () => {
     });
 
     test("returns false when no matching tuple", async () => {
+      declareRelations(store, "doc.viewer");
       expect(
         await check(store, {
           objectType: "doc",
@@ -99,6 +127,13 @@ describe("check algorithm", () => {
     });
 
     test("evaluates condition on direct tuple", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignable: [{ type: "user", condition: "in_region" }],
+        }),
+      );
       store.tuples.push(
         makeTuple({
           objectType: "doc",
@@ -141,6 +176,7 @@ describe("check algorithm", () => {
 
   describe("Step 1b: Wildcard check", () => {
     test("returns true when wildcard tuple exists", async () => {
+      declareRelations(store, "doc.viewer");
       store.tuples.push(
         makeTuple({
           objectType: "doc",
@@ -171,6 +207,7 @@ describe("check algorithm", () => {
     });
 
     test("returns false when no wildcard tuple for the relation", async () => {
+      declareRelations(store, "doc.viewer", "doc.editor");
       store.tuples.push(
         makeTuple({
           objectType: "doc",
@@ -192,6 +229,7 @@ describe("check algorithm", () => {
     });
 
     test("prefers direct tuple over wildcard", async () => {
+      declareRelations(store, "doc.viewer");
       store.tuples.push(
         makeTuple({
           objectType: "doc",
@@ -220,6 +258,15 @@ describe("check algorithm", () => {
     });
 
     test("evaluates condition on wildcard tuple", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignable: [
+            { type: "user", wildcard: true, condition: "in_region" },
+          ],
+        }),
+      );
       store.tuples.push(
         makeTuple({
           objectType: "doc",
@@ -262,6 +309,7 @@ describe("check algorithm", () => {
 
   describe("Step 2: Userset expansion", () => {
     test("resolves userset tuple", async () => {
+      declareRelations(store, "channel.writer", "workspace.member");
       // channel:proj#writer -> workspace:sandcastle#member
       store.tuples.push(
         makeTuple({
@@ -296,6 +344,7 @@ describe("check algorithm", () => {
     });
 
     test("returns false when userset subject doesn't have relation", async () => {
+      declareRelations(store, "channel.writer", "workspace.member");
       store.tuples.push(
         makeTuple({
           objectType: "channel",
@@ -320,6 +369,20 @@ describe("check algorithm", () => {
     });
 
     test("evaluates condition on userset tuple", async () => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "channel",
+          relation: "writer",
+          directlyAssignable: [
+            {
+              type: "workspace",
+              relation: "member",
+              condition: "weekday_only",
+            },
+          ],
+        }),
+      );
+      declareRelations(store, "workspace.member");
       store.tuples.push(
         makeTuple({
           objectType: "channel",
@@ -372,6 +435,7 @@ describe("check algorithm", () => {
 
   describe("Step 3: Relation inheritance (implied_by)", () => {
     test("resolves implied relation", async () => {
+      declareRelations(store, "workspace.legacy_admin");
       store.relationConfigs.push(
         makeConfig({
           objectType: "workspace",
@@ -409,6 +473,7 @@ describe("check algorithm", () => {
     });
 
     test("doesn't resolve unrelated implied chain", async () => {
+      declareRelations(store, "workspace.channels_admin", "workspace.guest");
       store.relationConfigs.push(
         makeConfig({
           objectType: "workspace",
@@ -440,6 +505,7 @@ describe("check algorithm", () => {
 
   describe("Step 4: Computed userset", () => {
     test("checks computed userset relation on same object", async () => {
+      declareRelations(store, "branch.can_push");
       store.relationConfigs.push(
         makeConfig({
           objectType: "branch",
@@ -469,6 +535,7 @@ describe("check algorithm", () => {
     });
 
     test("returns false when user doesn't have computed relation", async () => {
+      declareRelations(store, "branch.can_push");
       store.relationConfigs.push(
         makeConfig({
           objectType: "branch",
@@ -491,6 +558,7 @@ describe("check algorithm", () => {
 
   describe("Step 5: Tuple-to-userset", () => {
     test("follows tupleset then checks computed userset", async () => {
+      declareRelations(store, "repo.organization", "org.member");
       store.relationConfigs.push(
         makeConfig({
           objectType: "repo",
@@ -536,6 +604,7 @@ describe("check algorithm", () => {
     });
 
     test("returns false when user doesn't have relation on linked object", async () => {
+      declareRelations(store, "repo.organization", "org.member");
       store.relationConfigs.push(
         makeConfig({
           objectType: "repo",
@@ -1083,6 +1152,10 @@ describe("check algorithm", () => {
           }),
         );
       }
+      // The rung the direct tuple sits on rewrites nothing, but it
+      // is still a relation the check resolves, so it needs a
+      // config like every other.
+      declareRelations(store, `doc.lvl${length}`);
       store.tuples.push(
         makeTuple({
           objectType: "doc",
@@ -1805,6 +1878,124 @@ describe("check algorithm", () => {
     });
   });
 
+  describe("A relation the model does not define", () => {
+    /**
+     * The row is pushed onto the store, never written through
+     * `addTuple`.
+     *
+     * That is not a shortcut: `addTuple` refuses a tuple whose
+     * relation has no config, so the write path could not create
+     * this state and a test built on it would prove nothing. A row
+     * that outlives its config is how a deployment reaches it — a
+     * deleted config, an out-of-band writer, a half-applied
+     * fixture — and the row then read as *unrestricted* and
+     * granted, where OpenFGA answers HTTP 400.
+     */
+    const request = {
+      objectType: "doc",
+      objectId: "1",
+      relation: "reviewer",
+      subjectType: "user",
+      subjectId: "alice",
+    };
+
+    beforeEach(() => {
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "reviewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+    });
+
+    test("a stored row on it no longer grants", async () => {
+      await expect(check(store, request)).rejects.toBeInstanceOf(
+        RelationConfigNotFoundError,
+      );
+    });
+
+    test("the same row grants once the relation is declared", async () => {
+      // The control: the row itself is fine, and nothing here
+      // refuses rows on principle.
+      declareRelations(store, "doc.reviewer");
+
+      expect(await check(store, request)).toBe(true);
+    });
+
+    test("a relation reached by a rewrite is refused too", async () => {
+      // The rewrite targets are resolved as nodes of their own, so
+      // the gate cannot be applied only to the requested relation.
+      declareRelations(store, "doc.viewer");
+      const viewer = store.relationConfigs.find((c) => c.relation === "viewer");
+      if (viewer) viewer.computedUserset = "undefined_relation";
+
+      await expect(
+        check(store, { ...request, relation: "viewer" }),
+      ).rejects.toBeInstanceOf(RelationConfigNotFoundError);
+    });
+
+    test("a tupleset type without the computed relation is skipped", async () => {
+      // The one exception, and it is upstream's: a model is valid
+      // when *some* of the tupleset's types define the computed
+      // relation, and the rows whose type does not are dropped as
+      // the dispatches are produced. Raising here would answer a
+      // refusal where OpenFGA answers `false`.
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          tupleToUserset: [{ tupleset: "parent", computedUserset: "member" }],
+        }),
+      );
+      declareRelations(store, "doc.parent", "team.member");
+      store.tuples.push(
+        // `org` has no `member` relation; `team` does.
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "parent",
+          subjectType: "org",
+          subjectId: "acme",
+        }),
+        makeTuple({
+          objectType: "org",
+          objectId: "acme",
+          relation: "member",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+
+      expect(await check(store, { ...request, relation: "viewer" })).toBe(
+        false,
+      );
+
+      // The control: the same shape through a type that *does*
+      // define the relation still grants.
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "parent",
+          subjectType: "team",
+          subjectId: "eng",
+        }),
+        makeTuple({
+          objectType: "team",
+          objectId: "eng",
+          relation: "member",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+
+      expect(await check(store, { ...request, relation: "viewer" })).toBe(true);
+    });
+  });
+
   describe("Multi-entry tuple-to-userset", () => {
     beforeEach(() => {
       store.relationConfigs.push(
@@ -1820,6 +2011,12 @@ describe("check algorithm", () => {
     });
 
     test("grants via the first TTU entry", async () => {
+      declareRelations(
+        store,
+        "project.owner",
+        "project.partner",
+        "org.project_editor",
+      );
       store.tuples.push(
         makeTuple({
           objectType: "project",
@@ -1848,6 +2045,12 @@ describe("check algorithm", () => {
     });
 
     test("grants via the second TTU entry", async () => {
+      declareRelations(
+        store,
+        "project.owner",
+        "project.partner",
+        "org.project_editor",
+      );
       store.tuples.push(
         makeTuple({
           objectType: "project",
@@ -1876,6 +2079,12 @@ describe("check algorithm", () => {
     });
 
     test("denies when neither entry grants", async () => {
+      declareRelations(
+        store,
+        "project.owner",
+        "project.partner",
+        "org.project_editor",
+      );
       store.tuples.push(
         makeTuple({
           objectType: "project",
@@ -2701,6 +2910,7 @@ describe("createTsfga client", () => {
 
   describe("listSubjects", () => {
     test("returns direct subjects for object + relation", async () => {
+      declareRelations(store, "doc.viewer");
       store.tuples.push(
         makeTuple({
           objectType: "doc",

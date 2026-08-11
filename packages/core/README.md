@@ -469,7 +469,12 @@ against the same list, so a store that over-returns loses rows
 rather than smuggling them past the model.
 
 `null` and `[]` are opposites on all three: `null` declines to
-narrow, `[]` excludes the part.
+narrow, `[]` excludes the part. Core no longer sends `null` — a
+relation with no config is refused before anything is read, so
+every query carries the relation's own restrictions — but the
+fields stay nullable, because "I did not narrow this part" is a
+statement a wrapper may still need to make about a query it
+forwards.
 
 ### The gate is wider than the clamp, deliberately
 
@@ -500,10 +505,11 @@ That is how a purely computed relation is expressed: an empty
 and no read is issued.
 
 A part is left out only on a *positive* exclusion. A relation with
-no config at all still reads everything — there is nothing to
-narrow against. The gate is the same predicate `addTuple` applies,
-so a tuple that can be written is always a tuple that can be
-found.
+no config at all is not read at all: `check` raises
+`RelationConfigNotFoundError` for it, exactly as `addTuple` does,
+rather than reading the absence as "unrestricted". The gate is
+the same predicate `addTuple` applies, so a tuple that can be
+written is always a tuple that can be found.
 
 **This makes relation configs load-bearing rather than
 advisory.** A tuple written straight to the database, bypassing
@@ -530,6 +536,11 @@ import { admitsSubjectRef, directSubjectRef } from "@tsfga/core";
 <!-- sample: gate-predicate -->
 ```typescript
 const config = await store.findRelationConfig("document", "viewer");
+// No config means the model does not define the relation, which
+// `check` refuses rather than treats as unrestricted. The
+// predicate takes it non-null so the same decision is yours to
+// make here.
+if (config === null) throw new Error("document.viewer is not configured");
 // The fourth argument is the condition name. Passing null asks
 // whether the relation admits `team#member` *unconditioned* --
 // a relation admitting only `team#member with in_hours` will
@@ -539,12 +550,12 @@ admitsSubjectRef(config, directSubjectRef("team", "eng", "member", null));
 
 Two things to know before relying on it:
 
-- **A `null` config is permissive**, because that is what `check`
-  does and agreement is the whole point of exporting these. Inside
-  `check` a `null` config means the relation is unconstrained; in
-  your `WHERE` clause it usually means you misspelled the relation
-  name, and the filter then silently admits everything. Look the
-  config up yourself and fail on `null` if that is what you meant.
+- **The config is not optional.** It used to be, answering `true`
+  for `null` because that is what `check` did. Both are gone:
+  `check` raises `RelationConfigNotFoundError` on a relation with
+  no config, so the misspelled relation name that used to make the
+  filter silently admit everything is now a `null` the compiler
+  makes you handle.
 - **It filters tuple *shapes* only.** It knows nothing of
   `excludedBy` or `intersection`, which revoke a grant after the
   row is read. A row it admits is one `check` will *consider*, not
@@ -558,6 +569,12 @@ stored. Narrowing a relation does not revalidate the tuples
 already written, so inadmissible rows are an ordinary state to be
 in, and reporting them was a divergence: OpenFGA filters in Expand
 and ListUsers for the same reason.
+
+A relation with no config raises `RelationConfigNotFoundError`
+here too, rather than reporting every stored row. `check` refuses
+such a relation, and a `listSubjects` that reported subjects
+`check` will not act on is the same divergence in the granting
+direction.
 
 The consequence is worth stating plainly: **there is no library
 path that finds an inadmissible row in order to delete it.**

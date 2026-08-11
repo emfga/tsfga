@@ -175,6 +175,19 @@ describe("request-scoped node memoization", () => {
           relation: "right",
           impliedBy: ["r2"],
         }),
+        // The two leaves are separate relations rather than one
+        // shared node, which is the whole point of the control —
+        // and they are relations, so they are configured.
+        makeConfig({
+          objectType: "doc",
+          relation: "l2",
+          directlyAssignable: [{ type: "user" }],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "r2",
+          directlyAssignable: [{ type: "user" }],
+        }),
       );
       store.resetCounts();
 

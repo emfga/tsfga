@@ -74,6 +74,11 @@ export async function coreQuickStart(): Promise<void> {
 export async function gatePredicate(): Promise<void> {
   // #region gate-predicate
   const config = await store.findRelationConfig("document", "viewer");
+  // No config means the model does not define the relation, which
+  // `check` refuses rather than treats as unrestricted. The
+  // predicate takes it non-null so the same decision is yours to
+  // make here.
+  if (config === null) throw new Error("document.viewer is not configured");
   // The fourth argument is the condition name. Passing null asks
   // whether the relation admits `team#member` *unconditioned* --
   // a relation admitting only `team#member with in_hours` will
