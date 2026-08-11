@@ -109,6 +109,24 @@ function expect(actual) {
         `Expected instance of ${ctor.name}, got ${actual?.constructor?.name}`,
       );
     },
+    /**
+     * Substring for a string, membership for an array. Bun's
+     * matcher is overloaded the same way.
+     * @param {any} expected
+     */
+    toContain(expected) {
+      if (typeof actual === "string") {
+        assert.ok(
+          actual.includes(expected),
+          `Expected ${JSON.stringify(actual)} to contain ${JSON.stringify(expected)}`,
+        );
+        return;
+      }
+      assert.ok(
+        Array.isArray(actual) && actual.includes(expected),
+        `Expected ${JSON.stringify(actual)} to contain ${JSON.stringify(expected)}`,
+      );
+    },
     /** @param {ThrowExpectation} [expected] */
     toThrow(expected) {
       const { threw, error } = capture(actual);
@@ -127,6 +145,17 @@ function expect(actual) {
       /** @param {any} expected */
       toBe(expected) {
         assert.notStrictEqual(actual, expected);
+      },
+      /** @param {any} expected */
+      toContain(expected) {
+        const has =
+          typeof actual === "string"
+            ? actual.includes(expected)
+            : Array.isArray(actual) && actual.includes(expected);
+        assert.ok(
+          !has,
+          `Expected ${JSON.stringify(actual)} not to contain ${JSON.stringify(expected)}`,
+        );
       },
       /** @param {ThrowExpectation} [expected] */
       toThrow(expected) {
