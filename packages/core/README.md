@@ -85,8 +85,37 @@ const allowed = await fga.check({
 `check()` resolves relations recursively with a configurable
 recursion budget (`maxDepth`, default 25, via the second
 argument of `createTsfga`). The default matches OpenFGA's
-`OPENFGA_RESOLVE_NODE_LIMIT` (25), so both systems exhaust
-resolution at the same model depth.
+`OPENFGA_RESOLVE_NODE_LIMIT` (25) in value, but **not in reach** —
+see below.
+
+### Known divergence: the depth boundary
+
+At the same numeric limit, tsfga exhausts one dispatch earlier
+than OpenFGA on most shapes. Upstream resolves the *terminal* hop
+in place instead of dispatching for it: its weight-2 resolvers
+require the target node to have weight 1 to the user type, which
+is true only of the last hop. tsfga has no weighted relation
+graph, so it dispatches for every hop.
+
+At the default 25, an n-hop chain answers for `n <= 25` upstream
+and `n <= 24` here; deeper, upstream answers where tsfga raises
+`DepthExceededError`. The direction is conservative — tsfga
+refuses where upstream answers — but it is a divergence.
+
+**The offset is not uniform, which is why the budget is not simply
+raised.** Give the leaf relation a second arm and it is no longer
+weight 1, upstream declines its own resolver, dispatches for the
+terminal hop as tsfga does, and the two agree exactly. A uniform
+`+1` would make tsfga answer on that shape where upstream returns
+`authorization_model_resolution_too_complex` — a *granting*
+divergence introduced by a parity fix, which is worse than the
+fail-closed one it would replace.
+
+The correct fix is to implement upstream's weight computation, and
+it is deferred to its own round. Both rows — the offset and its
+absence on a weight-2 leaf — are pinned two-sided in
+`tests/conformance/depth-boundary.test.ts`, so this goes red if
+the gap widens or closes.
 
 **Only hops to another object spend the budget.** Userset
 expansion and tuple-to-userset expansion each cost one depth;

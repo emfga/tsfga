@@ -7,6 +7,31 @@ releases may contain breaking changes).
 
 ## 0.6.0 — 2026-08
 
+### Documentation
+
+- **The depth boundary is documented as a divergence, not parity.**
+  The README claimed both systems exhaust resolution at the same
+  model depth. They do not: at the same numeric limit tsfga
+  exhausts one dispatch earlier on most shapes, because upstream
+  resolves the terminal hop in place rather than dispatching for
+  it. The direction is conservative — tsfga refuses where OpenFGA
+  answers — but the claim shipped and was false.
+
+  The budget is deliberately **not** raised. The offset is not
+  uniform: on a chain whose leaf relation is not weight 1,
+  upstream declines its own resolver and the two agree exactly, so
+  a uniform `+1` would grant where upstream returns
+  `authorization_model_resolution_too_complex`. Both rows are
+  pinned two-sided, so the gap cannot widen or close unnoticed.
+
+- **`maxBreadth`'s doc comments no longer contradict the README.**
+  `CheckOptions` and `check` both said bounding breadth never
+  changes the boolean result; the README spends a section on the
+  one shape where it does — a cycle reaching an intersection
+  operand. The comments ship in the `.d.ts`, so the wrong half was
+  the published one.
+
+
 ### Added
 
 - **`admitsSubjectRef` and `directSubjectRef` are exported.** A

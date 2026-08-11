@@ -327,10 +327,13 @@ function wouldDeadlock(entry: InflightEntry, waiter: WaitNode | null): boolean {
  * bounded by `options.maxBreadth` (default 10, matching OpenFGA's
  * default `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT`; pass Infinity for
  * unbounded fanout).
- * Breadth never changes the boolean result or whether a check
- * resolves versus rejects; when several branches fail, which
- * branch's error surfaces depends on completion order — the same
- * nondeterminism OpenFGA has.
+ * Breadth changes the boolean result only where a cycle reaches
+ * an intersection operand — INTERSECTION_REDUCER carries a cycled
+ * operand's indeterminacy out with its denial, so which operand
+ * wins the race can decide the answer one level up. Otherwise it
+ * changes only which branch's error surfaces when several fail,
+ * which depends on completion order — the same nondeterminism
+ * OpenFGA has.
  */
 // `async` is load-bearing: `createCheckScope` validates
 // `maxBreadth` and throws, and an option error must reach the

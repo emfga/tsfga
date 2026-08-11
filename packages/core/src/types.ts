@@ -246,10 +246,16 @@ export interface CheckOptions {
    * Maximum number of branches of one resolution node evaluated
    * concurrently (default: 10, matching OpenFGA's default
    * `OPENFGA_RESOLVE_NODE_BREADTH_LIMIT`; pass Infinity to
-   * restore unbounded fanout). Bounding breadth never changes
-   * the boolean result or whether a check errors — only which
-   * branch's error surfaces when several fail. Must be an
-   * integer >= 1, or Infinity.
+   * restore unbounded fanout). Must be an integer >= 1, or
+   * Infinity.
+   *
+   * Bounding breadth changes the boolean result on exactly one
+   * shape: a cycle reaching an intersection operand, where which
+   * operand wins the race decides whether the denial carries its
+   * indeterminacy out, and breadth decides whether the operands
+   * race at all. Everywhere else it changes only which branch's
+   * error surfaces when several fail. Upstream behaves the same
+   * way. See "Bounded breadth" in the README.
    */
   maxBreadth?: number;
   /**

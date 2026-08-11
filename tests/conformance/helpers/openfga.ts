@@ -28,6 +28,10 @@ const MODEL_REFUSAL_CODES: ReadonlySet<string> = new Set([
   ErrorCode.UnknownRelation,
   ErrorCode.InvalidWriteInput,
   ErrorCode.WriteFailedDueToInvalidInput,
+  // The engine declining to resolve is a refusal about the
+  // request, not a transport failure: it is what OpenFGA answers
+  // instead of a boolean when the model is too deeply nested.
+  ErrorCode.AuthorizationModelResolutionTooComplex,
 ]);
 
 /** How OpenFGA refused, when it refused for a reason the model owns. */
