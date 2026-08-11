@@ -13,6 +13,7 @@ import type {
   CheckOptions,
   CheckRequest,
   ConditionDefinition,
+  ListObjectsRequest,
   RelationConfig,
   RemoveTupleRequest,
 } from "./types.ts";
@@ -56,8 +57,9 @@ export interface TsfgaClient {
   /**
    * List object IDs of a type for which the subject passes a full
    * check. Candidates come from `listCandidateObjectIds`
-   * (pre-filter); the optional `context` is forwarded to each
-   * per-object check for CEL condition evaluation.
+   * (pre-filter) together with the objects any contextual tuples
+   * name; the optional `context` is forwarded to each per-object
+   * check for CEL condition evaluation.
    *
    * Candidates are checked concurrently, bounded by `maxBreadth`,
    * and share one relation-config cache and one node memo for the
@@ -67,14 +69,12 @@ export interface TsfgaClient {
    *   candidate in candidate order — including
    *   `DepthExceededError`, which aborts the whole call rather
    *   than dropping that one object.
+   * @throws RelationConfigNotFoundError, InvalidSubjectTypeError or
+   *   InvalidConditionalTupleError when a contextual tuple fails
+   *   the same validation `addTuple` applies. Raised once for the
+   *   call, before any candidate is checked.
    */
-  listObjects(
-    objectType: string,
-    relation: string,
-    subjectType: string,
-    subjectId: string,
-    context?: Record<string, unknown>,
-  ): Promise<string[]>;
+  listObjects(request: ListObjectsRequest): Promise<string[]>;
   /**
    * List direct subjects only — no userset or relation expansion.
    *
@@ -139,22 +139,8 @@ export function createTsfga(
       return store.deleteTuple(request);
     },
 
-    listObjects(
-      objectType: string,
-      relation: string,
-      subjectType: string,
-      subjectId: string,
-      context?: Record<string, unknown>,
-    ): Promise<string[]> {
-      return listObjects(
-        store,
-        objectType,
-        relation,
-        subjectType,
-        subjectId,
-        context,
-        options,
-      );
+    listObjects(request: ListObjectsRequest): Promise<string[]> {
+      return listObjects(store, request, options);
     },
 
     async listSubjects(
@@ -265,6 +251,7 @@ export type {
   ConditionParameterScalarType,
   ConditionParameterType,
   IntersectionOperand,
+  ListObjectsRequest,
   RelationConfig,
   RemoveTupleRequest,
   Tuple,

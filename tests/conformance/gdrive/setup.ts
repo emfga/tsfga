@@ -39,6 +39,8 @@ const uuidMap = new Map<string, string>([
   ["design", "00000000-0000-4000-be00-000000000007"],
   ["public", "00000000-0000-4000-be00-000000000008"],
   ["private", "00000000-0000-4000-be00-000000000009"],
+  // Named by no stored tuple: only a contextual tuple reaches it.
+  ["extra", "00000000-0000-4000-be00-00000000000a"],
 ]);
 
 export function uuid(name: string): string {

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, test } from "bun:test";
-import type { TsfgaClient } from "@tsfga/core";
+import type { AddTupleRequest, TsfgaClient } from "@tsfga/core";
 import type { DB } from "@tsfga/kysely";
 import type { Kysely } from "kysely";
 import { setupGdrive, teardownGdrive, uuid } from "./gdrive/setup.ts";
@@ -123,5 +123,104 @@ describe("listObjects Conformance", () => {
 
   test("the control: a direct relation needs no expansion", async () => {
     await expectObjects("group", "member", "alice", ["engineering"]);
+  });
+
+  /**
+   * `ListObjectsRequest` carries `contextual_tuples` upstream. The
+   * tsfga signature had nowhere to put them, so none of this could
+   * be written at all before the request object replaced the flat
+   * arguments.
+   */
+  describe("contextual tuples", () => {
+    /** As `expectObjects`, with tuples that exist for the call. */
+    async function expectObjectsWith(
+      objectType: string,
+      relation: string,
+      subject: string,
+      contextualTuples: AddTupleRequest[],
+      expected: string[],
+    ): Promise<void> {
+      await expectListObjectsConformance(
+        storeId,
+        authorizationModelId,
+        tsfgaClient,
+        {
+          objectType,
+          relation,
+          subjectType: "user",
+          subjectId: uuid(subject),
+          contextualTuples,
+        },
+        expected.map(uuid),
+      );
+    }
+
+    test("a contextual direct tuple adds an object", async () => {
+      // charlie writes nothing; owning doc:private makes him a
+      // writer of it and of nothing else.
+      await expectObjectsWith(
+        "doc",
+        "can_write",
+        "charlie",
+        [
+          {
+            objectType: "doc",
+            objectId: uuid("private"),
+            relation: "owner",
+            subjectType: "user",
+            subjectId: uuid("charlie"),
+          },
+        ],
+        ["private"],
+      );
+    });
+
+    test("a contextual userset tuple expands", async () => {
+      // The tuple grants group:engineering#member on doc:design,
+      // and alice is a member, so the object must appear through an
+      // expansion rather than through the row itself.
+      await expectObjectsWith(
+        "doc",
+        "viewer",
+        "alice",
+        [
+          {
+            objectType: "doc",
+            objectId: uuid("design"),
+            relation: "viewer",
+            subjectType: "group",
+            subjectId: uuid("engineering"),
+            subjectRelation: "member",
+          },
+        ],
+        ["design", "private"],
+      );
+    });
+
+    test("an object only a contextual tuple names is still an answer", async () => {
+      // doc:extra has no stored tuple at all, so it is not in the
+      // candidate pool the store reports. Upstream returns it, and
+      // passing the pool straight through would have left it out
+      // with no error.
+      await expectObjectsWith(
+        "doc",
+        "can_write",
+        "charlie",
+        [
+          {
+            objectType: "doc",
+            objectId: uuid("extra"),
+            relation: "owner",
+            subjectType: "user",
+            subjectId: uuid("charlie"),
+          },
+        ],
+        ["extra"],
+      );
+    });
+
+    test("the control: no contextual tuples, no objects", async () => {
+      await expectObjects("doc", "can_write", "charlie", []);
+    });
   });
 });

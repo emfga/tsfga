@@ -84,6 +84,21 @@ export async function expectPinnedDivergence(
   expect(tsfgaResult).toBe(expected.tsfga);
 }
 
+/** A tuple as OpenFGA's contextual-tuple field spells it. */
+function asFgaTuple(tuple: AddTupleRequest): {
+  user: string;
+  relation: string;
+  object: string;
+} {
+  return {
+    user: tuple.subjectRelation
+      ? `${tuple.subjectType}:${tuple.subjectId}#${tuple.subjectRelation}`
+      : `${tuple.subjectType}:${tuple.subjectId}`,
+    relation: tuple.relation,
+    object: `${tuple.objectType}:${tuple.objectId}`,
+  };
+}
+
 /** Run one check on both engines, in parallel. */
 async function runBoth(
   storeId: string,
@@ -91,13 +106,7 @@ async function runBoth(
   tsfgaClient: TsfgaClient,
   params: CheckRequest,
 ): Promise<[CheckOutcome, CheckOutcome]> {
-  const contextualTuples = params.contextualTuples?.map((t) => ({
-    user: t.subjectRelation
-      ? `${t.subjectType}:${t.subjectId}#${t.subjectRelation}`
-      : `${t.subjectType}:${t.subjectId}`,
-    relation: t.relation,
-    object: `${t.objectType}:${t.objectId}`,
-  }));
+  const contextualTuples = params.contextualTuples?.map(asFgaTuple);
 
   const [tsfgaResult, openFgaRaw] = await Promise.all([
     tsfgaClient
@@ -134,6 +143,8 @@ export interface ListObjectsParams {
   relation: string;
   subjectType: string;
   subjectId: string;
+  context?: Record<string, unknown>;
+  contextualTuples?: AddTupleRequest[];
 }
 
 /**
@@ -157,13 +168,11 @@ export async function expectListObjectsConformance(
   expected: readonly string[],
 ): Promise<void> {
   const [tsfgaObjects, openFgaObjects] = await Promise.all([
-    tsfgaClient.listObjects(
-      params.objectType,
-      params.relation,
-      params.subjectType,
-      params.subjectId,
-    ),
-    fgaListObjects(storeId, authorizationModelId, params),
+    tsfgaClient.listObjects(params),
+    fgaListObjects(storeId, authorizationModelId, {
+      ...params,
+      contextualTuples: params.contextualTuples?.map(asFgaTuple),
+    }),
   ]);
 
   const tsfgaResult = [...tsfgaObjects].sort();

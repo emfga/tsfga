@@ -1,6 +1,11 @@
-import { createCheckScope, runCheck } from "./check.ts";
+import {
+  createCheckScope,
+  runCheck,
+  validateContextualTuples,
+} from "./check.ts";
+import { ContextualTupleStore } from "./contextual-store.ts";
 import type { TupleStore } from "./store-interface.ts";
-import type { CheckOptions } from "./types.ts";
+import type { CheckOptions, ListObjectsRequest } from "./types.ts";
 
 /**
  * List object IDs of a type for which the subject passes a full
@@ -31,18 +36,30 @@ import type { CheckOptions } from "./types.ts";
  * The returned array is in candidate order. That is a tsfga
  * determinism choice rather than parity — upstream streams objects
  * in completion order from its pool.
+ *
+ * Contextual tuples are applied **once, to the whole call**, not
+ * per candidate. `runCheck` gives a request carrying them its own
+ * memo, because a result resolved over them is not shareable with
+ * one resolved without; here every candidate sees the same overlay,
+ * so the scope memo stays shared and the saving this function
+ * exists for survives.
  */
 export async function listObjects(
   store: TupleStore,
-  objectType: string,
-  relation: string,
-  subjectType: string,
-  subjectId: string,
-  context?: Record<string, unknown>,
+  request: ListObjectsRequest,
   options: CheckOptions = {},
 ): Promise<string[]> {
-  const scope = createCheckScope(store, options);
-  const candidateIds = await store.listCandidateObjectIds(objectType);
+  const { objectType, relation, subjectType, subjectId, context } = request;
+  const contextualTuples = request.contextualTuples ?? [];
+  if (contextualTuples.length > 0) {
+    await validateContextualTuples(store, contextualTuples);
+  }
+  const resolutionStore =
+    contextualTuples.length > 0
+      ? new ContextualTupleStore(store, contextualTuples)
+      : store;
+  const scope = createCheckScope(resolutionStore, options);
+  const candidateIds = await resolutionStore.listCandidateObjectIds(objectType);
 
   return resolveCandidates(candidateIds, scope.maxBreadth, (objectId) =>
     runCheck(scope, {

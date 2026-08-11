@@ -13,6 +13,7 @@ import {
   validateTupleWrite,
 } from "./tuple-validation.ts";
 import type {
+  AddTupleRequest,
   CheckOptions,
   CheckRequest,
   CheckTuples,
@@ -489,6 +490,31 @@ export function createCheckScope(
   };
 }
 
+/**
+ * Contextual tuples must pass exactly the validation `addTuple`
+ * applies, before any of them is read.
+ *
+ * Validated concurrently but reported in **tuple order**, not
+ * completion order, so which error a caller sees does not depend
+ * on which store read finished first.
+ *
+ * Shared with `listObjects`, which applies one overlay to a whole
+ * call rather than one per check.
+ */
+export async function validateContextualTuples(
+  store: TupleStore,
+  tuples: readonly AddTupleRequest[],
+): Promise<void> {
+  const validations = await Promise.allSettled(
+    tuples.map((tuple) => validateTupleWrite(store, tuple)),
+  );
+  for (const validation of validations) {
+    if (validation.status === "rejected") {
+      throw validation.reason;
+    }
+  }
+}
+
 /** Run one check in a scope. Internal; see `CheckScope`. */
 export async function runCheck(
   scope: CheckScope,
@@ -499,19 +525,7 @@ export async function runCheck(
   // Wrap store with contextual tuples for the whole request.
   // Contextual tuples must pass the same validation as addTuple.
   if (request.contextualTuples?.length) {
-    // Validate all contextual tuples concurrently; surface the
-    // first failure in tuple order (not completion order) so the
-    // thrown error is deterministic.
-    const validations = await Promise.allSettled(
-      request.contextualTuples.map((tuple) =>
-        validateTupleWrite(scope.store, tuple),
-      ),
-    );
-    for (const validation of validations) {
-      if (validation.status === "rejected") {
-        throw validation.reason;
-      }
-    }
+    await validateContextualTuples(scope.store, request.contextualTuples);
     // These tuples exist for this request only, so results resolved
     // over them are not shareable — and results already in the
     // scope's memo were resolved over a graph missing them. Neither

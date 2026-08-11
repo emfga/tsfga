@@ -6,11 +6,27 @@ import { listObjects } from "../src/list-objects.ts";
 import type {
   CheckTuples,
   CheckTuplesQuery,
+  ListObjectsRequest,
   RelationConfig,
   Tuple,
 } from "../src/types.ts";
 import { delay, StoreReadFailure } from "./helpers/erroring-store.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
+
+/**
+ * The one request every scope, breadth and ordering test asks.
+ *
+ * Named rather than repeated because these tests are about how the
+ * candidates are resolved, not about which request they answer:
+ * the request is the fixture's constant, and spelling it out
+ * eleven times invited it to drift.
+ */
+const ALICE_VIEWER: ListObjectsRequest = {
+  objectType: "doc",
+  relation: "viewer",
+  subjectType: "user",
+  subjectId: "alice",
+};
 
 function makeTuple(overrides: Partial<Tuple> = {}): Tuple {
   return {
@@ -164,7 +180,7 @@ describe("listObjects", () => {
       seedSharedSubtree(5);
       store.resetCounts();
 
-      await listObjects(store, "doc", "viewer", "user", "alice");
+      await listObjects(store, ALICE_VIEWER);
 
       expect(store.callsWith("findRelationConfig", "doc", "viewer")).toBe(1);
       expect(store.callsWith("findRelationConfig", "folder", "member")).toBe(1);
@@ -177,7 +193,7 @@ describe("listObjects", () => {
       seedSharedSubtree(5);
       store.resetCounts();
 
-      await listObjects(store, "doc", "viewer", "user", "alice", undefined, {
+      await listObjects(store, ALICE_VIEWER, {
         maxBreadth: 1,
       });
 
@@ -220,7 +236,7 @@ describe("listObjects", () => {
       // Long enough that all eight would overlap if unbounded.
       for (const id of docIds(8)) store.delays.set(id, 10);
 
-      await listObjects(store, "doc", "viewer", "user", "alice", undefined, {
+      await listObjects(store, ALICE_VIEWER, {
         maxBreadth: 3,
       });
 
@@ -230,7 +246,7 @@ describe("listObjects", () => {
     test("breadth 1 runs candidates one at a time", async () => {
       seedSharedSubtree(4);
 
-      await listObjects(store, "doc", "viewer", "user", "alice", undefined, {
+      await listObjects(store, ALICE_VIEWER, {
         maxBreadth: 1,
       });
 
@@ -241,7 +257,7 @@ describe("listObjects", () => {
       seedSharedSubtree(2);
 
       await expect(
-        listObjects(store, "doc", "viewer", "user", "alice", undefined, {
+        listObjects(store, ALICE_VIEWER, {
           maxBreadth: 0,
         }),
       ).rejects.toBeInstanceOf(Error);
@@ -268,7 +284,7 @@ describe("listObjects", () => {
       store.delays.set("4", 1);
 
       expect(
-        await listObjects(store, "doc", "viewer", "user", "alice", undefined, {
+        await listObjects(store, ALICE_VIEWER, {
           maxBreadth: 4,
         }),
       ).toEqual(["1", "4"]);
@@ -288,7 +304,7 @@ describe("listObjects", () => {
 
       expect(
         await failureMessage(
-          listObjects(store, "doc", "viewer", "user", "alice", undefined, {
+          listObjects(store, ALICE_VIEWER, {
             maxBreadth: 4,
           }),
         ),
@@ -300,7 +316,7 @@ describe("listObjects", () => {
       store.failures.set("2", new StoreReadFailure("doc:2 failed"));
 
       await failureMessage(
-        listObjects(store, "doc", "viewer", "user", "alice", undefined, {
+        listObjects(store, ALICE_VIEWER, {
           maxBreadth: 1,
         }),
       );
@@ -323,11 +339,9 @@ describe("listObjects", () => {
       );
       store.failures.set("3", new StoreReadFailure("doc:3 failed"));
 
-      expect(
-        await failureMessage(
-          listObjects(store, "doc", "viewer", "user", "alice"),
-        ),
-      ).toBe("doc:3 failed");
+      expect(await failureMessage(listObjects(store, ALICE_VIEWER))).toBe(
+        "doc:3 failed",
+      );
     });
 
     test("depth exhaustion aborts the whole call", async () => {
@@ -336,7 +350,7 @@ describe("listObjects", () => {
       seedSharedSubtree(3);
 
       await expect(
-        listObjects(store, "doc", "viewer", "user", "alice", undefined, {
+        listObjects(store, ALICE_VIEWER, {
           maxDepth: 1,
         }),
       ).rejects.toBeInstanceOf(DepthExceededError);
@@ -347,9 +361,7 @@ describe("listObjects", () => {
     test("an empty candidate list resolves to an empty array", async () => {
       // The pool must settle with nothing ever launched rather
       // than hanging on a promise no callback will resolve.
-      expect(
-        await listObjects(store, "doc", "viewer", "user", "alice"),
-      ).toEqual([]);
+      expect(await listObjects(store, ALICE_VIEWER)).toEqual([]);
     });
   });
 
@@ -358,12 +370,7 @@ describe("listObjects", () => {
       seedSharedSubtree(6);
       for (const id of docIds(6)) store.delays.set(id, 10);
 
-      await createTsfga(store, { maxBreadth: 2 }).listObjects(
-        "doc",
-        "viewer",
-        "user",
-        "alice",
-      );
+      await createTsfga(store, { maxBreadth: 2 }).listObjects(ALICE_VIEWER);
 
       expect(store.peakInFlight).toBe(2);
     });

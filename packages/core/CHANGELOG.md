@@ -139,6 +139,36 @@ releases may contain breaking changes).
   at evaluation instead. Documented in the README and pinned
   two-sided.
 
+- **BREAKING: `listObjects` takes a request object and accepts
+  contextual tuples.** `CheckRequest` has carried
+  `contextualTuples` and both `check` and `checkMany` honour them,
+  but `listObjects` took flat positional arguments with nowhere to
+  put them, while upstream's `ListObjectsRequest` has
+  `contextual_tuples`. The published API could not express what
+  the operation it mirrors supports.
+
+  ```diff
+  - fga.listObjects("doc", "viewer", "user", "alice", context)
+  + fga.listObjects({ objectType: "doc", relation: "viewer",
+  +                   subjectType: "user", subjectId: "alice",
+  +                   context, contextualTuples })
+  ```
+
+  The flat form was an accidental design rather than a considered
+  one, so it is replaced rather than kept alive behind an
+  overload. The exported `ListObjectsRequest` type is new.
+
+  Contextual tuples apply once to the whole call, not once per
+  candidate, so the shared node memo that makes `listObjects`
+  cheaper than N checks survives them. They are validated exactly
+  as `addTuple` validates a write, before any candidate is
+  checked. `ContextualTupleStore.listCandidateObjectIds` now
+  unions in the objects they name: the pool is a pre-filter, and
+  an object no stored tuple mentions is still an answer if a
+  contextual tuple puts the subject on it — upstream returns it,
+  and passing the pool through unchanged left it out with no
+  error.
+
 ### Documented
 
 - **Sub-millisecond timestamps are a known divergence.** Go's

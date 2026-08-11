@@ -2657,9 +2657,14 @@ describe("createTsfga client", () => {
 
     test("returns only objects the subject can access", async () => {
       const fga = createTsfga(store);
-      expect(await fga.listObjects("doc", "viewer", "user", "alice")).toEqual([
-        "1",
-      ]);
+      expect(
+        await fga.listObjects({
+          objectType: "doc",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toEqual(["1"]);
     });
 
     test("propagates context to per-object checks", async () => {
@@ -2679,15 +2684,17 @@ describe("createTsfga client", () => {
         }),
       );
       const fga = createTsfga(store);
+      const request = {
+        objectType: "doc",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+      };
       expect(
-        await fga.listObjects("doc", "viewer", "user", "alice", {
-          region: "us",
-        }),
+        await fga.listObjects({ ...request, context: { region: "us" } }),
       ).toEqual(["1", "3"]);
       expect(
-        await fga.listObjects("doc", "viewer", "user", "alice", {
-          region: "eu",
-        }),
+        await fga.listObjects({ ...request, context: { region: "eu" } }),
       ).toEqual(["1"]);
     });
   });

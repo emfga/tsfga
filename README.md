@@ -118,7 +118,7 @@ following methods:
 | `checkMany(requests)` | Check several requests in one shared resolution scope |
 | `addTuple(request)` | Insert or update a relationship tuple |
 | `removeTuple(request)` | Delete a relationship tuple |
-| `listObjects(objectType, relation, subjectType, subjectId)` | List object IDs the subject can access |
+| `listObjects(request)` | List object IDs the subject can access |
 | `listSubjects(objectType, objectId, relation)` | List direct subjects for an object + relation |
 | `writeRelationConfig(config)` | Insert or update a relation configuration |
 | `deleteRelationConfig(objectType, relation)` | Delete a relation configuration |

@@ -206,6 +206,29 @@ export interface CheckRequest {
   contextualTuples?: AddTupleRequest[];
 }
 
+/**
+ * Parameters for a list-objects request.
+ *
+ * A request object rather than positional arguments because
+ * upstream's `ListObjectsRequest` carries `contextual_tuples` and
+ * the flat form had nowhere to put them.
+ */
+export interface ListObjectsRequest {
+  objectType: string;
+  relation: string;
+  subjectType: string;
+  subjectId: string;
+  /** Forwarded to every per-candidate check. */
+  context?: Record<string, unknown>;
+  /**
+   * Tuples that exist for this request only. Validated exactly as
+   * `addTuple` validates a write, once for the whole call, and
+   * their objects join the candidate pool — an object reachable
+   * only through a contextual tuple is still an answer.
+   */
+  contextualTuples?: AddTupleRequest[];
+}
+
 /** Options for the check algorithm */
 export interface CheckOptions {
   /** Maximum recursion depth (default: 25) */

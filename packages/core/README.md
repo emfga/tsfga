@@ -73,7 +73,7 @@ const allowed = await fga.check({
 | `checkMany(requests)` | Check several requests in one shared resolution scope; outcomes in request order |
 | `addTuple(request)` | Insert or update a relationship tuple |
 | `removeTuple(request)` | Delete a relationship tuple |
-| `listObjects(objectType, relation, subjectType, subjectId, context?)` | List object IDs the subject can access, in candidate order; `context` is forwarded to each check |
+| `listObjects(request)` | List object IDs the subject can access, in candidate order; the request takes `context` and `contextualTuples` |
 | `listSubjects(objectType, objectId, relation)` | List direct subjects for an object + relation (no expansion) |
 | `writeRelationConfig(config)` | Insert or update a relation configuration |
 | `deleteRelationConfig(objectType, relation)` | Delete a relation configuration |
@@ -409,6 +409,18 @@ const [canView, canEdit] = await fga.checkMany([
   a tuple cache — a cache would hide that write.
 
 ## listObjects
+
+`listObjects` takes a request object — `objectType`, `relation`,
+`subjectType`, `subjectId`, and optionally `context` and
+`contextualTuples` — mirroring upstream's `ListObjectsRequest`.
+
+Contextual tuples are applied once to the whole call rather than
+once per candidate, so every candidate sees the same overlay and
+the shared node memo below still holds. They are validated exactly
+as `addTuple` validates a write, before any candidate is checked,
+and the objects they name join the candidate pool: an object no
+stored tuple mentions is still an answer if a contextual tuple
+puts the subject on it.
 
 Candidates come from `listCandidateObjectIds`, which is only a
 pre-filter: every candidate still goes through a full `check`.

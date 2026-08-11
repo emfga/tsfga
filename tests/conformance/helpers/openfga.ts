@@ -213,6 +213,8 @@ export interface FgaListObjectsParams {
   relation: string;
   subjectType: string;
   subjectId: string;
+  context?: Record<string, unknown>;
+  contextualTuples?: FgaContextualTuple[];
 }
 
 /**
@@ -240,6 +242,8 @@ export async function fgaListObjects(
       user: `${params.subjectType}:${params.subjectId}`,
       relation: params.relation,
       type: params.objectType,
+      context: params.context,
+      contextualTuples: params.contextualTuples,
     },
     { authorizationModelId },
   );

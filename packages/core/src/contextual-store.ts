@@ -147,8 +147,28 @@ export class ContextualTupleStore implements TupleStore {
     return this.inner.deleteTuple(tuple);
   }
 
-  listCandidateObjectIds(objectType: string): Promise<string[]> {
-    return this.inner.listCandidateObjectIds(objectType);
+  /**
+   * The stored candidates, plus every object a contextual tuple
+   * names of this type.
+   *
+   * The pool is a pre-filter for `listObjects`, and a contextual
+   * tuple can be the only reason an object belongs in the answer —
+   * upstream returns such an object, and passing the call straight
+   * through would leave it out with no error. Ids the store already
+   * returned are not repeated, since a duplicate candidate would
+   * appear twice in the result.
+   */
+  async listCandidateObjectIds(objectType: string): Promise<string[]> {
+    const stored = await this.inner.listCandidateObjectIds(objectType);
+    const seen = new Set(stored);
+    const extra: string[] = [];
+    for (const tuple of this.contextualTuples) {
+      if (tuple.objectType !== objectType) continue;
+      if (seen.has(tuple.objectId)) continue;
+      seen.add(tuple.objectId);
+      extra.push(tuple.objectId);
+    }
+    return extra.length === 0 ? stored : [...stored, ...extra];
   }
 
   upsertRelationConfig(config: RelationConfig): Promise<void> {
