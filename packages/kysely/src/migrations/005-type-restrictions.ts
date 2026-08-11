@@ -78,7 +78,18 @@ export async function down(db: Kysely<unknown>): Promise<void> {
 
   await db.schema
     .alterTable("tsfga.relation_configs")
-    .addColumn("directly_assignable_types", sql`text[]`)
+    // `001` declares this nullable with no default, but pre-005
+    // core reads a null as "no restriction". Restoring it as null
+    // would widen every relation the rollback touches, so it is
+    // added empty and the default dropped, as below.
+    .addColumn("directly_assignable_types", sql`text[]`, (col) =>
+      col.defaultTo(sql`'{}'::text[]`),
+    )
+    .execute();
+
+  await db.schema
+    .alterTable("tsfga.relation_configs")
+    .alterColumn("directly_assignable_types", (col) => col.dropDefault())
     .execute();
 
   await db.schema

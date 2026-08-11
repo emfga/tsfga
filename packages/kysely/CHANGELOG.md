@@ -51,6 +51,15 @@ releases may contain breaking changes).
 
 ### Fixed
 
+- **Rolling migration `005` back restores an empty type column,
+  not a null one.** `down` added `directly_assignable_types` with
+  no default, so every restored row read `NULL`, which pre-005
+  core treats as "no type restriction" — a rollback that widened
+  every relation it touched. It now adds the column defaulted to
+  `'{}'` and drops the default, the same dance `down` already
+  performed for `allows_userset_subjects` beside it. An empty
+  `text[]` admits nothing, so the rollback fails closed like `up`.
+
 - **A consumer's result-transforming plugin no longer corrupts
   adapter reads.** `CamelCasePlugin.transformResult` renames every
   result-row key regardless of how the query was built, so a

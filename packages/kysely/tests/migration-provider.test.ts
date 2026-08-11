@@ -87,4 +87,48 @@ describe("migrationProvider", () => {
     expect(error).toBe(undefined);
     expect(results).toHaveLength(0);
   });
+
+  /**
+   * Rolling `005` back must leave the restored column empty rather
+   * than null: pre-005 core reads a null
+   * `directly_assignable_types` as "no restriction", so a null
+   * rollback would silently widen every relation it restores.
+   */
+  test("rolling back 005 restores an empty type column", async () => {
+    await db
+      .withTables<{
+        "tsfga.relation_configs": {
+          object_type: string;
+          relation: string;
+          directly_assignable: string;
+        };
+      }>()
+      .insertInto("tsfga.relation_configs")
+      .values({
+        object_type: "document",
+        relation: "viewer",
+        directly_assignable: JSON.stringify([{ type: "user" }]),
+      })
+      .execute();
+
+    const migrator = new Migrator({ db, provider: migrationProvider });
+    const { error } = await migrator.migrateDown();
+    expect(error).toBe(undefined);
+
+    const rows = await db
+      .withTables<{
+        "tsfga.relation_configs": {
+          object_type: string;
+          directly_assignable_types: string[] | null;
+        };
+      }>()
+      .selectFrom("tsfga.relation_configs")
+      .select("directly_assignable_types")
+      .where("object_type", "=", "document")
+      .execute();
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.directly_assignable_types).not.toBeNull();
+    expect(rows[0]?.directly_assignable_types).toEqual([]);
+  });
 });
