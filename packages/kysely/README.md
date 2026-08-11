@@ -24,7 +24,8 @@ The floor moved to 0.6.0 rather than the ceiling widening,
 because core 0.6.0 changed `TupleStore` itself — `RelationConfig`
 holds one `directlyAssignable` list of structured type
 restrictions, `CheckTuplesQuery` carries a ref set per part
-instead of two booleans, and `listDirectSubjects` is gone. This
+instead of the three `include*` booleans, and
+`listDirectSubjects` is gone. This
 adapter does not work with earlier cores, and earlier adapters do
 not work with this core.
 
@@ -77,7 +78,18 @@ that need direct access.
 This migration replaces `directly_assignable_types` and
 `allows_userset_subjects` on `tsfga.relation_configs` with a
 single `directly_assignable` (jsonb, NOT NULL) holding OpenFGA
-type restrictions: `["user", "user:*", "team#member"]`.
+type restrictions as objects, one per admitted assignment:
+
+```json
+[{"type": "user"},
+ {"type": "user", "wildcard": true},
+ {"type": "team", "relation": "member"},
+ {"type": "user", "condition": "weekday_only"}]
+```
+
+The adapter validates this shape on every read and raises
+`InvalidStoredDataError` on anything else — a bare string entry
+included, which is what the column held before this migration.
 
 **Existing relation configs are not converted, and cannot be.**
 `allows_userset_subjects = true` does not record which usersets
@@ -116,7 +128,16 @@ concurrent writer cannot invalidate what was read.
 
 **Use `SERIALIZABLE`.** It preserves the invariant with no extra
 API surface — the losing transaction aborts with `40001` and you
-retry it:
+retry it.
+
+**It holds only if every writer that can invalidate the read is
+also `SERIALIZABLE`.** PostgreSQL detects the conflict from the
+predicate locks the serializable readers take, so a concurrent
+`READ COMMITTED` writer — another service, a migration, a
+psql session, or one path in your own application that forgot the
+isolation level — is not part of that bookkeeping and is never
+aborted. This is a property of the whole set of writers on the
+table, not of the transaction below.
 
 ```typescript
 await db.transaction().setIsolationLevel("serializable").execute(
@@ -190,6 +211,43 @@ connection held instead of up to three. The latter is usually the
 bigger effect: branches of a node resolve concurrently up to
 `maxBreadth`, so three reads per node meant a wide node could ask
 the pool for three times as many connections as it has branches.
+
+### Size the pool for the fanout, not for the call
+
+`maxBreadth` bounds the branches of **one** node, not the call, so
+concurrent reads compound with every further level of dispatch.
+Measured with an instrumented store counting simultaneous reads,
+at the shipped defaults (`maxBreadth` 10, `maxConcurrentChecks`
+50):
+
+| call | grants one dispatch away | two | three |
+|---|---|---|---|
+| `check` | 10 | 100 | 1000 |
+| `listObjects` | 100 | 1000 | 10000 |
+| `checkMany` | 500 | 5000 | 50000 |
+
+Each row is the one above it times a factor the call adds —
+`maxBreadth` again for `listObjects`, which checks candidates
+concurrently at the same bound, and `maxConcurrentChecks` for
+`checkMany` — and each column is the previous one times
+`maxBreadth`, because a userset or tuple-to-userset row dispatches
+to another object whose own branches then fan out again. The
+exponent is the model's dispatch depth, which `maxDepth` caps at
+25.
+
+A pool smaller than the peak does not break anything: the excess
+reads queue. But they queue *holding* the branches that are
+waiting on them, so a pool sized for the first column against a
+model shaped like the third turns concurrency into a queue and
+the latency win into its opposite. Lower `maxBreadth` if that is
+the trade you want — it is the same knob on both.
+
+Inside a transaction the whole question dissolves: every store
+call runs on the transaction's one connection, so the peak is 1
+and the queries serialize there instead of at the pool. The
+concurrency knobs then buy nothing — which is worth knowing,
+because scoping a client to a transaction is a documented and
+otherwise unremarkable thing to do.
 
 Which plan PostgreSQL picks depends on the disjuncts. Asking for
 one part gives the same plan as before this was merged. Asking
