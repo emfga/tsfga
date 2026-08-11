@@ -6,10 +6,24 @@ import {
   type CheckRequest,
   formatRestriction,
   type RelationConfig,
+  TsfgaError,
   type TsfgaClient,
   type TypeRestriction,
 } from "@tsfga/core";
 import { fgaCheck, fgaWrite } from "./openfga.ts";
+
+/**
+ * What a check may do: answer, or decline to answer.
+ *
+ * "refused" is an outcome rather than a failure because several
+ * parity shapes are ones where *both* engines refuse -- the
+ * coercion matrix is largely "OpenFGA refuses and tsfga answers",
+ * and a check on a relation the model does not define is a refusal
+ * upstream. Collapsing that into a thrown error, as this helper
+ * used to, made those cases unassertable: a refusal could only
+ * ever fail a test, never satisfy one.
+ */
+export type CheckOutcome = boolean | "refused";
 
 /**
  * Assert that tsfga and OpenFGA return the same result for a permission check.
@@ -20,7 +34,7 @@ export async function expectConformance(
   authorizationModelId: string,
   tsfgaClient: TsfgaClient,
   params: CheckRequest,
-  expected: boolean,
+  expected: CheckOutcome,
 ): Promise<void> {
   const contextualTuples = params.contextualTuples?.map((t) => ({
     user: t.subjectRelation
@@ -30,8 +44,16 @@ export async function expectConformance(
     object: `${t.objectType}:${t.objectId}`,
   }));
 
-  const [tsfgaResult, openFgaResult] = await Promise.all([
-    tsfgaClient.check(params),
+  const [tsfgaResult, openFgaRaw] = await Promise.all([
+    tsfgaClient
+      .check(params)
+      .then((allowed): CheckOutcome => allowed)
+      .catch((error: unknown): CheckOutcome => {
+        // Only tsfga's own refusals count as a refusal. Anything
+        // else is a broken fixture masquerading as agreement.
+        if (error instanceof TsfgaError) return "refused";
+        throw error;
+      }),
     fgaCheck(storeId, authorizationModelId, {
       objectType: params.objectType,
       objectId: params.objectId,
@@ -43,9 +65,11 @@ export async function expectConformance(
     }),
   ]);
 
-  if (openFgaResult === null) {
-    throw new Error("OpenFGA returned an error");
+  if (openFgaRaw === null) {
+    throw new Error("OpenFGA returned no answer and no refusal");
   }
+  const openFgaResult: CheckOutcome =
+    typeof openFgaRaw === "boolean" ? openFgaRaw : "refused";
 
   // Both systems must agree
   expect(tsfgaResult).toBe(openFgaResult);
@@ -78,7 +102,14 @@ export async function expectWriteConformance(
     tsfgaClient
       .addTuple(tuple)
       .then(() => "accepted" as const)
-      .catch(() => "refused" as const),
+      .catch((error: unknown) => {
+        // A TsfgaError is the model refusing. Anything else -- a
+        // missing relation config from a mis-ordered fixture, a
+        // dropped connection -- would otherwise be reported as a
+        // refusal and satisfy the assertion it was meant to test.
+        if (error instanceof TsfgaError) return "refused" as const;
+        throw error;
+      }),
     fgaWrite(storeId, authorizationModelId, tuple),
   ]);
 

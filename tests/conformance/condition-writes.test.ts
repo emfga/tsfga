@@ -20,7 +20,11 @@ import {
   getDb,
   rollbackTransaction,
 } from "./helpers/db.ts";
-import { fgaCreateStore, fgaWriteModel } from "./helpers/openfga.ts";
+import {
+  fgaCreateStore,
+  fgaWriteModel,
+  fgaWriteOutcome,
+} from "./helpers/openfga.ts";
 
 /**
  * The write path validates the condition dimension, the same five
@@ -216,6 +220,16 @@ describe("Condition Write Validation Conformance", () => {
     });
   });
 
+  /**
+   * These assert tsfga's own cause strings, which upstream does not
+   * share -- OpenFGA's prose is its own and pinning it here would
+   * pin its wording rather than its behaviour. The two-sided claim
+   * this block makes is the one below it: that upstream separates
+   * the same five refusals into five distinct reasons, so tsfga's
+   * discrimination is no finer than what the model actually
+   * distinguishes. That both engines refuse at all is covered by
+   * "what is refused".
+   */
   describe("the cause is discriminated, as upstream discriminates it", () => {
     async function causeOf(
       overrides: Partial<AddTupleRequest>,
@@ -269,6 +283,33 @@ describe("Condition Write Validation Conformance", () => {
           conditionContext: { n: 4.5, stray: 1 },
         }),
       ).toBe("parameter type error");
+    });
+
+    test("upstream separates the same five refusals", async () => {
+      const cases: Array<Partial<AddTupleRequest>> = [
+        { relation: "conditioned" },
+        { conditionName: "cond_b" },
+        { conditionName: "cond_missing" },
+        { conditionName: "cond_a", conditionContext: { n: 4.5 } },
+        { conditionName: "cond_a", conditionContext: { n: 50, stray: 1 } },
+      ];
+
+      const reasons: string[] = [];
+      for (const overrides of cases) {
+        const outcome = await fgaWriteOutcome(
+          storeId,
+          authorizationModelId,
+          tuple(overrides),
+        );
+        // Every one of these must be refused upstream too, or the
+        // tsfga-side cause above is discriminating something the
+        // model does not.
+        expect(outcome).not.toBe("accepted");
+        if (outcome !== "accepted") reasons.push(outcome.reason);
+      }
+
+      expect(reasons).toHaveLength(5);
+      expect(new Set(reasons).size).toBe(5);
     });
   });
 

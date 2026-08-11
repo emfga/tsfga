@@ -217,8 +217,8 @@ describe("Condition Error vs Sibling Grant Conformance", () => {
 
   test("4: both systems error when nothing grants carl", async () => {
     // No context and no sibling path: the condition error is the
-    // only outcome. tsfga throws; OpenFGA returns an error (the
-    // helper maps it to null).
+    // only outcome, and both engines report it as a refusal
+    // rather than as an answer.
     await expect(
       tsfgaClient.check({
         objectType: "document",
@@ -236,7 +236,9 @@ describe("Condition Error vs Sibling Grant Conformance", () => {
       subjectType: "user",
       subjectId: uuid("carl"),
     });
-    expect(openFgaResult).toBeNull();
+    expect(typeof openFgaResult === "object" && openFgaResult !== null).toBe(
+      true,
+    );
   });
 
   test("5: carl's conditioned grant works with context", async () => {

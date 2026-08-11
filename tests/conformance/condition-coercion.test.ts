@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, test } from "bun:test";
 import { createTsfga, type TsfgaClient } from "@tsfga/core";
 import type { DB } from "@tsfga/kysely";
 import { KyselyTupleStore } from "@tsfga/kysely";
@@ -16,7 +16,6 @@ import {
   rollbackTransaction,
 } from "./helpers/db.ts";
 import {
-  fgaCheck,
   fgaCreateStore,
   fgaWriteModel,
   fgaWriteTuples,
@@ -118,23 +117,16 @@ describe("Condition Coercion Conformance", () => {
 
   /** Both systems must refuse to answer, not answer differently. */
   async function expectBothRefuse(n: unknown): Promise<void> {
-    const [tsfgaOutcome, openFgaResult] = await Promise.all([
-      tsfgaClient
-        .check(request(n))
-        .then((allowed) => `answered:${allowed}`)
-        .catch(() => "refused"),
-      fgaCheck(storeId, authorizationModelId, {
-        objectType: "doc",
-        objectId: uuid("d1"),
-        relation: "v",
-        subjectType: "user",
-        subjectId: uuid("alice"),
-        context: { n },
-      }),
-    ]);
-    expect(tsfgaOutcome).toBe("refused");
-    // `fgaCheck` reports an OpenFGA error as `null`.
-    expect(openFgaResult).toBeNull();
+    // Refusal is an outcome both engines can report, so this is
+    // the ordinary conformance assertion rather than a bespoke
+    // one that reads an error as an absent answer.
+    await expectConformance(
+      storeId,
+      authorizationModelId,
+      tsfgaClient,
+      request(n),
+      "refused",
+    );
   }
 
   describe("a numeric string is parsed, not rejected", () => {
