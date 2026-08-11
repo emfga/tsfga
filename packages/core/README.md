@@ -166,6 +166,28 @@ just `false`" makes `base:true but not subtract:cycle` grant,
 because the truncated exclusion reads as "not excluded". OpenFGA
 denies, and so does tsfga.
 
+### Known divergence: `uint`
+
+cel-js has no `uint` representation. An `int` and a `uint`
+parameter both reach CEL as a `bigint`, which is CEL's `int`, so
+two cells still differ from upstream:
+
+| expression | OpenFGA | tsfga |
+|---|---|---|
+| `type(n) == uint` | `true` | `false` |
+| `n + 1u == 8u` | `true` | error, no overload |
+
+Both are pinned two-sided in the conformance suite, so they
+cannot change without being noticed. `uint(n) + 1u == 8u` works
+on both, and `type(n) == int` agrees. `Environment.registerType`
+makes a real `uint` reachable in principle; it was judged not
+worth its cost rather than found impossible, and that judgement
+is the thing to revisit if these cells start mattering.
+
+Every other integer cell agrees, including the arithmetic
+operators, exact comparison past 2^53, saturation at the int64
+bounds, and overflow past them.
+
 ### Known divergence: recursive relations
 
 OpenFGA has dedicated resolvers for *recursive* relation shapes

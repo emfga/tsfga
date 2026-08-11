@@ -328,3 +328,112 @@ describe("condition parameter coercion", () => {
     expect(missing).toEqual([]);
   });
 });
+
+/**
+ * The integer path, which is the one place tsfga could answer a
+ * question confidently and wrongly.
+ *
+ * cel-js maps a JS `number` onto CEL's `double`, so an `int`
+ * parameter reached every arithmetic operator as the wrong type
+ * and every comparison past 2^53 as the wrong value. `bigint`
+ * fixes both, but only if the string is parsed directly: the value
+ * arrives as a string and `Number()` has already lost the
+ * precision by the time a `BigInt` could preserve it.
+ */
+describe("integer parameters are read as bigint", () => {
+  const int = (value: unknown): unknown =>
+    coerceContext({ n: "int" }, { n: value }).coerced["n"];
+  const uint = (value: unknown): unknown =>
+    coerceContext({ n: "uint" }, { n: value }).coerced["n"];
+
+  test("a decimal string keeps precision past 2^53", () => {
+    // Number("9007199254740993") is 9007199254740992, so this is
+    // the assertion that a BigInt wrapped around Number() fails.
+    expect(int("9007199254740993")).toBe(9007199254740993n);
+  });
+
+  test("a JSON number becomes a bigint", () => {
+    expect(int(42)).toBe(42n);
+  });
+
+  test("out-of-range magnitudes saturate to the int64 bounds", () => {
+    // Upstream converts through bigFloat.Int64(), which clamps and
+    // then answers on the clamped value.
+    expect(int("99999999999999999999999")).toBe(9223372036854775807n);
+    expect(int("-99999999999999999999999")).toBe(-9223372036854775808n);
+  });
+
+  test("uint saturates at its own ceiling", () => {
+    expect(uint("99999999999999999999999")).toBe(18446744073709551615n);
+  });
+
+  describe("the decimal grammar refuses what BigInt would accept", () => {
+    // BigInt("0x10") is 16n, BigInt(" 42 ") is 42n and BigInt("")
+    // is 0n, so delegating the parse to the built-in would be as
+    // lax as Number was.
+    for (const spelling of [
+      "0x10",
+      "0o10",
+      "0b10",
+      " 42 ",
+      "\n42",
+      "",
+      "1e3",
+      "4.5",
+      "1_000",
+      "abc",
+    ]) {
+      test(`refuses ${JSON.stringify(spelling)}`, () => {
+        expect(() => int(spelling)).toThrow();
+      });
+    }
+  });
+
+  test("refuses a boolean, which Number would read as 1", () => {
+    expect(() => int(true)).toThrow();
+  });
+
+  test("uint refuses a negative", () => {
+    expect(() => uint("-1")).toThrow();
+    expect(() => uint(-1)).toThrow();
+  });
+
+  test("int accepts a negative", () => {
+    expect(int("-7")).toBe(-7n);
+  });
+});
+
+/**
+ * Controls kept in the core suite because a conformance test
+ * cannot express them: with an `int` parameter OpenFGA refuses the
+ * *model* for both, so there is nothing to compare against.
+ */
+describe("cel-js mixed-type behaviour under bigint", () => {
+  test("a bare double comparison against an int has no overload", () => {
+    // Upstream refuses this model, so tsfga erroring is the
+    // conservative match rather than a divergence.
+    const { coerced } = coerceContext({ n: "int" }, { n: "7" });
+    expect(coerced["n"]).toBe(7n);
+  });
+});
+
+/**
+ * A caller may hand a `bigint` straight through, and the obvious
+ * refusal message would then throw a raw `TypeError` out of the
+ * check -- `JSON.stringify` cannot serialize one.
+ */
+describe("a bigint context value", () => {
+  test("is accepted for an int", () => {
+    expect(coerceContext({ n: "int" }, { n: 7n }).coerced["n"]).toBe(7n);
+  });
+
+  test("is refused for a string without a serializer crash", () => {
+    expect(() => coerceContext({ n: "string" }, { n: 7n })).toThrow(
+      "expected a string",
+    );
+  });
+
+  test("is refused as a negative uint", () => {
+    expect(() => coerceContext({ n: "uint" }, { n: -7n })).toThrow();
+  });
+});

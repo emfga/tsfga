@@ -7,6 +7,39 @@ releases may contain breaking changes).
 
 ## 0.6.0 — 2026-08
 
+### Fixed
+
+- **`int` and `uint` context values reach CEL as integers.** They
+  were passed to cel-js as JS numbers, which CEL reads as
+  `double`. Every arithmetic binary operator — `+ - * / %` —
+  raised `no such overload` where OpenFGA answers, and every
+  comparison past 2^53 answered the *opposite boolean with no
+  error*. Under a `but not`, a wrong `false` on the subtract side
+  does not exclude, so it grants. This was the only place tsfga
+  was confidently wrong rather than loud.
+
+  The value usually arrives as a string, so it is now parsed
+  directly to `bigint`: routing it through `Number()` first loses
+  the precision before a `BigInt` could preserve it. The integer
+  path takes a strict decimal grammar — `BigInt`'s own string
+  grammar accepts `0x10`, `" 42 "` and `""` as readily as
+  `Number`'s did. Magnitudes outside int64 saturate to its
+  bounds, because upstream converts through `bigFloat.Int64()`
+  and answers on the clamped value.
+
+  Overflow parity comes with it: past the int64 ceiling both
+  engines now raise an integer overflow.
+
+  Not a regression from 0.5.0's coercion work. CEL `==` is total
+  across types, so the precision comparison already answered a
+  silent `false` before it; that commit closed a much larger
+  class of silent-wrongs and only the ordering and arithmetic
+  operators moved from an error to a wrong answer.
+
+  Two `uint` cells remain divergent and are documented in the
+  README: cel-js has no `uint`, so `type(n) == uint` is `false`
+  and a bare `u`-suffixed literal finds no overload.
+
 ### Changed
 
 - **`InvalidSubjectTypeError` no longer names what the relation

@@ -70,6 +70,78 @@ const RFC3339 =
  * refuses `true` for an int, where a bare `Number(true)` would
  * happily produce `1`.
  */
+/**
+ * A context value as text, for a refusal message.
+ *
+ * `JSON.stringify` throws on a `bigint`, and a caller may hand one
+ * straight through -- so the obvious spelling turns a refusal that
+ * should be a `TsfgaError` into a raw `TypeError` escaping the
+ * check.
+ */
+function describeValue(value: unknown): string {
+  if (typeof value === "bigint") return `${value}n`;
+  return JSON.stringify(value) ?? typeof value;
+}
+
+/**
+ * A decimal integer, and nothing else.
+ *
+ * `BigInt`'s own string grammar is as lax as `Number`'s in exactly
+ * the ways that matter here: `BigInt("0x10")` is `16n`,
+ * `BigInt(" 42 ")` is `42n`, and `BigInt("")` is `0n`. Upstream
+ * refuses all three, so the parse cannot be delegated to either
+ * built-in. Owned here and generalised to the remaining numeric
+ * types in the commit that follows.
+ */
+const DECIMAL_INTEGER = /^[+-]?[0-9]+$/;
+
+/** Go's int64, which is what upstream stores an `int` in. */
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+/** Go's uint64. */
+const UINT64_MAX = 2n ** 64n - 1n;
+
+/**
+ * Saturate to the range the declared type can hold.
+ *
+ * Upstream converts through `bigFloat.Int64()`, which clamps
+ * rather than failing, and then answers on the clamped value. An
+ * exact `BigInt` would answer the opposite boolean for a magnitude
+ * outside the range, so the clamp is part of matching it.
+ */
+function saturate(value: bigint, min: bigint, max: bigint): bigint {
+  if (value < min) return min;
+  if (value > max) return max;
+  return value;
+}
+
+/**
+ * An integer context value as a `bigint`, or `null`.
+ *
+ * `bigint` rather than `number` because cel-js maps a JS `number`
+ * onto CEL's `double`, so every arithmetic operator against an
+ * `int` literal failed to find an overload, and any magnitude past
+ * 2^53 compared wrong without erroring. The value usually arrives
+ * as a string, so it is parsed directly: routing it through
+ * `Number` first loses the precision before a `BigInt` could
+ * preserve it.
+ */
+function asBigInt(value: unknown, allowNegative: boolean): bigint | null {
+  if (typeof value === "boolean") return null;
+  if (typeof value === "bigint") {
+    return allowNegative || value >= 0n ? value : null;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || !Number.isInteger(value)) return null;
+    const parsed = BigInt(value);
+    return allowNegative || parsed >= 0n ? parsed : null;
+  }
+  if (typeof value !== "string") return null;
+  if (!DECIMAL_INTEGER.test(value)) return null;
+  const parsed = BigInt(value);
+  return allowNegative || parsed >= 0n ? parsed : null;
+}
+
 function asNumber(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (typeof value !== "string") return null;
@@ -90,7 +162,7 @@ function coerceValue(
   const refuse: (expected: string) => never = (expected) => {
     throw new Error(
       `parameter '${parameter}' expected ${expected}, but found ` +
-        `${JSON.stringify(value) ?? typeof value}`,
+        `${describeValue(value)}`,
     );
   };
 
@@ -108,15 +180,19 @@ function coerceValue(
 
     case "int":
     case "uint": {
-      const numeric = asNumber(value);
-      if (numeric === null) refuse(`an ${paramType} value`);
-      if (!Number.isInteger(numeric)) {
-        refuse(`an ${paramType} value, but found a non-integer`);
+      const signed = paramType === "int";
+      const parsed = asBigInt(value, signed);
+      if (parsed === null) {
+        // A negative given for a uint is worth saying plainly; it
+        // is the one rejection a caller is likely to have meant.
+        if (paramType === "uint" && asBigInt(value, true) !== null) {
+          refuse("a uint value, but found a negative");
+        }
+        refuse(`an ${paramType} value`);
       }
-      if (paramType === "uint" && numeric < 0) {
-        refuse("a uint value, but found a negative");
-      }
-      return numeric;
+      return signed
+        ? saturate(parsed, INT64_MIN, INT64_MAX)
+        : saturate(parsed, 0n, UINT64_MAX);
     }
 
     case "double": {
