@@ -66,7 +66,7 @@ describe("Entitlements Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "member",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -78,7 +78,7 @@ describe("Entitlements Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "plan",
       relation: "subscriber",
-      directlyAssignable: ["organization"],
+      directlyAssignable: [{ type: "organization" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -102,7 +102,7 @@ describe("Entitlements Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "feature",
       relation: "associated_plan",
-      directlyAssignable: ["plan"],
+      directlyAssignable: [{ type: "plan" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

@@ -55,7 +55,7 @@ describe("Public Access Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "viewer",
-      directlyAssignable: ["user", "user:*"],
+      directlyAssignable: [{ type: "user" }, { type: "user", wildcard: true }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

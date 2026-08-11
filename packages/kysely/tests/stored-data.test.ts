@@ -228,8 +228,8 @@ describe("Invalid stored data", () => {
           relation: "viewer",
           subjectType: "user",
           subjectId: uuid2,
-          includeDirect: true,
-          includeWildcard: false,
+          directRefs: null,
+          wildcardRefs: [],
           usersetRefs: [],
         }),
       ).rejects.toBeInstanceOf(InvalidStoredDataError);

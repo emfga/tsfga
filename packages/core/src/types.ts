@@ -11,6 +11,45 @@ export interface Tuple {
 }
 
 /**
+ * One entry of a relation's type restriction, matching OpenFGA's
+ * `RelationReference` field for field.
+ *
+ * The four shapes upstream writes are:
+ *
+ * - `user` — `{ type: "user" }`
+ * - `user:*` — `{ type: "user", wildcard: true }`
+ * - `team#member` — `{ type: "team", relation: "member" }`
+ * - `user with weekday_only` —
+ *   `{ type: "user", condition: "weekday_only" }`
+ *
+ * and the condition composes with the other three.
+ *
+ * **The condition is part of the restriction, not an annotation on
+ * it.** OpenFGA matches it exactly and in both directions: a
+ * relation admitting only `[user with weekday_only]` refuses a
+ * tuple carrying no condition — even when the check context would
+ * have satisfied it — and a relation admitting only `[user]`
+ * refuses one that carries a condition. Probed against v1.18.2.
+ *
+ * Structured rather than a `"user with weekday_only"` string
+ * because the restriction is two-dimensional and every consumer
+ * needs a different projection of it: the read gate is
+ * condition-blind, the clamp is exact, and the adapter stores
+ * `type` and `relation` in separate columns. A string forces each
+ * of them to re-parse, and `CachingTupleStore` already refuses a
+ * joined string key on that same ground.
+ */
+export interface TypeRestriction {
+  type: string;
+  /** Set for a userset ref: `team#member`. */
+  relation?: string;
+  /** Set for the typed wildcard: `user:*`. */
+  wildcard?: true;
+  /** Set when the restriction carries a condition. */
+  condition?: string;
+}
+
+/**
  * The tuple reads one node of a check needs, as one request.
  *
  * A node can want up to three things about `objectType:objectId`
@@ -19,9 +58,17 @@ export interface Tuple {
  * usersets are assigned to it. They are asked for together so a
  * store can serve them in one round-trip.
  *
- * The three `include*` flags say which parts the caller wants.
- * They reflect the relation config: a part the model cannot admit
- * is not requested at all.
+ * The three ref sets say which parts the caller wants, and under
+ * which restrictions. They reflect the relation config: a part the
+ * model cannot admit is not requested at all.
+ *
+ * **For all three, `null` and `[]` are opposites.** `null` means
+ * the relation declines to narrow — no config was found, so there
+ * is nothing to restrict against, and every row qualifies. `[]`
+ * means the relation positively admits nothing of that shape, so
+ * the part is excluded. Reading one as the other is the difference
+ * between a closed gate and an open one, so a wrapper forwarding
+ * these must say which it means.
  *
  * They are a **narrowing hint, not a trust boundary**. A store
  * may use them to skip work — that is the point of sending them —
@@ -37,20 +84,23 @@ export interface CheckTuplesQuery {
   relation: string;
   subjectType: string;
   subjectId: string;
-  /** Direct tuple for exactly this subject, no subject relation. */
-  includeDirect: boolean;
-  /** Direct tuple for `subjectType:*`, no subject relation. */
-  includeWildcard: boolean;
+  /**
+   * Restrictions under which a direct tuple for exactly this
+   * subject is admitted, with no subject relation.
+   *
+   * More than one entry is ordinary: `[user, user with
+   * weekday_only]` admits the same subject both bare and
+   * conditioned, and a row matching either qualifies.
+   */
+  directRefs: readonly TypeRestriction[] | null;
+  /** As `directRefs`, for the `subjectType:*` wildcard row. */
+  wildcardRefs: readonly TypeRestriction[] | null;
   /**
    * Userset refs (`type#relation`) this relation admits, so a
    * store can restrict its userset scan to rows the model can
    * actually use.
-   *
-   * `[]` excludes the userset part entirely. `null` means the
-   * relation declines to narrow — every tuple on it with a
-   * subject relation.
    */
-  usersetRefs: readonly string[] | null;
+  usersetRefs: readonly TypeRestriction[] | null;
 }
 
 /**
@@ -82,25 +132,22 @@ export interface RelationConfig {
   objectType: string;
   relation: string;
   /**
-   * What this relation admits as a direct assignment, in OpenFGA's
-   * type-restriction notation and matching its
-   * `directly_related_user_types` one for one:
-   *
-   * - `"user"` — an ordinary subject of that type
-   * - `"user:*"` — the typed wildcard
-   * - `"team#member"` — a userset, naming the relation
+   * What this relation admits as a direct assignment, matching
+   * OpenFGA's `directly_related_user_types` one for one.
    *
    * Required. `[]` says the relation admits no direct assignment
    * at all — a purely computed relation — which is a different
    * statement from a relation that declines to narrow, and the
    * check algorithm reads it as one: it issues no tuple read.
    *
-   * The userset entries carry the relation, so `team#member` and
-   * `team#owner` are distinguishable. A relation admitting only
-   * the first must refuse a tuple naming the second, on the write
-   * path and on the read path alike.
+   * Each entry is matched on all four of its fields. The userset
+   * entries carry the relation, so `team#member` and `team#owner`
+   * are distinguishable; the entries carry the condition, so
+   * `user` and `user with weekday_only` are too. A relation
+   * admitting only one of a pair must refuse a tuple naming the
+   * other, on the write path and on the read path alike.
    */
-  directlyAssignable: string[];
+  directlyAssignable: TypeRestriction[];
   impliedBy: string[] | null;
   computedUserset: string | null;
   tupleToUserset: Array<{ tupleset: string; computedUserset: string }> | null;

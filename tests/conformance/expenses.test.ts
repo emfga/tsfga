@@ -59,7 +59,7 @@ describe("Expenses Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "employee",
       relation: "manager",
-      directlyAssignable: ["employee"],
+      directlyAssignable: [{ type: "employee" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -83,7 +83,7 @@ describe("Expenses Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "report",
       relation: "submitter",
-      directlyAssignable: ["employee"],
+      directlyAssignable: [{ type: "employee" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

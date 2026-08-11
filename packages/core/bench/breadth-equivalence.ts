@@ -3,6 +3,7 @@ import type {
   IntersectionOperand,
   RelationConfig,
   Tuple,
+  TypeRestriction,
 } from "../src/types.ts";
 import { MockTupleStore } from "../tests/helpers/mock-store.ts";
 
@@ -17,8 +18,34 @@ function rng(seed: number) {
   };
 }
 
-/** Every direct subject ref these generated models can name. */
-const ANY_DIRECT = ["user", "user:*", "doc", "doc:*"];
+/** Every direct subject shape these generated models can name. */
+const DIRECT_SHAPES: TypeRestriction[] = [
+  { type: "user" },
+  { type: "user", wildcard: true },
+  { type: "doc" },
+  { type: "doc", wildcard: true },
+];
+
+/**
+ * The conditions a restriction may carry, `undefined` included.
+ *
+ * The restriction's condition is matched exactly against the row's,
+ * so a model that only ever admits bare refs drops every
+ * conditioned row at the clamp — which is the same way this
+ * harness went blind to userset expansion, one dimension over.
+ */
+const REF_CONDITIONS = [undefined, "always", "never"];
+
+/** Each shape, bare and under each condition. */
+function withConditions(shapes: TypeRestriction[]): TypeRestriction[] {
+  return shapes.flatMap((shape) =>
+    REF_CONDITIONS.map((condition) =>
+      condition === undefined ? { ...shape } : { ...shape, condition },
+    ),
+  );
+}
+
+const ANY_DIRECT = withConditions(DIRECT_SHAPES);
 
 /**
  * The userset refs a generated model can name, derived from the
@@ -35,8 +62,11 @@ const ANY_DIRECT = ["user", "user:*", "doc", "doc:*"];
  * purpose, so that admitting some refs is never the same as
  * admitting all of them.
  */
-function usersetRefsFor(rels: readonly string[]): string[] {
-  return [...rels.map((r) => `doc#${r}`), "doc#absent"];
+function usersetRefsFor(rels: readonly string[]): TypeRestriction[] {
+  return withConditions([
+    ...rels.map((relation) => ({ type: "doc", relation })),
+    { type: "doc", relation: "absent" },
+  ]);
 }
 
 // `directlyAssignable` is required rather than defaulted: what a
@@ -110,12 +140,17 @@ function buildStore(
       cfg({
         objectType: "doc",
         relation,
-        // Partial admission on both halves. A config that admits
+        // Partial admission on every dimension — type, wildcard,
+        // userset relation and condition. A config that admits
         // either everything or nothing never exercises the clamp;
-        // a random subset is what makes a row that the gate lets
-        // through and the clamp drops actually occur.
+        // a random subset is what makes a row that the read gate
+        // lets through and the clamp then drops actually occur,
+        // and that pair is the whole point of the split.
         directlyAssignable: [
-          ...(rand() < 0.5 ? ["user", "doc"] : ANY_DIRECT),
+          ...(rand() < 0.5
+            ? withConditions([{ type: "user" }, { type: "doc" }])
+            : ANY_DIRECT
+          ).filter(() => rand() < 0.7),
           ...(rand() < 0.25 ? [] : usersetRefs.filter(() => rand() < 0.6)),
         ],
         impliedBy: implied.length ? implied : null,
@@ -211,7 +246,13 @@ function buildStore(
  * zero the run has exercised no userset expansion at all, no
  * matter how many cases it reports.
  */
-const coverage = { usersetRows: 0, admittedUserset: 0, directRows: 0 };
+const coverage = {
+  usersetRows: 0,
+  admittedUserset: 0,
+  directRows: 0,
+  conditionedRows: 0,
+  admittedConditioned: 0,
+};
 
 /** Tally the rows a store holds, and what its reads give back. */
 function instrument(store: MockTupleStore): MockTupleStore {
@@ -221,11 +262,17 @@ function instrument(store: MockTupleStore): MockTupleStore {
     } else {
       coverage.usersetRows++;
     }
+    if (t.conditionName !== null) coverage.conditionedRows++;
   }
   const read = store.findCheckTuples.bind(store);
   store.findCheckTuples = async (query) => {
     const reply = await read(query);
     coverage.admittedUserset += reply.usersets.length;
+    for (const row of [reply.direct, reply.wildcard, ...reply.usersets]) {
+      if (row !== null && row.conditionName !== null) {
+        coverage.admittedConditioned++;
+      }
+    }
     return reply;
   };
   return store;
@@ -347,6 +394,13 @@ if (coverage.admittedUserset === 0) {
   console.log(
     "FAIL: no userset row was admitted by any config — " +
       "userset expansion was never exercised",
+  );
+  process.exit(1);
+}
+if (coverage.admittedConditioned === 0) {
+  console.log(
+    "FAIL: no conditioned row was admitted by any config — " +
+      "the condition dimension of the restriction was never exercised",
   );
   process.exit(1);
 }

@@ -26,7 +26,7 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
   return {
     objectType: "",
     relation: "",
-    directlyAssignable: ["user", "user:*"],
+    directlyAssignable: [{ type: "user" }, { type: "user", wildcard: true }],
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
@@ -107,12 +107,12 @@ describe("branches abandoned after the answer is decided", () => {
       makeConfig({
         objectType: "doc",
         relation: "slow4",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
       }),
       makeConfig({
         objectType: "doc",
         relation: "fast",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
       }),
     );
     store.tuples.push(

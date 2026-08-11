@@ -77,9 +77,11 @@ export interface TsfgaClient {
   /**
    * List direct subjects only — no userset or relation expansion.
    *
-   * Filtered by the relation's `directlyAssignable`, so a row the
-   * model does not admit is never reported: a subject this returns
-   * is one `check` could act on, not merely one that is stored.
+   * Filtered by the relation's `directlyAssignable`, **matched
+   * exactly, condition included**: a row carrying a condition the
+   * relation does not admit is no more reported than one carrying
+   * a type it does not admit. So a subject this returns is one
+   * `check` could act on, not merely one that is stored.
    * That matters because narrowing a relation does not revalidate
    * the tuples already written, so inadmissible rows are an
    * ordinary state to be in.
@@ -177,6 +179,7 @@ export function createTsfga(
               tuple.subjectType,
               tuple.subjectId,
               tuple.subjectRelation,
+              tuple.conditionName,
             ),
           ),
         )
@@ -214,9 +217,12 @@ export { type CheckOutcome, checkMany } from "./check-many.ts";
 export { evaluateTupleCondition } from "./conditions.ts";
 export { ContextualTupleStore } from "./contextual-store.ts";
 export {
+  type ConditionalTupleCause,
   ConditionEvaluationError,
   ConditionNotFoundError,
   DepthExceededError,
+  formatRestriction,
+  InvalidConditionalTupleError,
   InvalidStoredDataError,
   InvalidSubjectTypeError,
   RelationConfigNotFoundError,
@@ -225,7 +231,10 @@ export {
 export type { TupleStore } from "./store-interface.ts";
 export {
   admitsSubjectRef,
+  admitsSubjectShape,
   directSubjectRef,
+  type SubjectShape,
+  subjectShape,
   validateTupleWrite,
 } from "./tuple-validation.ts";
 export type {
@@ -240,4 +249,5 @@ export type {
   RelationConfig,
   RemoveTupleRequest,
   Tuple,
+  TypeRestriction,
 } from "./types.ts";

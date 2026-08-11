@@ -4,9 +4,11 @@ import { ContextualTupleStore } from "./contextual-store.ts";
 import { DepthExceededError, TsfgaError } from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
 import {
-  admitsSubjectRef,
+  admittedRefsForShape,
   admittedUsersetRefs,
   directSubjectRef,
+  refsAdmit,
+  subjectShape,
   validateTupleWrite,
 } from "./tuple-validation.ts";
 import type {
@@ -16,6 +18,7 @@ import type {
   CheckTuplesQuery,
   RelationConfig,
   Tuple,
+  TypeRestriction,
 } from "./types.ts";
 
 /**
@@ -833,27 +836,42 @@ async function readNodeTuples(
   request: CheckRequest,
   config: RelationConfig | null,
 ): Promise<CheckTuples> {
-  const subjectRef = directSubjectRef(request.subjectType, request.subjectId);
-  const wildcardRef = `${request.subjectType}:*`;
-
-  const includeDirect = admitsSubjectRef(config, subjectRef);
+  // Condition-blind, and it has to be: the gate decides what to
+  // ask the store for, and a row's condition is on the row. So it
+  // asks for every restriction of the right *shape* and lets
+  // `clampToQuery` do the exact match once the rows are in hand.
+  // Anything narrower would have to fetch conditioned and bare
+  // rows separately.
+  const directRefs = admittedRefsForShape(
+    config,
+    subjectShape(request.subjectType, request.subjectId, null),
+  );
   // Checking the wildcard subject itself makes the two probes the
-  // same query, and `directSubjectRef` makes their gates agree
-  // too. Ask once: `checkBase` reads the slots identically, so
-  // folding it into `direct` loses nothing and saves a duplicate
-  // condition evaluation.
-  const includeWildcard =
-    request.subjectId === "*" ? false : admitsSubjectRef(config, wildcardRef);
+  // same query, and `subjectShape` folds `subjectId === "*"` into
+  // the wildcard shape, so the direct slot already carries the
+  // right restrictions. Ask once: `checkBase` reads the slots
+  // identically, so folding it into `direct` loses nothing and
+  // saves a duplicate condition evaluation.
+  const wildcardRefs =
+    request.subjectId === "*"
+      ? []
+      : admittedRefsForShape(config, {
+          type: request.subjectType,
+          wildcard: true,
+        });
   const usersetRefs = admittedUsersetRefs(config);
 
   // A relation that admits none of the three — one that is purely
   // computed, or purely an intersection of rewrites — has nothing
   // to ask for. Skip the round-trip rather than send a query that
   // cannot match; the node still resolves through its rewrites.
-  // Reachable now that `directlyAssignable` distinguishes "admits
-  // nothing" from "declines to narrow", which the old nullable
-  // type list could not.
-  if (!includeDirect && !includeWildcard && usersetRefs?.length === 0) {
+  // `null` is *unrestricted*, not empty, so `null?.length === 0`
+  // is correctly false and such a relation still reads.
+  if (
+    directRefs?.length === 0 &&
+    wildcardRefs?.length === 0 &&
+    usersetRefs?.length === 0
+  ) {
     return NO_TUPLES;
   }
 
@@ -863,8 +881,8 @@ async function readNodeTuples(
     relation: request.relation,
     subjectType: request.subjectType,
     subjectId: request.subjectId,
-    includeDirect,
-    includeWildcard,
+    directRefs,
+    wildcardRefs,
     usersetRefs,
   };
   return clampToQuery(await store.findCheckTuples(query), query);
@@ -912,30 +930,48 @@ function clampToQuery(
     tuple.objectId === query.objectId &&
     tuple.relation === query.relation;
 
+  /** The restriction this row would have to be admitted under. */
+  const refOf = (tuple: Tuple): TypeRestriction =>
+    directSubjectRef(
+      tuple.subjectType,
+      tuple.subjectId,
+      tuple.subjectRelation,
+      tuple.conditionName,
+    );
+
   // A probe answers for one subject with no subject relation; the
   // wildcard slot answers for `*` and nothing else.
-  const isProbe = (tuple: Tuple | null, subjectId: string): boolean =>
+  //
+  // The exact four-field match happens **here**, and the ordering
+  // is externally observable rather than a matter of taste: a row
+  // the model does not admit has to be dropped before anything
+  // evaluates its condition, or a missing context parameter raises
+  // where OpenFGA simply answers `false`.
+  const isProbe = (
+    tuple: Tuple | null,
+    subjectId: string,
+    refs: readonly TypeRestriction[] | null,
+  ): boolean =>
     tuple !== null &&
     onNode(tuple) &&
     tuple.subjectType === query.subjectType &&
     tuple.subjectId === subjectId &&
-    tuple.subjectRelation === null;
+    tuple.subjectRelation === null &&
+    refsAdmit(refs, refOf(tuple));
 
   // Usersets carry their own subject type — `team:eng#member` on a
   // `user` check — so the subject type is not comparable to the
   // query's. What *is* checkable, and is the whole point of
-  // carrying `usersetRefs`, is that `type#relation` is one the
-  // relation admits. This is the clamp that closes T6: a store
-  // that hands back a `team#owner` row on a relation admitting
-  // only `team#member` loses it here rather than having it
-  // expanded and granted.
-  const isUserset = (tuple: Tuple): boolean => {
-    if (!onNode(tuple) || tuple.subjectRelation === null) return false;
-    if (query.usersetRefs === null) return true;
-    return query.usersetRefs.includes(
-      `${tuple.subjectType}#${tuple.subjectRelation}`,
-    );
-  };
+  // carrying `usersetRefs`, is that the row's `type#relation` and
+  // condition are ones the relation admits. This is the clamp that
+  // closes T6: a store that hands back a `team#owner` row on a
+  // relation admitting only `team#member`, or a conditioned row on
+  // a relation admitting only the bare ref, loses it here rather
+  // than having it expanded and granted.
+  const isUserset = (tuple: Tuple): boolean =>
+    onNode(tuple) &&
+    tuple.subjectRelation !== null &&
+    refsAdmit(query.usersetRefs, refOf(tuple));
 
   let usersets: readonly Tuple[] = NO_TUPLES.usersets;
   if (query.usersetRefs === null || query.usersetRefs.length > 0) {
@@ -947,14 +983,12 @@ function clampToQuery(
   }
 
   return {
-    direct:
-      query.includeDirect && isProbe(reply.direct, query.subjectId)
-        ? reply.direct
-        : null,
-    wildcard:
-      query.includeWildcard && isProbe(reply.wildcard, "*")
-        ? reply.wildcard
-        : null,
+    direct: isProbe(reply.direct, query.subjectId, query.directRefs)
+      ? reply.direct
+      : null,
+    wildcard: isProbe(reply.wildcard, "*", query.wildcardRefs)
+      ? reply.wildcard
+      : null,
     usersets,
   };
 }

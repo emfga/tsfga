@@ -82,7 +82,7 @@ describe("Userset Type Restriction Conformance", () => {
       await tsfgaClient.writeRelationConfig({
         objectType: "team",
         relation,
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,
@@ -93,7 +93,10 @@ describe("Userset Type Restriction Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "viewer",
-      directlyAssignable: ["user", "team#member"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "team", relation: "member" },
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -103,7 +106,10 @@ describe("Userset Type Restriction Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "editor",
-      directlyAssignable: ["team#member", "team#owner"],
+      directlyAssignable: [
+        { type: "team", relation: "member" },
+        { type: "team", relation: "owner" },
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -113,7 +119,7 @@ describe("Userset Type Restriction Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "owner",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -123,7 +129,7 @@ describe("Userset Type Restriction Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "public",
-      directlyAssignable: ["user:*"],
+      directlyAssignable: [{ type: "user", wildcard: true }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

@@ -77,7 +77,7 @@ describe("Condition Error vs Sibling Grant Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "member",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -87,7 +87,10 @@ describe("Condition Error vs Sibling Grant Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "viewer",
-      directlyAssignable: ["user", "team#member"],
+      directlyAssignable: [
+        { type: "user", condition: "valid_ip" },
+        { type: "team", relation: "member" },
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

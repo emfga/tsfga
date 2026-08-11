@@ -63,7 +63,7 @@ describe("Contextual Time-Based Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "timeslot",
       relation: "user",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -75,7 +75,7 @@ describe("Contextual Time-Based Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "ip-address-range",
       relation: "user",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -87,7 +87,7 @@ describe("Contextual Time-Based Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "branch",
       relation: "account_manager",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -99,7 +99,7 @@ describe("Contextual Time-Based Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "branch",
       relation: "approved_ip_address_range",
-      directlyAssignable: ["ip-address-range"],
+      directlyAssignable: [{ type: "ip-address-range" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -111,7 +111,7 @@ describe("Contextual Time-Based Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "branch",
       relation: "approved_timeslot",
-      directlyAssignable: ["timeslot"],
+      directlyAssignable: [{ type: "timeslot" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -146,7 +146,7 @@ describe("Contextual Time-Based Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "account",
       relation: "branch",
-      directlyAssignable: ["branch"],
+      directlyAssignable: [{ type: "branch" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -172,7 +172,7 @@ describe("Contextual Time-Based Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "account",
       relation: "customer",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -227,7 +227,7 @@ describe("Contextual Time-Based Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "transaction",
       relation: "account",
-      directlyAssignable: ["account"],
+      directlyAssignable: [{ type: "account" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

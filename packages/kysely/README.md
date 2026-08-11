@@ -22,10 +22,11 @@ admitted only once the adapter has been tested against it.
 
 The floor moved to 0.6.0 rather than the ceiling widening,
 because core 0.6.0 changed `TupleStore` itself — `RelationConfig`
-holds one `directlyAssignable` list, `CheckTuplesQuery` carries
-userset refs, and `listDirectSubjects` is gone. This adapter does
-not work with earlier cores, and earlier adapters do not work
-with this core.
+holds one `directlyAssignable` list of structured type
+restrictions, `CheckTuplesQuery` carries a ref set per part
+instead of two booleans, and `listDirectSubjects` is gone. This
+adapter does not work with earlier cores, and earlier adapters do
+not work with this core.
 
 ## Quick start
 

@@ -84,7 +84,7 @@ await fga.writeRelationConfig({
   objectType: "document",
   relation: "viewer",
   // OpenFGA type restrictions: `user`, `user:*`, `team#member`.
-  directlyAssignable: ["user"],
+  directlyAssignable: [{ type: "user" }],
 });
 
 // Add a tuple

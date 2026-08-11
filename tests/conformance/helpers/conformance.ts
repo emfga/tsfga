@@ -1,11 +1,13 @@
 import { expect } from "bun:test";
 import * as fs from "node:fs";
 import { transformer } from "@openfga/syntax-transformer";
-import type {
-  AddTupleRequest,
-  CheckRequest,
-  RelationConfig,
-  TsfgaClient,
+import {
+  type AddTupleRequest,
+  type CheckRequest,
+  formatRestriction,
+  type RelationConfig,
+  type TsfgaClient,
+  type TypeRestriction,
 } from "@tsfga/core";
 import { fgaCheck, fgaWrite } from "./openfga.ts";
 
@@ -174,15 +176,15 @@ export interface ConfigDriftOptions {
  * Assert that a fixture's relation configs say what its own model
  * says about direct assignment.
  *
- * **Condition-blind.** A `[user with weekday_only]` restriction is
- * compared as `user`. The condition is a real part of the
- * restriction upstream, but tsfga's config cannot record it yet.
+ * **Exact, condition included.** `[user with weekday_only]` and
+ * `[user]` are different restrictions, and a config claiming the
+ * second where the model says the first admits a tuple OpenFGA
+ * refuses. That is the drift this exists to catch — it is not a
+ * cosmetic mismatch but the granting direction.
  *
- * **Set comparison, not multiset.** Stripping conditions collapses
- * entries: `advanced-entitlements` writes one restriction with four
- * DSL entries that differ only by condition. Counting would fail
- * there and nowhere else, which reads as an unexplained single red
- * rather than as the design.
+ * **Set comparison, not multiset**, since a model may name the
+ * same ref twice under different conditions and order carries no
+ * meaning.
  */
 export function expectConfigsMatchModel(
   modelPath: string,
@@ -226,9 +228,10 @@ export function expectConfigsMatchModel(
       problems.push(`${relation}: exempted as moved, but nothing writes it`);
       continue;
     }
-    const dropped = [...admitted].filter(
-      (ref) => !destination.directlyAssignable.includes(ref),
+    const carried = new Set(
+      destination.directlyAssignable.map(formatRestriction),
     );
+    const dropped = [...admitted].filter((ref) => !carried.has(ref));
     if (dropped.length > 0) {
       problems.push(
         `${relation}: moved to ${movedTo}, which does not admit ` +
@@ -238,7 +241,9 @@ export function expectConfigsMatchModel(
     if (original.directlyAssignable.length > 0) {
       problems.push(
         `${relation}: moved to ${movedTo}, so it must admit nothing, ` +
-          `but admits ${original.directlyAssignable.join(", ")}`,
+          `but admits ${original.directlyAssignable
+            .map(formatRestriction)
+            .join(", ")}`,
       );
     }
     exempt.add(relation);
@@ -253,7 +258,7 @@ export function expectConfigsMatchModel(
       );
       continue;
     }
-    const actual = new Set(config.directlyAssignable);
+    const actual = new Set(config.directlyAssignable.map(formatRestriction));
     const extra = [...actual].filter((ref) => !admitted.has(ref));
     const missing = [...admitted].filter((ref) => !actual.has(ref));
     if (extra.length > 0 || missing.length > 0) {
@@ -286,8 +291,10 @@ export function expectConfigsMatchModel(
 }
 
 /**
- * `objectType.relation` to the set of refs the model admits, in
- * tsfga's notation and with conditions stripped.
+ * `objectType.relation` to the set of refs the model admits, each
+ * rendered by `formatRestriction` so that comparison is one string
+ * equality rather than a hand-rolled structural compare that could
+ * disagree with the one the library uses.
  *
  * Read through `@openfga/syntax-transformer`, never by pattern-
  * matching the DSL text. A `grep` for `with ` reports 24 hits in
@@ -305,13 +312,11 @@ function modelRestrictions(modelPath: string): Map<string, Set<string>> {
       const refs = metadata[relation]?.directly_related_user_types ?? [];
       const admitted = new Set<string>();
       for (const ref of refs) {
-        if (ref.wildcard) {
-          admitted.add(`${ref.type}:*`);
-        } else if (ref.relation) {
-          admitted.add(`${ref.type}#${ref.relation}`);
-        } else {
-          admitted.add(ref.type);
-        }
+        const restriction: TypeRestriction = { type: ref.type };
+        if (ref.relation) restriction.relation = ref.relation;
+        if (ref.wildcard) restriction.wildcard = true;
+        if (ref.condition) restriction.condition = ref.condition;
+        admitted.add(formatRestriction(restriction));
       }
       restrictions.set(`${type.type}.${relation}`, admitted);
     }

@@ -63,7 +63,7 @@ describe("GitHub Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "member",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -75,7 +75,7 @@ describe("GitHub Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "repo_admin",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -87,7 +87,7 @@ describe("GitHub Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "repo_reader",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -99,7 +99,10 @@ describe("GitHub Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "member",
-      directlyAssignable: ["user", "team#member"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "team", relation: "member" },
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -111,7 +114,7 @@ describe("GitHub Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "repo",
       relation: "organization",
-      directlyAssignable: ["organization"],
+      directlyAssignable: [{ type: "organization" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -123,7 +126,10 @@ describe("GitHub Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "repo",
       relation: "admin",
-      directlyAssignable: ["user", "team#member"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "team", relation: "member" },
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [
@@ -137,7 +143,10 @@ describe("GitHub Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "repo",
       relation: "maintainer",
-      directlyAssignable: ["user", "team#member"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "team", relation: "member" },
+      ],
       impliedBy: ["admin"],
       computedUserset: null,
       tupleToUserset: null,
@@ -149,7 +158,10 @@ describe("GitHub Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "repo",
       relation: "writer",
-      directlyAssignable: ["user", "team#member"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "team", relation: "member" },
+      ],
       impliedBy: ["maintainer"],
       computedUserset: null,
       tupleToUserset: null,
@@ -161,7 +173,10 @@ describe("GitHub Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "repo",
       relation: "triager",
-      directlyAssignable: ["user", "team#member"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "team", relation: "member" },
+      ],
       impliedBy: ["writer"],
       computedUserset: null,
       tupleToUserset: null,
@@ -173,7 +188,10 @@ describe("GitHub Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "repo",
       relation: "reader",
-      directlyAssignable: ["user", "team#member"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "team", relation: "member" },
+      ],
       impliedBy: ["triager"],
       computedUserset: null,
       tupleToUserset: [

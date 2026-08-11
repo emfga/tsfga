@@ -57,7 +57,7 @@ describe("Token Claims Contextual Tuples Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "group",
       relation: "member",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -67,7 +67,7 @@ describe("Token Claims Contextual Tuples Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "viewer",
-      directlyAssignable: ["group#member"],
+      directlyAssignable: [{ type: "group", relation: "member" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

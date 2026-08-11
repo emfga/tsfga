@@ -1,4 +1,5 @@
 import type { TupleStore } from "../../src/store-interface.ts";
+import { directSubjectRef, refsAdmit } from "../../src/tuple-validation.ts";
 import type {
   AddTupleRequest,
   CheckTuples,
@@ -7,6 +8,7 @@ import type {
   RelationConfig,
   RemoveTupleRequest,
   Tuple,
+  TypeRestriction,
 } from "../../src/types.ts";
 
 /**
@@ -98,19 +100,40 @@ export class MockTupleStore implements TupleStore {
           t.subjectRelation == null,
       ) ?? null;
 
+    // Narrowed to the admitted refs, as a real adapter would.
+    // `null` declines to narrow, `[]` excludes the part. Matching
+    // is on all four fields, the condition included.
+    const admits = (
+      refs: readonly TypeRestriction[] | null,
+      tuple: Tuple,
+    ): boolean =>
+      refsAdmit(
+        refs,
+        directSubjectRef(
+          tuple.subjectType,
+          tuple.subjectId,
+          tuple.subjectRelation,
+          tuple.conditionName,
+        ),
+      );
+
+    const probe = (
+      refs: readonly TypeRestriction[] | null,
+      subjectId: string,
+    ): Tuple | null => {
+      if (refs !== null && refs.length === 0) return null;
+      const tuple = findDirect(subjectId);
+      return tuple !== null && admits(refs, tuple) ? tuple : null;
+    };
+
     return {
-      direct: query.includeDirect ? findDirect(query.subjectId) : null,
-      wildcard: query.includeWildcard ? findDirect("*") : null,
-      // Narrowed to the admitted refs, as a real adapter would.
-      // `null` declines to narrow, `[]` excludes the scan.
+      direct: probe(query.directRefs, query.subjectId),
+      wildcard: probe(query.wildcardRefs, "*"),
       usersets: onRelation.filter(
         (t) =>
           t.subjectRelation !== null &&
           t.subjectRelation !== undefined &&
-          (query.usersetRefs === null ||
-            query.usersetRefs.includes(
-              `${t.subjectType}#${t.subjectRelation}`,
-            )),
+          admits(query.usersetRefs, t),
       ),
     };
   }

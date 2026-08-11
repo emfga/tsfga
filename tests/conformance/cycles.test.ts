@@ -127,11 +127,14 @@ describe("Cycle Conformance", () => {
     for (const [relation, other] of [
       ["member", "owner"],
       ["owner", "member"],
-    ]) {
+    ] as const) {
       await tsfgaClient.writeRelationConfig({
         objectType: "group",
         relation,
-        directlyAssignable: ["user", `group#${other}`],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "group", relation: other },
+        ],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,
@@ -142,7 +145,10 @@ describe("Cycle Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "recursive_group",
       relation: "member",
-      directlyAssignable: ["user", "recursive_group#member"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "recursive_group", relation: "member" },
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -152,7 +158,7 @@ describe("Cycle Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "cyclic",
-      directlyAssignable: ["group#member"],
+      directlyAssignable: [{ type: "group", relation: "member" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -162,7 +168,7 @@ describe("Cycle Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "recursive_cyclic",
-      directlyAssignable: ["recursive_group#member"],
+      directlyAssignable: [{ type: "recursive_group", relation: "member" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -173,7 +179,7 @@ describe("Cycle Conformance", () => {
       await tsfgaClient.writeRelationConfig({
         objectType: "document",
         relation,
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,

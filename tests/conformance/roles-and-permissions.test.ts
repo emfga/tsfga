@@ -54,7 +54,7 @@ describe("Roles and Permissions Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "trip",
       relation: "owner",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -64,7 +64,7 @@ describe("Roles and Permissions Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "trip",
       relation: "viewer",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

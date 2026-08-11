@@ -1,3 +1,6 @@
+import type { SubjectShape } from "./tuple-validation.ts";
+import type { TypeRestriction } from "./types.ts";
+
 export class TsfgaError extends Error {
   constructor(message: string) {
     super(message);
@@ -12,17 +15,94 @@ export class RelationConfigNotFoundError extends TsfgaError {
   }
 }
 
+/**
+ * A type restriction in OpenFGA's own notation — `user`,
+ * `user:*`, `team#member`, `user with weekday_only`.
+ *
+ * Only for messages. Everything that decides anything matches the
+ * structured fields; rendering to a string is the last step, so
+ * nothing is ever re-parsed out of one.
+ */
+export function formatRestriction(restriction: TypeRestriction): string {
+  const base = restriction.wildcard
+    ? `${restriction.type}:*`
+    : restriction.relation !== undefined
+      ? `${restriction.type}#${restriction.relation}`
+      : restriction.type;
+  return restriction.condition === undefined
+    ? base
+    : `${base} with ${restriction.condition}`;
+}
+
+/**
+ * The subject's *type* is not assignable here, whatever condition
+ * it might carry.
+ *
+ * Deliberately condition-blind, and raised before the condition is
+ * considered at all. The condition dimension has its own error —
+ * see `InvalidConditionalTupleError` — because reporting it here
+ * would render as `Subject type 'user with weekday_only' is not
+ * allowed`, naming a type that does not exist.
+ */
 export class InvalidSubjectTypeError extends TsfgaError {
   constructor(
-    subjectType: string,
+    subject: SubjectShape,
     objectType: string,
     relation: string,
-    allowed: string[],
+    allowed: readonly TypeRestriction[],
   ) {
     super(
-      `Subject type '${subjectType}' is not allowed for ${objectType}.${relation}. Allowed: ${allowed.join(", ")}`,
+      `Subject type '${formatRestriction(subject)}' is not allowed for ` +
+        `${objectType}.${relation}. Allowed: ` +
+        `${allowed.map(formatRestriction).join(", ")}`,
     );
     this.name = "InvalidSubjectTypeError";
+  }
+}
+
+/**
+ * Every way a tuple's condition can fail against the model.
+ *
+ * OpenFGA raises one error type for all of them and discriminates
+ * by a cause string (`internal/validation/validation.go`), so
+ * tsfga does the same rather than inventing a class per cause —
+ * one upstream error, one tsfga error.
+ */
+export type ConditionalTupleCause =
+  /** No condition on the tuple, but every matching restriction has one. */
+  | "condition is missing"
+  /** A condition the matching restrictions do not name. */
+  | "invalid condition for type restriction"
+  /** The condition is not defined in the store. */
+  | "undefined condition"
+  /** A context value cannot be read as its declared parameter type. */
+  | "parameter type error"
+  /** A context key the condition does not declare. */
+  | "invalid context parameter";
+
+/**
+ * The subject's type is assignable, but not with the condition the
+ * tuple carries — or without one.
+ */
+export class InvalidConditionalTupleError extends TsfgaError {
+  override readonly cause: ConditionalTupleCause;
+
+  constructor(
+    cause: ConditionalTupleCause,
+    subject: TypeRestriction,
+    objectType: string,
+    relation: string,
+    allowed: readonly TypeRestriction[],
+    detail?: string,
+  ) {
+    super(
+      `Invalid conditional tuple for ${objectType}.${relation}: ${cause}` +
+        (detail === undefined ? "" : ` (${detail})`) +
+        `. Subject: '${formatRestriction(subject)}'. Allowed: ` +
+        `${allowed.map(formatRestriction).join(", ")}`,
+    );
+    this.name = "InvalidConditionalTupleError";
+    this.cause = cause;
   }
 }
 

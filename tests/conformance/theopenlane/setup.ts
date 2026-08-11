@@ -129,7 +129,7 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "user",
     relation: "_self",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
   }),
   rc({
     objectType: "user",
@@ -153,7 +153,7 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "service",
     relation: "_self",
-    directlyAssignable: ["service"],
+    directlyAssignable: [{ type: "service" }],
   }),
   rc({
     objectType: "service",
@@ -177,43 +177,49 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "system",
     relation: "system_admin",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
   }),
   // --- feature ---
   rc({
     objectType: "feature",
     relation: "enabled",
-    directlyAssignable: ["organization"],
+    directlyAssignable: [{ type: "organization" }],
   }),
   // --- organization ---
   rc({
     objectType: "organization",
     relation: "parent",
-    directlyAssignable: ["organization"],
+    directlyAssignable: [{ type: "organization" }],
   }),
   rc({
     objectType: "organization",
     relation: "owner",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "owner" }],
   }),
   rc({
     objectType: "organization",
     relation: "admin",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "admin" }],
   }),
   rc({
     objectType: "organization",
     relation: "member",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
     impliedBy: ["owner", "admin"],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "member" }],
   }),
   rc({
     objectType: "organization",
     relation: "access",
-    directlyAssignable: ["organization#member"],
+    directlyAssignable: [
+      {
+        type: "organization",
+        relation: "member",
+        condition: "email_domains_allowed",
+      },
+    ],
   }),
   rc({
     objectType: "organization",
@@ -227,14 +233,14 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "organization",
     relation: "can_delete",
-    directlyAssignable: ["service"],
+    directlyAssignable: [{ type: "service" }],
     impliedBy: ["owner"],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_delete" }],
   }),
   rc({
     objectType: "organization",
     relation: "can_edit",
-    directlyAssignable: ["service"],
+    directlyAssignable: [{ type: "service" }],
     impliedBy: ["_admin_and_access", "owner"],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_edit" }],
   }),
@@ -250,14 +256,17 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "organization",
     relation: "can_view",
-    directlyAssignable: ["service", "user"],
+    directlyAssignable: [
+      { type: "service" },
+      { type: "user", condition: "time_based_grant" },
+    ],
     impliedBy: ["_member_and_access", "owner", "can_edit"],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_view" }],
   }),
   rc({
     objectType: "organization",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["owner"],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
@@ -288,7 +297,7 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "organization",
     relation: "standard_creator",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
   }),
   rc({
     objectType: "organization",
@@ -299,7 +308,7 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "organization",
     relation: "group_creator",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
   }),
   rc({
     objectType: "organization",
@@ -310,7 +319,7 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "organization",
     relation: "trust_center_admin",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
   }),
   rc({
     objectType: "organization",
@@ -322,23 +331,23 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "group",
     relation: "admin",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
   }),
   rc({
     objectType: "group",
     relation: "member",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
     impliedBy: ["admin"],
   }),
   rc({
     objectType: "group",
     relation: "parent",
-    directlyAssignable: ["organization"],
+    directlyAssignable: [{ type: "organization", condition: "public_group" }],
   }),
   rc({
     objectType: "group",
     relation: "parent_admin",
-    directlyAssignable: ["organization#owner"],
+    directlyAssignable: [{ type: "organization", relation: "owner" }],
   }),
   rc({
     objectType: "group",
@@ -368,25 +377,25 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "group",
     relation: "can_delete",
-    directlyAssignable: ["service"],
+    directlyAssignable: [{ type: "service" }],
     impliedBy: ["admin", "parent_deleter"],
   }),
   rc({
     objectType: "group",
     relation: "can_edit",
-    directlyAssignable: ["service"],
+    directlyAssignable: [{ type: "service" }],
     impliedBy: ["admin", "parent_editor"],
   }),
   rc({
     objectType: "group",
     relation: "can_view",
-    directlyAssignable: ["service"],
+    directlyAssignable: [{ type: "service" }],
     impliedBy: ["can_edit", "member", "parent_viewer"],
   }),
   rc({
     objectType: "group",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
     ],
@@ -400,30 +409,30 @@ const RELATION_CONFIGS: RelationConfig[] = [
     objectType: "file",
     relation: "parent",
     directlyAssignable: [
-      "user",
-      "program",
-      "organization",
-      "control",
-      "procedure",
-      "template",
-      "document_data",
-      "contact",
-      "internal_policy",
-      "narrative",
-      "evidence",
-      "note",
-      "trust_center_setting",
-      "subprocessor",
-      "export",
-      "trust_center_watermark_config",
-      "standard",
-      "trust_center_entity",
+      { type: "user" },
+      { type: "program" },
+      { type: "organization" },
+      { type: "control" },
+      { type: "procedure" },
+      { type: "template" },
+      { type: "document_data" },
+      { type: "contact" },
+      { type: "internal_policy" },
+      { type: "narrative" },
+      { type: "evidence" },
+      { type: "note" },
+      { type: "trust_center_setting" },
+      { type: "subprocessor" },
+      { type: "export" },
+      { type: "trust_center_watermark_config" },
+      { type: "standard" },
+      { type: "trust_center_entity" },
     ],
   }),
   rc({
     objectType: "file",
     relation: "tc_doc_parent",
-    directlyAssignable: ["trust_center_doc"],
+    directlyAssignable: [{ type: "trust_center_doc" }],
   }),
   rc({
     objectType: "file",
@@ -474,30 +483,30 @@ const RELATION_CONFIGS: RelationConfig[] = [
     objectType: "file",
     relation: "can_view",
     directlyAssignable: [
-      "user:*",
-      "service:*",
-      "user",
-      "service",
-      "organization#member",
+      { type: "user", wildcard: true },
+      { type: "service", wildcard: true },
+      { type: "user" },
+      { type: "service" },
+      { type: "organization", relation: "member" },
     ],
     impliedBy: ["parent_viewer", "tc_doc_viewer"],
   }),
   rc({
     objectType: "file",
     relation: "can_edit",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["parent_editor", "tc_doc_editor"],
   }),
   rc({
     objectType: "file",
     relation: "can_delete",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["parent_deleter", "tc_doc_deleter"],
   }),
   rc({
     objectType: "file",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
     ],
@@ -510,12 +519,12 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "program",
     relation: "parent",
-    directlyAssignable: ["organization"],
+    directlyAssignable: [{ type: "organization" }],
   }),
   rc({
     objectType: "program",
     relation: "admin",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "owner" }],
     intersection: [
       { type: "direct" },
@@ -525,7 +534,7 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "program",
     relation: "member",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
     intersection: [
       { type: "direct" },
       { type: "tupleToUserset", tupleset: "parent", computedUserset: "member" },
@@ -534,22 +543,25 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "program",
     relation: "auditor",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
   }),
   rc({
     objectType: "program",
     relation: "editor",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
   }),
   rc({
     objectType: "program",
     relation: "viewer",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
   }),
   rc({
     objectType: "program",
     relation: "blocked",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
   }),
   rc({
     objectType: "program",
@@ -586,19 +598,19 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "program",
     relation: "can_delete",
-    directlyAssignable: ["service"],
+    directlyAssignable: [{ type: "service" }],
     impliedBy: ["admin", "parent_deleter"],
   }),
   rc({
     objectType: "program",
     relation: "can_edit",
-    directlyAssignable: ["service"],
+    directlyAssignable: [{ type: "service" }],
     impliedBy: ["admin", "parent_editor", "_editor_not_blocked"],
   }),
   rc({
     objectType: "program",
     relation: "can_view",
-    directlyAssignable: ["service"],
+    directlyAssignable: [{ type: "service" }],
     impliedBy: [
       "member",
       "can_edit",
@@ -609,7 +621,7 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "program",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["admin"],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
@@ -636,32 +648,35 @@ const RELATION_CONFIGS: RelationConfig[] = [
     objectType: "control",
     relation: "parent",
     directlyAssignable: [
-      "user",
-      "service",
-      "organization",
-      "program",
-      "standard",
+      { type: "user" },
+      { type: "service" },
+      { type: "organization" },
+      { type: "program" },
+      { type: "standard" },
     ],
   }),
   rc({
     objectType: "control",
     relation: "system",
-    directlyAssignable: ["system"],
+    directlyAssignable: [{ type: "system" }],
   }),
   rc({
     objectType: "control",
     relation: "owner",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
   }),
   rc({
     objectType: "control",
     relation: "delegate",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
   }),
   rc({
     objectType: "control",
     relation: "blocked",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
   }),
   rc({
     objectType: "control",
@@ -675,7 +690,10 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "control",
     relation: "editor",
-    directlyAssignable: ["group#member", "organization#owner"],
+    directlyAssignable: [
+      { type: "group", relation: "member" },
+      { type: "organization", relation: "owner" },
+    ],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "admin" },
       { tupleset: "parent", computedUserset: "can_edit" },
@@ -698,27 +716,27 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "control",
     relation: "can_delete",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["owner", "_editor_not_blocked"],
     tupleToUserset: [{ tupleset: "system", computedUserset: "system_admin" }],
   }),
   rc({
     objectType: "control",
     relation: "can_edit",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["owner", "delegate", "_editor_not_blocked"],
     tupleToUserset: [{ tupleset: "system", computedUserset: "system_admin" }],
   }),
   rc({
     objectType: "control",
     relation: "can_view",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["can_edit", "_viewer_not_blocked"],
   }),
   rc({
     objectType: "control",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
     ],
@@ -731,22 +749,29 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "subcontrol",
     relation: "parent",
-    directlyAssignable: ["user", "service", "control"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "service" },
+      { type: "control" },
+    ],
   }),
   rc({
     objectType: "subcontrol",
     relation: "owner",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
   }),
   rc({
     objectType: "subcontrol",
     relation: "delegate",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
   }),
   rc({
     objectType: "subcontrol",
     relation: "blocked",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
   }),
   rc({
     objectType: "subcontrol",
@@ -757,7 +782,10 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "subcontrol",
     relation: "editor",
-    directlyAssignable: ["group#member", "organization#owner"],
+    directlyAssignable: [
+      { type: "group", relation: "member" },
+      { type: "organization", relation: "owner" },
+    ],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_edit" }],
   }),
   rc({
@@ -777,25 +805,25 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "subcontrol",
     relation: "can_delete",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["owner", "_editor_not_blocked"],
   }),
   rc({
     objectType: "subcontrol",
     relation: "can_edit",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["owner", "delegate", "_editor_not_blocked"],
   }),
   rc({
     objectType: "subcontrol",
     relation: "can_view",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["can_edit", "_viewer_not_blocked"],
   }),
   rc({
     objectType: "subcontrol",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
     ],
@@ -808,40 +836,46 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "internal_policy",
     relation: "parent",
-    directlyAssignable: ["organization"],
+    directlyAssignable: [{ type: "organization" }],
   }),
   rc({
     objectType: "internal_policy",
     relation: "admin",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_delete" }],
   }),
   rc({
     objectType: "internal_policy",
     relation: "editor",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
   }),
   rc({
     objectType: "internal_policy",
     relation: "viewer",
-    directlyAssignable: ["program#auditor", "group#member"],
+    directlyAssignable: [
+      { type: "program", relation: "auditor" },
+      { type: "group", relation: "member" },
+    ],
     impliedBy: ["editor"],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_view" }],
   }),
   rc({
     objectType: "internal_policy",
     relation: "blocked",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
   }),
   rc({
     objectType: "internal_policy",
     relation: "approver",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
   }),
   rc({
     objectType: "internal_policy",
     relation: "delegate",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
   }),
   rc({
     objectType: "internal_policy",
@@ -860,25 +894,25 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "internal_policy",
     relation: "can_delete",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["admin", "approver", "_editor_not_blocked"],
   }),
   rc({
     objectType: "internal_policy",
     relation: "can_edit",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["admin", "approver", "delegate", "_editor_not_blocked"],
   }),
   rc({
     objectType: "internal_policy",
     relation: "can_view",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["can_edit", "_viewer_not_blocked"],
   }),
   rc({
     objectType: "internal_policy",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
     ],
@@ -891,30 +925,33 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "contact",
     relation: "parent",
-    directlyAssignable: ["organization"],
+    directlyAssignable: [{ type: "organization" }],
   }),
   rc({
     objectType: "contact",
     relation: "editor",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_edit" }],
   }),
   rc({
     objectType: "contact",
     relation: "viewer",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
     impliedBy: ["editor"],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_view" }],
   }),
   rc({
     objectType: "contact",
     relation: "blocked",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
   }),
   rc({
     objectType: "contact",
     relation: "_direct_and_parent_member_view",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     intersection: [
       { type: "direct" },
       { type: "tupleToUserset", tupleset: "parent", computedUserset: "member" },
@@ -923,7 +960,7 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "contact",
     relation: "_direct_and_parent_member_edit",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     intersection: [
       { type: "direct" },
       { type: "tupleToUserset", tupleset: "parent", computedUserset: "member" },
@@ -932,7 +969,7 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "contact",
     relation: "_direct_user_and_parent_member",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
     intersection: [
       { type: "direct" },
       { type: "tupleToUserset", tupleset: "parent", computedUserset: "member" },
@@ -977,7 +1014,7 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "contact",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
     ],
@@ -991,27 +1028,27 @@ const RELATION_CONFIGS: RelationConfig[] = [
     objectType: "task",
     relation: "parent",
     directlyAssignable: [
-      "user",
-      "service",
-      "program",
-      "control",
-      "procedure",
-      "internal_policy",
-      "subcontrol",
-      "control_objective",
-      "risk",
-      "task",
+      { type: "user" },
+      { type: "service" },
+      { type: "program" },
+      { type: "control" },
+      { type: "procedure" },
+      { type: "internal_policy" },
+      { type: "subcontrol" },
+      { type: "control_objective" },
+      { type: "risk" },
+      { type: "task" },
     ],
   }),
   rc({
     objectType: "task",
     relation: "assignee",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
   }),
   rc({
     objectType: "task",
     relation: "assigner",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
   }),
   rc({
     objectType: "task",
@@ -1022,32 +1059,32 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "task",
     relation: "editor",
-    directlyAssignable: ["organization#owner"],
+    directlyAssignable: [{ type: "organization", relation: "owner" }],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_edit" }],
   }),
   rc({
     objectType: "task",
     relation: "can_delete",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["assigner"],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_delete" }],
   }),
   rc({
     objectType: "task",
     relation: "can_edit",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["assignee", "assigner", "editor", "can_delete"],
   }),
   rc({
     objectType: "task",
     relation: "can_view",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["assignee", "assigner", "can_delete", "can_edit", "viewer"],
   }),
   rc({
     objectType: "task",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
     ],
@@ -1061,52 +1098,52 @@ const RELATION_CONFIGS: RelationConfig[] = [
     objectType: "note",
     relation: "parent",
     directlyAssignable: [
-      "program",
-      "control",
-      "procedure",
-      "internal_policy",
-      "subcontrol",
-      "control_objective",
-      "task",
-      "trust_center",
-      "risk",
-      "evidence",
-      "discussion",
+      { type: "program" },
+      { type: "control" },
+      { type: "procedure" },
+      { type: "internal_policy" },
+      { type: "subcontrol" },
+      { type: "control_objective" },
+      { type: "task" },
+      { type: "trust_center" },
+      { type: "risk" },
+      { type: "evidence" },
+      { type: "discussion" },
     ],
   }),
   rc({
     objectType: "note",
     relation: "owner",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
   }),
   rc({
     objectType: "note",
     relation: "editor",
-    directlyAssignable: ["organization#owner"],
+    directlyAssignable: [{ type: "organization", relation: "owner" }],
   }),
   rc({
     objectType: "note",
     relation: "can_edit",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["owner", "editor"],
   }),
   rc({
     objectType: "note",
     relation: "can_delete",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["can_edit"],
   }),
   rc({
     objectType: "note",
     relation: "can_view",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["can_edit"],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_view" }],
   }),
   rc({
     objectType: "note",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
     ],
@@ -1120,32 +1157,38 @@ const RELATION_CONFIGS: RelationConfig[] = [
     objectType: "evidence",
     relation: "parent",
     directlyAssignable: [
-      "user",
-      "service",
-      "program",
-      "control",
-      "procedure",
-      "internal_policy",
-      "subcontrol",
-      "control_objective",
-      "task",
+      { type: "user" },
+      { type: "service" },
+      { type: "program" },
+      { type: "control" },
+      { type: "procedure" },
+      { type: "internal_policy" },
+      { type: "subcontrol" },
+      { type: "control_objective" },
+      { type: "task" },
     ],
   }),
   rc({
     objectType: "evidence",
     relation: "editor",
-    directlyAssignable: ["group#member", "organization#owner"],
+    directlyAssignable: [
+      { type: "group", relation: "member" },
+      { type: "organization", relation: "owner" },
+    ],
   }),
   rc({
     objectType: "evidence",
     relation: "viewer",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
     impliedBy: ["editor"],
   }),
   rc({
     objectType: "evidence",
     relation: "blocked",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
   }),
   rc({
     objectType: "evidence",
@@ -1174,25 +1217,25 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "evidence",
     relation: "can_delete",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["_delete_not_blocked"],
   }),
   rc({
     objectType: "evidence",
     relation: "can_edit",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["can_delete", "_edit_not_blocked"],
   }),
   rc({
     objectType: "evidence",
     relation: "can_view",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["can_edit", "_view_not_blocked"],
   }),
   rc({
     objectType: "evidence",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
     ],
@@ -1205,22 +1248,22 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "standard",
     relation: "parent",
-    directlyAssignable: ["organization"],
+    directlyAssignable: [{ type: "organization" }],
   }),
   rc({
     objectType: "standard",
     relation: "associated_with",
-    directlyAssignable: ["trust_center"],
+    directlyAssignable: [{ type: "trust_center" }],
   }),
   rc({
     objectType: "standard",
     relation: "editor",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
   }),
   rc({
     objectType: "standard",
     relation: "viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["editor"],
     tupleToUserset: [
       { tupleset: "associated_with", computedUserset: "can_view" },
@@ -1244,7 +1287,10 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "standard",
     relation: "can_view",
-    directlyAssignable: ["user:*", "service:*"],
+    directlyAssignable: [
+      { type: "user", wildcard: true },
+      { type: "service", wildcard: true },
+    ],
     impliedBy: ["viewer", "parent_viewer"],
   }),
   rc({
@@ -1262,7 +1308,7 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "standard",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
     ],
@@ -1275,22 +1321,22 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "trust_center",
     relation: "parent",
-    directlyAssignable: ["organization"],
+    directlyAssignable: [{ type: "organization" }],
   }),
   rc({
     objectType: "trust_center",
     relation: "system",
-    directlyAssignable: ["system"],
+    directlyAssignable: [{ type: "system" }],
   }),
   rc({
     objectType: "trust_center",
     relation: "nda_signed",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
   }),
   rc({
     objectType: "trust_center",
     relation: "editor",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
   }),
   rc({
     objectType: "trust_center",
@@ -1331,32 +1377,39 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "trust_center",
     relation: "can_view",
-    directlyAssignable: ["user:*", "service:*"],
+    directlyAssignable: [
+      { type: "user", wildcard: true },
+      { type: "service", wildcard: true },
+    ],
     impliedBy: ["parent_viewer", "viewer"],
   }),
   rc({
     objectType: "trust_center",
     relation: "can_edit",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["parent_editor", "editor"],
     tupleToUserset: [{ tupleset: "system", computedUserset: "system_admin" }],
   }),
   rc({
     objectType: "trust_center",
     relation: "can_delete",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["parent_deleter"],
   }),
   // --- trust_center_doc ---
   rc({
     objectType: "trust_center_doc",
     relation: "parent",
-    directlyAssignable: ["trust_center", "user", "service"],
+    directlyAssignable: [
+      { type: "trust_center" },
+      { type: "user" },
+      { type: "service" },
+    ],
   }),
   rc({
     objectType: "trust_center_doc",
     relation: "editor",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
   }),
   rc({
     objectType: "trust_center_doc",
@@ -1399,26 +1452,31 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "trust_center_doc",
     relation: "can_view",
-    directlyAssignable: ["user", "service", "user:*", "service:*"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "service" },
+      { type: "user", wildcard: true },
+      { type: "service", wildcard: true },
+    ],
     impliedBy: ["parent_viewer", "viewer"],
   }),
   rc({
     objectType: "trust_center_doc",
     relation: "can_edit",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["parent_editor", "editor"],
   }),
   rc({
     objectType: "trust_center_doc",
     relation: "can_delete",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["parent_deleter", "editor"],
   }),
   // --- export ---
   rc({
     objectType: "export",
     relation: "system",
-    directlyAssignable: ["system"],
+    directlyAssignable: [{ type: "system" }],
   }),
   rc({
     objectType: "export",
@@ -1429,44 +1487,54 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "export",
     relation: "can_edit",
-    directlyAssignable: ["service"],
+    directlyAssignable: [{ type: "service" }],
     tupleToUserset: [{ tupleset: "system", computedUserset: "system_admin" }],
   }),
   rc({
     objectType: "export",
     relation: "can_view",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["can_edit"],
   }),
   // --- workflow_definition ---
   rc({
     objectType: "workflow_definition",
     relation: "parent",
-    directlyAssignable: ["user", "service", "organization"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "service" },
+      { type: "organization" },
+    ],
   }),
   rc({
     objectType: "workflow_definition",
     relation: "admin",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_delete" }],
   }),
   rc({
     objectType: "workflow_definition",
     relation: "editor",
-    directlyAssignable: ["group#member", "organization#owner"],
+    directlyAssignable: [
+      { type: "group", relation: "member" },
+      { type: "organization", relation: "owner" },
+    ],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_edit" }],
   }),
   rc({
     objectType: "workflow_definition",
     relation: "viewer",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
     impliedBy: ["editor"],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_view" }],
   }),
   rc({
     objectType: "workflow_definition",
     relation: "blocked",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
   }),
   rc({
     objectType: "workflow_definition",
@@ -1485,25 +1553,25 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "workflow_definition",
     relation: "can_delete",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["admin", "_editor_not_blocked"],
   }),
   rc({
     objectType: "workflow_definition",
     relation: "can_edit",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["admin", "_editor_not_blocked"],
   }),
   rc({
     objectType: "workflow_definition",
     relation: "can_view",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["can_edit", "_viewer_not_blocked"],
   }),
   rc({
     objectType: "workflow_definition",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
     ],
@@ -1517,13 +1585,13 @@ const RELATION_CONFIGS: RelationConfig[] = [
     objectType: "workflow_instance",
     relation: "parent",
     directlyAssignable: [
-      "user",
-      "service",
-      "organization",
-      "workflow_definition",
-      "control",
-      "internal_policy",
-      "evidence",
+      { type: "user" },
+      { type: "service" },
+      { type: "organization" },
+      { type: "workflow_definition" },
+      { type: "control" },
+      { type: "internal_policy" },
+      { type: "evidence" },
     ],
   }),
   rc({
@@ -1535,7 +1603,10 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "workflow_instance",
     relation: "blocked",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
   }),
   rc({
     objectType: "workflow_instance",
@@ -1547,23 +1618,23 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "workflow_instance",
     relation: "can_view",
-    directlyAssignable: ["service"],
+    directlyAssignable: [{ type: "service" }],
     impliedBy: ["_viewer_not_blocked"],
   }),
   rc({
     objectType: "workflow_instance",
     relation: "can_edit",
-    directlyAssignable: ["service"],
+    directlyAssignable: [{ type: "service" }],
   }),
   rc({
     objectType: "workflow_instance",
     relation: "can_delete",
-    directlyAssignable: ["service"],
+    directlyAssignable: [{ type: "service" }],
   }),
   rc({
     objectType: "workflow_instance",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
     ],
@@ -1576,22 +1647,31 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "assessment",
     relation: "parent",
-    directlyAssignable: ["organization"],
+    directlyAssignable: [{ type: "organization" }],
   }),
   rc({
     objectType: "assessment",
     relation: "owner",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
   }),
   rc({
     objectType: "assessment",
     relation: "delegate",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
   }),
   rc({
     objectType: "assessment",
     relation: "editor",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "admin" },
       { tupleset: "parent", computedUserset: "owner" },
@@ -1600,13 +1680,19 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "assessment",
     relation: "viewer",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
     impliedBy: ["editor"],
   }),
   rc({
     objectType: "assessment",
     relation: "blocked",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
   }),
   rc({
     objectType: "assessment",
@@ -1625,44 +1711,54 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "assessment",
     relation: "can_delete",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
     impliedBy: ["owner", "_editor_not_blocked"],
   }),
   rc({
     objectType: "assessment",
     relation: "can_edit",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
     impliedBy: ["owner", "delegate", "_editor_not_blocked"],
   }),
   rc({
     objectType: "assessment",
     relation: "can_view",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
     impliedBy: ["can_edit", "_viewer_not_blocked"],
   }),
   // --- campaign ---
   rc({
     objectType: "campaign",
     relation: "parent",
-    directlyAssignable: ["user", "service", "organization"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "service" },
+      { type: "organization" },
+    ],
   }),
   rc({
     objectType: "campaign",
     relation: "editor",
-    directlyAssignable: ["group#member", "organization#owner"],
+    directlyAssignable: [
+      { type: "group", relation: "member" },
+      { type: "organization", relation: "owner" },
+    ],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_edit" }],
   }),
   rc({
     objectType: "campaign",
     relation: "viewer",
-    directlyAssignable: ["group#member"],
+    directlyAssignable: [{ type: "group", relation: "member" }],
     impliedBy: ["editor"],
     tupleToUserset: [{ tupleset: "parent", computedUserset: "can_view" }],
   }),
   rc({
     objectType: "campaign",
     relation: "blocked",
-    directlyAssignable: ["user", "group#member"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "group", relation: "member" },
+    ],
   }),
   rc({
     objectType: "campaign",
@@ -1681,25 +1777,25 @@ const RELATION_CONFIGS: RelationConfig[] = [
   rc({
     objectType: "campaign",
     relation: "can_delete",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["_editor_not_blocked"],
   }),
   rc({
     objectType: "campaign",
     relation: "can_edit",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["_editor_not_blocked"],
   }),
   rc({
     objectType: "campaign",
     relation: "can_view",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     impliedBy: ["can_edit", "_viewer_not_blocked"],
   }),
   rc({
     objectType: "campaign",
     relation: "audit_log_viewer",
-    directlyAssignable: ["user", "service"],
+    directlyAssignable: [{ type: "user" }, { type: "service" }],
     tupleToUserset: [
       { tupleset: "parent", computedUserset: "audit_log_viewer" },
     ],

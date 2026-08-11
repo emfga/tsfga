@@ -67,7 +67,10 @@ describe("Temporal Access Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "viewer",
-      directlyAssignable: ["user"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "user", condition: "temporal_access" },
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

@@ -24,11 +24,12 @@ const fga = createTsfga(store);
 await fga.writeRelationConfig({
   objectType: "document",
   relation: "viewer",
-  // What the relation admits, in OpenFGA's type-restriction
-  // notation: a bare type, `type:*` for the wildcard, and
-  // `type#relation` for a userset. `[]` means the relation admits
-  // no direct assignment at all.
-  directlyAssignable: ["user"],
+  // What the relation admits, one entry per entry of OpenFGA's
+  // `directly_related_user_types`: `{ type }` for a bare type,
+  // `{ type, wildcard: true }` for `user:*`, `{ type, relation }`
+  // for a userset, and `condition` on any of them. `[]` means the
+  // relation admits no direct assignment at all.
+  directlyAssignable: [{ type: "user" }],
 });
 
 // Add a tuple
@@ -323,13 +324,38 @@ nothing it could find would be valid:
 | wildcard probe | `directlyAssignable` omits `subjectType:*` |
 | userset scan | `directlyAssignable` has no `type#relation` entry |
 
-The userset scan is narrowed rather than switched: the query
-carries the `type#relation` refs the relation admits, so a
-relation admitting `team#member` never asks for — and never
-expands — a `team:eng#owner` row. The refs are a hint the store
-may use to narrow its query; the guarantee is that the reply is
-re-clamped against the same list, so a store that over-returns
-loses rows rather than smuggling them past the model.
+All three parts are narrowed rather than switched: the query
+carries the restrictions the relation admits, so a relation
+admitting `team#member` never asks for — and never expands — a
+`team:eng#owner` row. The refs are a hint the store may use to
+narrow its query; the guarantee is that the reply is re-clamped
+against the same list, so a store that over-returns loses rows
+rather than smuggling them past the model.
+
+`null` and `[]` are opposites on all three: `null` declines to
+narrow, `[]` excludes the part.
+
+### The gate is wider than the clamp, deliberately
+
+The restriction's condition is matched too, and that splits what
+used to be one predicate in two. The read gate runs *before* the
+row exists and the condition lives *on* the row, so the gate can
+only match the subject's shape — type, wildcard, userset relation
+— and asks for every restriction of that shape, conditioned or
+not. `clampToQuery` then performs the exact four-field match on
+the reply, before the check algorithm sees a row.
+
+So the invariant is not that the read gate and the write gate
+agree. It is:
+
+```
+readGate ⊇ writeGate     and     clamp ≡ writeGate
+```
+
+The ordering is externally observable rather than a matter of
+taste: a row the model does not admit must be dropped before
+anything evaluates its condition, or a missing context parameter
+raises where OpenFGA answers `false`.
 
 With all three ruled out there is nothing to ask, and the node
 skips the store entirely — it still resolves through its rewrites.
@@ -407,9 +433,11 @@ really reach.
 Contextual tuples passed on a `CheckRequest` are validated
 against relation configs with the same rules as `addTuple`: the
 relation config must exist, and the subject ref — the bare type,
-`type:*` for a wildcard subject, or `type#relation` for a userset
-— must appear in `directlyAssignable`. Invalid contextual tuples
-throw `RelationConfigNotFoundError` or `InvalidSubjectTypeError`.
+`type:*` for a wildcard subject, or `type#relation` for a userset,
+each with the tuple's condition — must appear in
+`directlyAssignable`. Invalid contextual tuples throw
+`RelationConfigNotFoundError`, `InvalidSubjectTypeError` or
+`InvalidConditionalTupleError`.
 
 ## TupleStore interface
 

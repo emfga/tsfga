@@ -9,6 +9,84 @@ releases may contain breaking changes).
 
 ### Fixed
 
+- **A type restriction now carries its condition, and the
+  condition is matched exactly.** `directlyAssignable` recorded
+  `user` for the OpenFGA restriction `[user with weekday_only]`,
+  dropping the condition. OpenFGA treats the condition as part of
+  the restriction and matches it in both directions — probed
+  against v1.18.2:
+
+  | stored row | model admits | OpenFGA |
+  |---|---|---|
+  | `user:alice`, no condition | `[user with weekday_only]` | `false` |
+  | `user:alice` with `weekday_only` | `[user]` | `false` |
+  | `user:alice` with `weekday_only` | `[user with other_cond]` | `false` |
+  | `team:eng#member` with `weekday_only` | `[team#member]` | `false` |
+
+  The first row is the fail-open one: tsfga admitted it, found no
+  `conditionName`, treated that as unconditional access and
+  granted — **even where the check context would have satisfied
+  the condition it lacked**. The wildcard cases mirror it exactly.
+
+  `tests/conformance/condition-restrictions.test.ts` reproduces
+  the whole table against the container. Against the previous
+  commit 6 of its 11 cases fail, all of them in the granting
+  direction; the other 5 hold before and after.
+
+### Changed
+
+- **BREAKING: `RelationConfig.directlyAssignable` is now
+  `TypeRestriction[]`, not `string[]`.** Each entry mirrors
+  OpenFGA's `RelationReference` field for field:
+
+  ```ts
+  { type: "user" }                                  // user
+  { type: "user", wildcard: true }                  // user:*
+  { type: "team", relation: "member" }              // team#member
+  { type: "user", condition: "weekday_only" }       // user with weekday_only
+  ```
+
+  Structured rather than a `"user with weekday_only"` string
+  because every consumer needs a different projection: the read
+  gate is condition-blind, the clamp is exact, and the Kysely
+  adapter wants `type` and `relation` as separate columns. A
+  joined string would be re-parsed at each, and
+  `CachingTupleStore` already refuses one on that ground.
+
+  Migration `005` is unchanged as DDL — the column was and stays
+  `jsonb NOT NULL` — but the payload shape changes, so relation
+  configs must be rewritten. Tuples are untouched.
+
+- **BREAKING: `CheckTuplesQuery`'s `includeDirect` and
+  `includeWildcard` booleans are now `directRefs` and
+  `wildcardRefs`**, joining `usersetRefs` as
+  `readonly TypeRestriction[] | null`. For all three, `null`
+  declines to narrow and `[]` excludes the part — they are
+  opposites, and a wrapper that forwards `null` where it meant
+  "already answered" opens the gate rather than closing it.
+
+- **BREAKING: `listSubjects` is now condition-exact.** A row
+  carrying a condition the relation does not admit is no longer
+  reported, exactly as a row of an unadmitted type is not.
+
+- **`InvalidSubjectTypeError` is condition-blind and raised
+  first**; the condition dimension raises the new
+  `InvalidConditionalTupleError`, which carries a `cause`
+  discriminator. OpenFGA raises one error for all condition
+  causes and discriminates by cause string, so tsfga does the
+  same. Folding the two together would have produced
+  `Subject type 'user with weekday_only' is not allowed`, naming
+  a type nobody wrote.
+
+- `TypeRestriction`, `SubjectShape`, `subjectShape`,
+  `admitsSubjectShape` and `formatRestriction` are exported.
+  `admitsSubjectShape` is the read gate; `admitsSubjectRef`
+  remains the exact match used by the clamp and the write path.
+  A consumer narrowing a `WHERE` clause wants the first to decide
+  what to fetch and the second to filter what it holds.
+
+### Fixed
+
 - **Userset type restrictions are now recorded and enforced.**
   `RelationConfig` kept a type array plus a bare boolean —
   *whether* userset subjects were allowed, never *which*. A

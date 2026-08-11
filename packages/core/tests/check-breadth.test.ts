@@ -38,7 +38,7 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
   return {
     objectType: "",
     relation: "",
-    directlyAssignable: ["user", "user:*"],
+    directlyAssignable: [{ type: "user" }, { type: "user", wildcard: true }],
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
@@ -129,7 +129,7 @@ function seedUnion<S extends MockTupleStore>(
       makeConfig({
         objectType: "doc",
         relation,
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
       }),
     );
   }
@@ -204,7 +204,7 @@ describe("sequential equivalence across breadths", () => {
         makeConfig({
           objectType: "doc",
           relation: "access",
-          directlyAssignable: ["user"],
+          directlyAssignable: [{ type: "user" }],
           intersection: [
             { type: "direct" },
             { type: "computedUserset", relation: "member" },
@@ -213,7 +213,7 @@ describe("sequential equivalence across breadths", () => {
         makeConfig({
           objectType: "doc",
           relation: "member",
-          directlyAssignable: ["user"],
+          directlyAssignable: [{ type: "user" }],
         }),
       );
       store.tuples.push(
@@ -289,7 +289,7 @@ describe("bounded launch behavior", () => {
       makeConfig({
         objectType: "doc",
         relation: "access",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
         intersection: [
           { type: "direct" },
           { type: "computedUserset", relation: "member" },
@@ -298,7 +298,7 @@ describe("bounded launch behavior", () => {
       makeConfig({
         objectType: "doc",
         relation: "member",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
       }),
     );
     const result = await check(
@@ -383,7 +383,7 @@ describe("error semantics under bounded breadth", () => {
       makeConfig({
         objectType: "doc",
         relation: "member",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
       }),
     );
     const result = await check(
@@ -407,7 +407,7 @@ describe("error semantics under bounded breadth", () => {
       makeConfig({
         objectType: "doc",
         relation: "granted",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
       }),
     );
     store.tuples.push(
@@ -476,7 +476,10 @@ describe("adversarial-review regressions", () => {
         makeConfig({
           objectType: "doc",
           relation: "slowerr",
-          directlyAssignable: ["user"],
+          directlyAssignable: [
+            { type: "user" },
+            { type: "user", condition: "missing_definition" },
+          ],
         }),
       );
       store.tuples.push(

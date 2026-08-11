@@ -22,7 +22,12 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
   return {
     objectType: "",
     relation: "",
-    directlyAssignable: ["user", "user:*", "team", "team:*"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "user", wildcard: true },
+      { type: "team" },
+      { type: "team", wildcard: true },
+    ],
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
@@ -240,8 +245,8 @@ describe("CachingTupleStore", () => {
       relation: "viewer",
       subjectType: "user",
       subjectId: "alice",
-      includeDirect: true,
-      includeWildcard: true,
+      directRefs: null,
+      wildcardRefs: null,
       usersetRefs: null,
     };
     await caching.findCheckTuples(query);
@@ -263,12 +268,15 @@ describe("check() uses request-scoped config cache", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignable: ["user", "team#member"],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "team", relation: "member" },
+        ],
       }),
       makeConfig({
         objectType: "team",
         relation: "member",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
       }),
     );
     for (let i = 0; i < 5; i++) {
@@ -303,7 +311,7 @@ describe("check() uses request-scoped config cache", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
       }),
     );
     store.resetCounts();
@@ -328,7 +336,7 @@ describe("check() uses request-scoped config cache", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
       }),
     );
     store.resetCounts();
@@ -360,12 +368,16 @@ describe("check() uses request-scoped config cache", () => {
       makeConfig({
         objectType: "doc",
         relation: "viewer",
-        directlyAssignable: ["user", "team#member"],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "team", relation: "member" },
+          { type: "team", relation: "member", condition: "flagged" },
+        ],
       }),
       makeConfig({
         objectType: "team",
         relation: "member",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
       }),
     );
     store.conditionDefinitions.push({

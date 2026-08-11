@@ -30,7 +30,12 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
   return {
     objectType: "",
     relation: "",
-    directlyAssignable: ["user", "user:*", "team", "team:*"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "user", wildcard: true },
+      { type: "team" },
+      { type: "team", wildcard: true },
+    ],
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
@@ -74,7 +79,7 @@ describe("checkMany", () => {
       makeConfig({
         objectType: "doc",
         relation: "deep",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
       }),
     );
   }
@@ -139,7 +144,7 @@ describe("checkMany", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignable: ["user"],
+          directlyAssignable: [{ type: "user" }],
         }),
       );
       store.tuples.push(
@@ -169,7 +174,7 @@ describe("checkMany", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignable: ["user"],
+          directlyAssignable: [{ type: "user" }],
         }),
       );
       const ids = ["1", "2", "3", "4", "5"];
@@ -209,7 +214,7 @@ describe("checkMany", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignable: ["user"],
+          directlyAssignable: [{ type: "user" }],
         }),
       );
       store.tuples.push(
@@ -287,7 +292,10 @@ describe("checkMany", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignable: ["user"],
+          directlyAssignable: [
+            { type: "user" },
+            { type: "user", condition: "is_open" },
+          ],
         }),
       );
       store.tuples.push(

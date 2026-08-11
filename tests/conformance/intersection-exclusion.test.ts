@@ -59,7 +59,7 @@ describe("Intersection + Exclusion Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "member",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -69,7 +69,7 @@ describe("Intersection + Exclusion Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "banned",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -79,7 +79,7 @@ describe("Intersection + Exclusion Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "owner",
-      directlyAssignable: ["organization"],
+      directlyAssignable: [{ type: "organization" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -89,7 +89,7 @@ describe("Intersection + Exclusion Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "writer",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

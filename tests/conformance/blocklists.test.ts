@@ -56,7 +56,7 @@ describe("Blocklists Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "member",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -66,7 +66,7 @@ describe("Blocklists Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "blocked",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -76,7 +76,10 @@ describe("Blocklists Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "editor",
-      directlyAssignable: ["user", "team#member"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "team", relation: "member" },
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

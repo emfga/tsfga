@@ -48,17 +48,28 @@ export class ContextualTupleStore implements TupleStore {
    * query, so a replaced probe still costs the store nothing.
    */
   async findCheckTuples(query: CheckTuplesQuery): Promise<CheckTuples> {
-    const direct = query.includeDirect
-      ? this.findContextualDirect(query, query.subjectId)
-      : null;
-    const wildcard = query.includeWildcard
-      ? this.findContextualDirect(query, "*")
-      : null;
+    const direct =
+      query.directRefs?.length === 0
+        ? null
+        : this.findContextualDirect(query, query.subjectId);
+    const wildcard =
+      query.wildcardRefs?.length === 0
+        ? null
+        : this.findContextualDirect(query, "*");
 
     const stored = await this.inner.findCheckTuples({
       ...query,
-      includeDirect: query.includeDirect && direct === null,
-      includeWildcard: query.includeWildcard && wildcard === null,
+      // These fields **suppress**, and suppressing is `[]`.
+      //
+      // The reading to avoid: `directRefs` is not a permission to
+      // be forwarded or withheld, it is a restriction, and its
+      // `null` means *unrestricted*. So the natural-looking
+      // `direct === null ? query.directRefs : null` is fail-open —
+      // it turns "the overlay already answered this probe, don't
+      // ask the store" into "ask the store, and accept anything".
+      // `[]` is the value that says the part is excluded.
+      directRefs: direct === null ? query.directRefs : [],
+      wildcardRefs: wildcard === null ? query.wildcardRefs : [],
     });
 
     return {

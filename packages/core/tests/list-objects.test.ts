@@ -30,7 +30,12 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
   return {
     objectType: "",
     relation: "",
-    directlyAssignable: ["user", "user:*", "folder", "folder:*"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "user", wildcard: true },
+      { type: "folder" },
+      { type: "folder", wildcard: true },
+    ],
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
@@ -115,7 +120,11 @@ describe("listObjects", () => {
       makeConfig({
         objectType: "folder",
         relation: "member",
-        directlyAssignable: ["user", "folder", "folder#member"],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "folder" },
+          { type: "folder", relation: "member" },
+        ],
       }),
     );
     for (let i = 1; i <= candidates; i++) {

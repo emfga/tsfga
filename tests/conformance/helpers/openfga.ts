@@ -133,7 +133,7 @@ export async function fgaWrite(
     relation: string;
     subjectType: string;
     subjectId: string;
-    subjectRelation?: string;
+    subjectRelation?: string | null;
   },
 ): Promise<"accepted" | "refused"> {
   const client = createClient(storeId);
@@ -155,4 +155,20 @@ export async function fgaWrite(
   } catch {
     return "refused";
   }
+}
+
+/**
+ * Write tuples verbatim, conditions included.
+ *
+ * `fgaWriteTuples` reads a YAML fixture; this takes the tuples
+ * directly, for a fixture whose rows are the thing under test and
+ * are written under one model and then read under another.
+ */
+export async function fgaWriteTuplesRaw(
+  storeId: string,
+  authorizationModelId: string,
+  tuples: FgaTupleYaml[],
+): Promise<void> {
+  const client = createClient(storeId);
+  await client.writeTuples(tuples, { authorizationModelId });
 }

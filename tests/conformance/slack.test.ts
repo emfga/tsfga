@@ -60,7 +60,7 @@ describe("Slack Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "workspace",
       relation: "legacy_admin",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -70,7 +70,7 @@ describe("Slack Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "workspace",
       relation: "channels_admin",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: ["legacy_admin"],
       computedUserset: null,
       tupleToUserset: null,
@@ -80,7 +80,7 @@ describe("Slack Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "workspace",
       relation: "member",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: ["channels_admin"],
       computedUserset: null,
       tupleToUserset: null,
@@ -90,7 +90,7 @@ describe("Slack Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "workspace",
       relation: "guest",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -100,7 +100,10 @@ describe("Slack Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "channel",
       relation: "writer",
-      directlyAssignable: ["user", "workspace#member"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "workspace", relation: "member" },
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -110,7 +113,10 @@ describe("Slack Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "channel",
       relation: "commenter",
-      directlyAssignable: ["user", "workspace#member"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "workspace", relation: "member" },
+      ],
       impliedBy: ["writer"],
       computedUserset: null,
       tupleToUserset: null,

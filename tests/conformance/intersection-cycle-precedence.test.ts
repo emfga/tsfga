@@ -134,12 +134,15 @@ describe("Intersection Cycle Precedence Conformance", () => {
     for (const [relation, other] of [
       ["member", "owner"],
       ["owner", "member"],
-    ]) {
+    ] as const) {
       await tsfgaClient.writeRelationConfig({
         ...base,
         objectType: "group",
         relation,
-        directlyAssignable: ["user", `group#${other}`],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "group", relation: other },
+        ],
       });
     }
 
@@ -148,27 +151,27 @@ describe("Intersection Cycle Precedence Conformance", () => {
       ...base,
       objectType: "document",
       relation: "parent",
-      directlyAssignable: ["document"],
+      directlyAssignable: [{ type: "document" }],
     });
     for (const relation of ["base", "chain0"]) {
       await tsfgaClient.writeRelationConfig({
         ...base,
         objectType: "document",
         relation,
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
       });
     }
     await tsfgaClient.writeRelationConfig({
       ...base,
       objectType: "document",
       relation: "conditioned",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user", condition: "valid_ip" }],
     });
     await tsfgaClient.writeRelationConfig({
       ...base,
       objectType: "document",
       relation: "cyclic",
-      directlyAssignable: ["group#member"],
+      directlyAssignable: [{ type: "group", relation: "member" }],
     });
     // The slow operand: nine sequential TTU hops that find nothing.
     for (let k = 1; k <= CHAIN_LENGTH; k++) {

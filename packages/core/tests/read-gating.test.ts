@@ -23,7 +23,12 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
   return {
     objectType: "",
     relation: "",
-    directlyAssignable: ["user", "user:*", "team", "team:*"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "user", wildcard: true },
+      { type: "team" },
+      { type: "team", wildcard: true },
+    ],
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
@@ -71,33 +76,48 @@ describe("structurally impossible reads are skipped", () => {
       // nothing is asked for at all and this would pass for the
       // wrong reason. That case has its own test below.
       await checkWith({
-        directlyAssignable: ["team", "team#member"],
+        directlyAssignable: [
+          { type: "team" },
+          { type: "team", relation: "member" },
+        ],
       });
 
-      expect(nodeQuery()?.includeDirect).toBe(false);
+      expect(nodeQuery()?.directRefs).toEqual([]);
     });
 
     test("a type list with the subject keeps its probe", async () => {
-      await checkWith({ directlyAssignable: ["user"] });
+      await checkWith({ directlyAssignable: [{ type: "user" }] });
 
-      expect(nodeQuery()?.includeDirect).toBe(true);
+      expect(nodeQuery()?.directRefs).toEqual([{ type: "user" }]);
     });
 
     test("no `type:*` in the list skips the wildcard probe", async () => {
-      await checkWith({ directlyAssignable: ["user"] });
+      await checkWith({ directlyAssignable: [{ type: "user" }] });
 
-      expect(nodeQuery()?.includeWildcard).toBe(false);
+      expect(nodeQuery()?.wildcardRefs).toEqual([]);
     });
 
     test("`type:*` in the list keeps the wildcard probe", async () => {
-      await checkWith({ directlyAssignable: ["user", "user:*"] });
+      await checkWith({
+        directlyAssignable: [
+          { type: "user" },
+          { type: "user", wildcard: true },
+        ],
+      });
 
-      expect(nodeQuery()?.includeWildcard).toBe(true);
+      expect(nodeQuery()?.wildcardRefs).toEqual([
+        { type: "user", wildcard: true },
+      ]);
     });
 
     test("admitting no userset skips the userset scan", async () => {
       await checkWith({
-        directlyAssignable: ["user", "user:*", "team", "team:*"],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "user", wildcard: true },
+          { type: "team" },
+          { type: "team", wildcard: true },
+        ],
       });
 
       expect(nodeQuery()?.usersetRefs).toEqual([]);
@@ -107,10 +127,17 @@ describe("structurally impossible reads are skipped", () => {
       // Not a flag: the refs name the relation, so a relation
       // admitting `team#member` never asks for `team#owner`.
       await checkWith({
-        directlyAssignable: ["user", "user:*", "team", "team#member"],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "user", wildcard: true },
+          { type: "team" },
+          { type: "team", relation: "member" },
+        ],
       });
 
-      expect(nodeQuery()?.usersetRefs).toEqual(["team#member"]);
+      expect(nodeQuery()?.usersetRefs).toEqual([
+        { type: "team", relation: "member" },
+      ]);
     });
 
     test("a relation that admits nothing sends no query", async () => {
@@ -129,11 +156,18 @@ describe("structurally impossible reads are skipped", () => {
       // The probes are gated on their own refs, so a list that
       // names both the bare type and the wildcard keeps both.
       await checkWith({
-        directlyAssignable: ["user", "user:*", "team", "team:*"],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "user", wildcard: true },
+          { type: "team" },
+          { type: "team", wildcard: true },
+        ],
       });
 
-      expect(nodeQuery()?.includeDirect).toBe(true);
-      expect(nodeQuery()?.includeWildcard).toBe(true);
+      expect(nodeQuery()?.directRefs).toEqual([{ type: "user" }]);
+      expect(nodeQuery()?.wildcardRefs).toEqual([
+        { type: "user", wildcard: true },
+      ]);
     });
 
     test("no config at all reads everything", async () => {
@@ -141,25 +175,52 @@ describe("structurally impossible reads are skipped", () => {
 
       await check(store, request);
 
-      expect(nodeQuery()?.includeDirect).toBe(true);
-      expect(nodeQuery()?.includeWildcard).toBe(true);
+      // `null`, not `[]`: no config declines to narrow, which is
+      // the opposite of admitting nothing.
+      expect(nodeQuery()?.directRefs).toBeNull();
+      expect(nodeQuery()?.wildcardRefs).toBeNull();
       expect(nodeQuery()?.usersetRefs).toBeNull();
     });
   });
 
-  describe("the read gate matches the write gate", () => {
-    // The two must agree or a tuple could be written and then
-    // never found. These walk the same configs through both paths
-    // and require the same verdict.
+  describe("the read gate covers the write gate", () => {
+    // Not "agrees with": once a restriction carries a condition
+    // the two gates cannot be the same predicate. The read gate
+    // runs before the row exists and the condition is on the row,
+    // so it matches the *shape* and is deliberately the wider of
+    // the two; `clampToQuery` then performs the exact match on the
+    // reply. The invariant is `readGate ⊇ writeGate` and
+    // `clamp ≡ writeGate`.
+    //
+    // What these walk is the consequence that still has to hold:
+    // a tuple the write path accepts is one a check can find.
     const configs: Array<[string, Partial<RelationConfig>]> = [
       [
         "null type list",
-        { directlyAssignable: ["user", "user:*", "team", "team:*"] },
+        {
+          directlyAssignable: [
+            { type: "user" },
+            { type: "user", wildcard: true },
+            { type: "team" },
+            { type: "team", wildcard: true },
+          ],
+        },
       ],
-      ["subject listed", { directlyAssignable: ["user"] }],
-      ["subject absent", { directlyAssignable: ["team"] }],
-      ["wildcard only", { directlyAssignable: ["user:*"] }],
-      ["both forms", { directlyAssignable: ["user", "user:*"] }],
+      ["subject listed", { directlyAssignable: [{ type: "user" }] }],
+      ["subject absent", { directlyAssignable: [{ type: "team" }] }],
+      [
+        "wildcard only",
+        { directlyAssignable: [{ type: "user", wildcard: true }] },
+      ],
+      [
+        "both forms",
+        {
+          directlyAssignable: [
+            { type: "user" },
+            { type: "user", wildcard: true },
+          ],
+        },
+      ],
       ["empty list", { directlyAssignable: [] }],
     ];
 
@@ -202,7 +263,7 @@ describe("structurally impossible reads are skipped", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignable: ["team"],
+          directlyAssignable: [{ type: "team" }],
         }),
       );
       store.tuples.push(makeTuple({ ...request }));
@@ -215,12 +276,12 @@ describe("structurally impossible reads are skipped", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignable: ["team"],
+          directlyAssignable: [{ type: "team" }],
         }),
         makeConfig({
           objectType: "team",
           relation: "member",
-          directlyAssignable: ["user"],
+          directlyAssignable: [{ type: "user" }],
         }),
       );
       store.tuples.push(
@@ -260,7 +321,7 @@ describe("structurally impossible reads are skipped", () => {
         makeConfig({
           objectType: "doc",
           relation: "owner",
-          directlyAssignable: ["user"],
+          directlyAssignable: [{ type: "user" }],
         }),
       );
       store.tuples.push(makeTuple({ ...request, relation: "owner" }));

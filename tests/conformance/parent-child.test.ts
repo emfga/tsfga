@@ -56,7 +56,7 @@ describe("Parent-Child Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "editor",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -66,7 +66,7 @@ describe("Parent-Child Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "parent",
-      directlyAssignable: ["folder"],
+      directlyAssignable: [{ type: "folder" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -76,7 +76,7 @@ describe("Parent-Child Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "editor",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "editor" }],

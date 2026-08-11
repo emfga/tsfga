@@ -10,6 +10,7 @@ import {
   type RemoveTupleRequest,
   type Tuple,
   type TupleStore,
+  type TypeRestriction,
 } from "@tsfga/core";
 import { type Kysely, sql } from "kysely";
 import type { DB, Json } from "./schema.ts";
@@ -83,22 +84,17 @@ export class KyselyTupleStore implements TupleStore {
    * afterwards.
    */
   async findCheckTuples(query: CheckTuplesQuery): Promise<CheckTuples> {
-    const { includeDirect, includeWildcard, usersetRefs } = query;
-    // `null` declines to narrow the userset scan; `[]` excludes it.
-    const includeUsersets = usersetRefs === null || usersetRefs.length > 0;
+    const { directRefs, wildcardRefs, usersetRefs } = query;
+    // `null` declines to narrow; `[]` excludes the part. The two
+    // must not be conflated — reading `[]` as "no filter" turns a
+    // query that asked for nothing into a full scan.
+    const wanted = (refs: readonly TypeRestriction[] | null): boolean =>
+      refs === null || refs.length > 0;
     // Every part excluded means no row could be used. Return the
     // empty result rather than a `WHERE false` round-trip.
-    if (!includeDirect && !includeWildcard && !includeUsersets) {
+    if (!wanted(directRefs) && !wanted(wildcardRefs) && !wanted(usersetRefs)) {
       return { direct: null, wildcard: null, usersets: [] };
     }
-    // The admitted refs are `type#relation` pairs, so the scan
-    // narrows to exactly the (subject_type, subject_relation)
-    // combinations the model can use. Core re-clamps the reply
-    // against the same list, so this stays an optimization.
-    const usersetPairs = (usersetRefs ?? []).map((ref) => {
-      const hash = ref.indexOf("#");
-      return { type: ref.slice(0, hash), relation: ref.slice(hash + 1) };
-    });
 
     const dbSubjectId =
       query.subjectId === "*" ? WILDCARD_SENTINEL : query.subjectId;
@@ -109,38 +105,56 @@ export class KyselyTupleStore implements TupleStore {
       .where("object_type", "=", query.objectType)
       .where("object_id", "=", query.objectId)
       .where("relation", "=", query.relation)
-      .where((eb) =>
-        eb.or([
-          ...(includeDirect
-            ? [
-                eb.and([
-                  eb("subject_type", "=", query.subjectType),
-                  eb("subject_id", "=", dbSubjectId),
-                  eb("subject_relation", "is", null),
-                ]),
-              ]
-            : []),
-          ...(includeWildcard
-            ? [
-                eb.and([
-                  eb("subject_type", "=", query.subjectType),
-                  eb("subject_id", "=", WILDCARD_SENTINEL),
-                  eb("subject_relation", "is", null),
-                ]),
-              ]
-            : []),
-          ...(includeUsersets
-            ? usersetRefs === null
+      .where((eb) => {
+        // A restriction admits a row only if the row's condition is
+        // the one it names — or if it names none and the row
+        // carries none. That is a column predicate, so the scan
+        // narrows on it like any other rather than filtering after.
+        const condition = (restriction: TypeRestriction) =>
+          restriction.condition === undefined
+            ? eb("condition_name", "is", null)
+            : eb("condition_name", "=", restriction.condition);
+
+        // One disjunct per admitted restriction. A relation
+        // admitting `[user, user with weekday_only]` produces two,
+        // and a row matching either qualifies.
+        const probe = (
+          refs: readonly TypeRestriction[] | null,
+          subjectId: string,
+        ) => {
+          if (!wanted(refs)) return [];
+          const slot = [
+            eb("subject_type", "=", query.subjectType),
+            eb("subject_id", "=", subjectId),
+            eb("subject_relation", "is", null),
+          ];
+          if (refs === null) return [eb.and(slot)];
+          return refs.map((r) => eb.and([...slot, condition(r)]));
+        };
+
+        return eb.or([
+          ...probe(directRefs, dbSubjectId),
+          ...probe(wildcardRefs, WILDCARD_SENTINEL),
+          ...(!wanted(usersetRefs)
+            ? []
+            : usersetRefs === null
               ? [eb("subject_relation", "is not", null)]
-              : usersetPairs.map((pair) =>
-                  eb.and([
-                    eb("subject_type", "=", pair.type),
-                    eb("subject_relation", "=", pair.relation),
-                  ]),
-                )
-            : []),
-        ]),
-      )
+              : usersetRefs.flatMap((r) =>
+                  // A userset ref without a relation names no
+                  // userset, so it contributes no disjunct rather
+                  // than a predicate on `undefined`.
+                  r.relation === undefined
+                    ? []
+                    : [
+                        eb.and([
+                          eb("subject_type", "=", r.type),
+                          eb("subject_relation", "=", r.relation),
+                          condition(r),
+                        ]),
+                      ],
+                )),
+        ]);
+      })
       .execute();
 
     let direct: Tuple | null = null;
@@ -151,12 +165,12 @@ export class KyselyTupleStore implements TupleStore {
       const tuple = this.rowToTuple(row);
       if (row.subject_relation !== null) {
         usersets.push(tuple);
-      } else if (includeDirect && row.subject_id === dbSubjectId) {
+      } else if (wanted(directRefs) && row.subject_id === dbSubjectId) {
         // Checked first, so a check *for* the wildcard subject —
         // where both disjuncts are the same query — lands in
         // `direct` rather than being reported twice.
         direct = tuple;
-      } else if (includeWildcard && row.subject_id === WILDCARD_SENTINEL) {
+      } else if (wanted(wildcardRefs) && row.subject_id === WILDCARD_SENTINEL) {
         wildcard = tuple;
       }
       // Partitioned on the raw column, never on the round-tripped
@@ -404,29 +418,52 @@ export class KyselyTupleStore implements TupleStore {
 
   /**
    * `directly_assignable` is NOT NULL and every entry is a type
-   * restriction string, so anything else in the column is a row no
+   * restriction object, so anything else in the column is a row no
    * tsfga write could have produced. Validated rather than cast:
    * the value gates both the write path and the check read gate,
    * so a malformed one must stop the request, not widen it.
+   *
+   * `wildcard` is normalized to `true` or absent rather than being
+   * kept as whatever JSON held. `{"wildcard": false}` would
+   * otherwise compare unequal to a restriction built in memory,
+   * where the field is simply missing, and the mismatch would
+   * silently drop rows at the clamp.
    */
-  private parseDirectlyAssignable(value: Json): string[] {
-    if (!Array.isArray(value)) {
-      throw new InvalidStoredDataError(
+  private parseDirectlyAssignable(value: Json): TypeRestriction[] {
+    const invalid = (detail: string) =>
+      new InvalidStoredDataError(
         "relation_configs",
         "directly_assignable",
-        "expected array",
+        detail,
       );
-    }
-    const result: string[] = [];
+    if (!Array.isArray(value)) throw invalid("expected array");
+
+    const result: TypeRestriction[] = [];
     for (const item of value) {
-      if (typeof item !== "string") {
-        throw new InvalidStoredDataError(
-          "relation_configs",
-          "directly_assignable",
-          "each element must be a type restriction string",
-        );
+      if (typeof item !== "object" || item === null || Array.isArray(item)) {
+        throw invalid("each element must be a type restriction object");
       }
-      result.push(item);
+      const { type, relation, wildcard, condition } = item;
+      if (typeof type !== "string" || type === "") {
+        throw invalid("each element needs a non-empty string 'type'");
+      }
+      if (relation !== undefined && typeof relation !== "string") {
+        throw invalid("'relation' must be a string when present");
+      }
+      if (condition !== undefined && typeof condition !== "string") {
+        throw invalid("'condition' must be a string when present");
+      }
+      if (wildcard !== undefined && typeof wildcard !== "boolean") {
+        throw invalid("'wildcard' must be a boolean when present");
+      }
+      if (relation !== undefined && wildcard === true) {
+        throw invalid("'relation' and 'wildcard' are mutually exclusive");
+      }
+      const restriction: TypeRestriction = { type };
+      if (relation !== undefined) restriction.relation = relation;
+      if (wildcard === true) restriction.wildcard = true;
+      if (condition !== undefined) restriction.condition = condition;
+      result.push(restriction);
     }
     return result;
   }

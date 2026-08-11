@@ -72,8 +72,8 @@ describe("KyselyTupleStore", () => {
       relation,
       subjectType,
       subjectId,
-      includeDirect: true,
-      includeWildcard: false,
+      directRefs: null,
+      wildcardRefs: [],
       usersetRefs: [],
     });
     return direct;
@@ -84,7 +84,7 @@ describe("KyselyTupleStore", () => {
       await store.upsertRelationConfig({
         objectType: "workspace",
         relation: "member",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
         impliedBy: ["channels_admin"],
         computedUserset: null,
         tupleToUserset: null,
@@ -96,7 +96,7 @@ describe("KyselyTupleStore", () => {
       expect(config).not.toBeNull();
       expect(config?.objectType).toBe("workspace");
       expect(config?.relation).toBe("member");
-      expect(config?.directlyAssignable).toEqual(["user"]);
+      expect(config?.directlyAssignable).toEqual([{ type: "user" }]);
       expect(config?.impliedBy).toEqual(["channels_admin"]);
     });
 
@@ -109,7 +109,7 @@ describe("KyselyTupleStore", () => {
       await store.upsertRelationConfig({
         objectType: "workspace",
         relation: "member",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,
@@ -119,7 +119,11 @@ describe("KyselyTupleStore", () => {
       await store.upsertRelationConfig({
         objectType: "workspace",
         relation: "member",
-        directlyAssignable: ["user", "team", "workspace#member"],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "team" },
+          { type: "workspace", relation: "member" },
+        ],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,
@@ -129,9 +133,9 @@ describe("KyselyTupleStore", () => {
 
       const config = await store.findRelationConfig("workspace", "member");
       expect(config?.directlyAssignable).toEqual([
-        "user",
-        "team",
-        "workspace#member",
+        { type: "user" },
+        { type: "team" },
+        { type: "workspace", relation: "member" },
       ]);
     });
 
@@ -139,7 +143,12 @@ describe("KyselyTupleStore", () => {
       await store.upsertRelationConfig({
         objectType: "workspace",
         relation: "member",
-        directlyAssignable: ["user", "user:*", "workspace", "workspace:*"],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "user", wildcard: true },
+          { type: "workspace" },
+          { type: "workspace", wildcard: true },
+        ],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,
@@ -162,7 +171,12 @@ describe("KyselyTupleStore", () => {
       await store.upsertRelationConfig({
         objectType: "repo",
         relation: "reader",
-        directlyAssignable: ["user", "user:*", "workspace", "workspace:*"],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "user", wildcard: true },
+          { type: "workspace" },
+          { type: "workspace", wildcard: true },
+        ],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: [
@@ -278,8 +292,8 @@ describe("KyselyTupleStore", () => {
         relation: "writer",
         subjectType: "user",
         subjectId: uuid3,
-        includeDirect: false,
-        includeWildcard: false,
+        directRefs: [],
+        wildcardRefs: [],
         usersetRefs: null,
       });
       expect(usersets).toHaveLength(1);
@@ -490,7 +504,12 @@ describe("KyselyTupleStore", () => {
       await store.upsertRelationConfig({
         objectType: "workspace",
         relation: "member",
-        directlyAssignable: ["user", "user:*", "workspace", "workspace:*"],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "user", wildcard: true },
+          { type: "workspace" },
+          { type: "workspace", wildcard: true },
+        ],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,
@@ -500,10 +519,10 @@ describe("KyselyTupleStore", () => {
 
       const config = await store.findRelationConfig("workspace", "member");
       expect(config?.directlyAssignable).toEqual([
-        "user",
-        "user:*",
-        "workspace",
-        "workspace:*",
+        { type: "user" },
+        { type: "user", wildcard: true },
+        { type: "workspace" },
+        { type: "workspace", wildcard: true },
       ]);
       expect(config?.impliedBy).toBeNull();
       expect(config?.computedUserset).toBeNull();
@@ -514,7 +533,7 @@ describe("KyselyTupleStore", () => {
       await store.upsertRelationConfig({
         objectType: "workspace",
         relation: "member",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
         impliedBy: ["channels_admin"],
         computedUserset: null,
         tupleToUserset: null,
@@ -524,7 +543,7 @@ describe("KyselyTupleStore", () => {
       await store.upsertRelationConfig({
         objectType: "workspace",
         relation: "member",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,
@@ -754,8 +773,8 @@ describe("KyselyTupleStore", () => {
               relation: "viewer",
               subjectType: "user",
               subjectId: uuid2,
-              includeDirect,
-              includeWildcard,
+              directRefs: includeDirect ? null : [],
+              wildcardRefs: includeWildcard ? null : [],
               usersetRefs: includeUsersets ? null : [],
             });
 
@@ -782,8 +801,8 @@ describe("KyselyTupleStore", () => {
         relation: "viewer",
         subjectType: "user",
         subjectId: "*",
-        includeDirect: true,
-        includeWildcard: true,
+        directRefs: null,
+        wildcardRefs: null,
         usersetRefs: [],
       });
 
@@ -806,7 +825,7 @@ describe("KyselyTupleStore", () => {
       await store.upsertRelationConfig({
         objectType: "resource",
         relation: "can_edit",
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,
@@ -822,7 +841,12 @@ describe("KyselyTupleStore", () => {
       await store.upsertRelationConfig({
         objectType: "resource",
         relation: "can_edit",
-        directlyAssignable: ["user", "user:*", "workspace", "workspace:*"],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "user", wildcard: true },
+          { type: "workspace" },
+          { type: "workspace", wildcard: true },
+        ],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,
@@ -832,7 +856,12 @@ describe("KyselyTupleStore", () => {
       await store.upsertRelationConfig({
         objectType: "resource",
         relation: "can_edit",
-        directlyAssignable: ["user", "user:*", "workspace", "workspace:*"],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "user", wildcard: true },
+          { type: "workspace" },
+          { type: "workspace", wildcard: true },
+        ],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,
@@ -940,8 +969,8 @@ describe("KyselyTupleStore", () => {
         relation: "writer",
         subjectType: "user",
         subjectId: uuid2,
-        includeDirect: true,
-        includeWildcard: true,
+        directRefs: null,
+        wildcardRefs: null,
         usersetRefs: null,
       });
 
@@ -968,8 +997,8 @@ describe("KyselyTupleStore", () => {
         relation: "writer",
         subjectType: "user",
         subjectId: uuid2,
-        includeDirect: true,
-        includeWildcard: true,
+        directRefs: null,
+        wildcardRefs: null,
         usersetRefs: null,
       });
 
@@ -1016,7 +1045,10 @@ describe("KyselyTupleStore", () => {
       await store.upsertRelationConfig({
         objectType: "channel",
         relation: "writer",
-        directlyAssignable: ["user", "workspace#member"],
+        directlyAssignable: [
+          { type: "user" },
+          { type: "workspace", relation: "member" },
+        ],
         impliedBy: ["admin"],
         computedUserset: null,
         tupleToUserset: [{ tupleset: "parent", computedUserset: "member" }],
@@ -1028,7 +1060,10 @@ describe("KyselyTupleStore", () => {
       expect(config).not.toBeNull();
       expect(config?.objectType).toBe("channel");
       expect(config?.relation).toBe("writer");
-      expect(config?.directlyAssignable).toEqual(["user", "workspace#member"]);
+      expect(config?.directlyAssignable).toEqual([
+        { type: "user" },
+        { type: "workspace", relation: "member" },
+      ]);
       expect(config?.impliedBy).toEqual(["admin"]);
       expect(config?.tupleToUserset).toEqual([
         { tupleset: "parent", computedUserset: "member" },

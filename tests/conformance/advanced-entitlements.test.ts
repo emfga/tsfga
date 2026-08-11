@@ -93,7 +93,7 @@ describe("Advanced Entitlements Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "member",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -105,7 +105,7 @@ describe("Advanced Entitlements Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "plan",
       relation: "subscriber",
-      directlyAssignable: ["organization#member"],
+      directlyAssignable: [{ type: "organization", relation: "member" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -117,7 +117,24 @@ describe("Advanced Entitlements Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "feature",
       relation: "has_feature",
-      directlyAssignable: ["plan#subscriber"],
+      directlyAssignable: [
+        { type: "plan", relation: "subscriber" },
+        {
+          type: "plan",
+          relation: "subscriber",
+          condition: "is_below_collaborator_limit",
+        },
+        {
+          type: "plan",
+          relation: "subscriber",
+          condition: "is_below_row_sync_limit",
+        },
+        {
+          type: "plan",
+          relation: "subscriber",
+          condition: "is_below_page_history_days_limit",
+        },
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

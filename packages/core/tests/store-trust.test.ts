@@ -26,7 +26,12 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
   return {
     objectType: "",
     relation: "",
-    directlyAssignable: ["user", "user:*", "team", "team:*"],
+    directlyAssignable: [
+      { type: "user" },
+      { type: "user", wildcard: true },
+      { type: "team" },
+      { type: "team", wildcard: true },
+    ],
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
@@ -106,10 +111,13 @@ describe("a store cannot widen what the model admits", () => {
 
       expect(
         await checkWith({
-          directlyAssignable: ["team", "team#member"],
+          directlyAssignable: [
+            { type: "team" },
+            { type: "team", relation: "member" },
+          ],
         }),
       ).toBe(false);
-      expect(store.lastQuery?.includeDirect).toBe(false);
+      expect(store.lastQuery?.directRefs).toEqual([]);
     });
 
     test("a wildcard tuple on a relation without `type:*` denies", async () => {
@@ -119,10 +127,13 @@ describe("a store cannot widen what the model admits", () => {
 
       expect(
         await checkWith({
-          directlyAssignable: ["user", "team#member"],
+          directlyAssignable: [
+            { type: "user" },
+            { type: "team", relation: "member" },
+          ],
         }),
       ).toBe(false);
-      expect(store.lastQuery?.includeWildcard).toBe(false);
+      expect(store.lastQuery?.wildcardRefs).toEqual([]);
     });
 
     test("a userset row on a relation that forbids usersets denies", async () => {
@@ -143,7 +154,7 @@ describe("a store cannot widen what the model admits", () => {
         makeConfig({
           objectType: "team",
           relation: "member",
-          directlyAssignable: ["user"],
+          directlyAssignable: [{ type: "user" }],
         }),
       );
       store.tuples.push(
@@ -158,7 +169,7 @@ describe("a store cannot widen what the model admits", () => {
 
       expect(
         await checkWith({
-          directlyAssignable: ["user"],
+          directlyAssignable: [{ type: "user" }],
         }),
       ).toBe(false);
       expect(store.lastQuery?.usersetRefs).toEqual([]);
@@ -176,7 +187,10 @@ describe("a store cannot widen what the model admits", () => {
         makeConfig({
           objectType: "doc",
           relation: "viewer",
-          directlyAssignable: ["user", "user:*"],
+          directlyAssignable: [
+            { type: "user" },
+            { type: "user", wildcard: true },
+          ],
         }),
       );
 
@@ -189,7 +203,9 @@ describe("a store cannot widen what the model admits", () => {
         direct: makeTuple({ ...request, objectId: "2" }),
       });
 
-      expect(await checkWith({ directlyAssignable: ["user"] })).toBe(false);
+      expect(await checkWith({ directlyAssignable: [{ type: "user" }] })).toBe(
+        false,
+      );
     });
 
     test("a tuple for another relation denies", async () => {
@@ -197,7 +213,9 @@ describe("a store cannot widen what the model admits", () => {
         direct: makeTuple({ ...request, relation: "editor" }),
       });
 
-      expect(await checkWith({ directlyAssignable: ["user"] })).toBe(false);
+      expect(await checkWith({ directlyAssignable: [{ type: "user" }] })).toBe(
+        false,
+      );
     });
 
     test("a subject-relation row in the direct slot denies", async () => {
@@ -207,7 +225,9 @@ describe("a store cannot widen what the model admits", () => {
         direct: makeTuple({ ...request, subjectRelation: "member" }),
       });
 
-      expect(await checkWith({ directlyAssignable: ["user"] })).toBe(false);
+      expect(await checkWith({ directlyAssignable: [{ type: "user" }] })).toBe(
+        false,
+      );
     });
 
     test("a direct row in the userset slot is not expanded", async () => {
@@ -217,7 +237,10 @@ describe("a store cannot widen what the model admits", () => {
 
       expect(
         await checkWith({
-          directlyAssignable: ["user", "team#member"],
+          directlyAssignable: [
+            { type: "user" },
+            { type: "team", relation: "member" },
+          ],
         }),
       ).toBe(false);
     });
@@ -228,7 +251,9 @@ describe("a store cannot widen what the model admits", () => {
       // The control: the clamp must reject only what is invalid.
       store = new RogueStore({ direct: makeTuple({ ...request }) });
 
-      expect(await checkWith({ directlyAssignable: ["user"] })).toBe(true);
+      expect(await checkWith({ directlyAssignable: [{ type: "user" }] })).toBe(
+        true,
+      );
     });
 
     test("a valid userset row is still expanded", async () => {
@@ -246,7 +271,7 @@ describe("a store cannot widen what the model admits", () => {
         makeConfig({
           objectType: "team",
           relation: "member",
-          directlyAssignable: ["user"],
+          directlyAssignable: [{ type: "user" }],
         }),
       );
       store.tuples.push(
@@ -261,7 +286,11 @@ describe("a store cannot widen what the model admits", () => {
 
       expect(
         await checkWith({
-          directlyAssignable: ["user", "team", "team#member"],
+          directlyAssignable: [
+            { type: "user" },
+            { type: "team" },
+            { type: "team", relation: "member" },
+          ],
         }),
       ).toBe(true);
     });
@@ -271,9 +300,14 @@ describe("a store cannot widen what the model admits", () => {
         wildcard: makeTuple({ ...request, subjectId: "*" }),
       });
 
-      expect(await checkWith({ directlyAssignable: ["user", "user:*"] })).toBe(
-        true,
-      );
+      expect(
+        await checkWith({
+          directlyAssignable: [
+            { type: "user" },
+            { type: "user", wildcard: true },
+          ],
+        }),
+      ).toBe(true);
     });
   });
 });

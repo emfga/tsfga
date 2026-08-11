@@ -7,6 +7,40 @@ releases may contain breaking changes).
 
 ## 0.5.0 — 2026-08
 
+### Changed
+
+- **BREAKING: `directly_assignable` holds structured restrictions.**
+  The column stays `jsonb NOT NULL` and migration `005` is
+  unchanged as DDL, but each entry is now an object rather than a
+  string:
+
+  ```json
+  [{"type": "user"},
+   {"type": "user", "wildcard": true},
+   {"type": "team", "relation": "member"},
+   {"type": "user", "condition": "weekday_only"}]
+  ```
+
+  Relation configs written under the previous payload must be
+  rewritten from the authorization model. Tuples are untouched.
+
+- **`findCheckTuples` narrows on the condition too.** The query
+  carries `directRefs`, `wildcardRefs` and `usersetRefs`, and the
+  adapter emits one disjunct per admitted restriction with a
+  `condition_name` predicate, so a row the model does not admit is
+  never fetched. As before this is an optimization only — core
+  re-clamps the reply, so an adapter that ignores the refs loses
+  rows rather than smuggling them past the model.
+
+  On all three, `null` declines to narrow and `[]` excludes the
+  part. An adapter reading `[]` as "no filter" answers a query
+  that asked for nothing with a full scan.
+
+- `parseDirectlyAssignable` validates the structured shape at the
+  adapter boundary and normalizes `wildcard` to `true`-or-absent,
+  so a stored `{"wildcard": false}` cannot compare unequal to an
+  in-memory restriction and silently drop rows at the clamp.
+
 ### Fixed
 
 - **A consumer's result-transforming plugin no longer corrupts

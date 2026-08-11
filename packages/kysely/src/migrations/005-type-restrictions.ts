@@ -16,6 +16,24 @@ import { type Kysely, sql } from "kysely";
  * "unrestricted" and "purely computed", so a purely computed
  * relation could not say that it admits nothing at all.
  *
+ * The new column holds a JSON array of restriction objects, one
+ * per entry of `directly_related_user_types` and carrying the same
+ * four fields:
+ *
+ * ```json
+ * [{"type": "user"},
+ *  {"type": "user", "wildcard": true},
+ *  {"type": "team", "relation": "member"},
+ *  {"type": "user", "condition": "weekday_only"}]
+ * ```
+ *
+ * Objects rather than `"user with weekday_only"` strings: the
+ * condition is a real dimension of the restriction, matched
+ * exactly, and every consumer wants a different projection of it —
+ * the read gate ignores the condition, the clamp does not, and
+ * this adapter's own SQL wants `type` and `relation` as separate
+ * predicates. A joined string would be re-parsed at each.
+ *
  * **Destructive, and deliberately not data-preserving.** There is
  * no honest automatic conversion: `allows_userset_subjects = true`
  * does not say which usersets the model intended, and `NULL` does

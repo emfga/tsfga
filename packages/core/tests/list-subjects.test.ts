@@ -4,7 +4,7 @@ import {
   createTsfga,
   directSubjectRef,
 } from "../src/index.ts";
-import type { RelationConfig, Tuple } from "../src/types.ts";
+import type { RelationConfig, Tuple, TypeRestriction } from "../src/types.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
 
 function makeTuple(overrides: Partial<Tuple> = {}): Tuple {
@@ -25,7 +25,7 @@ function makeConfig(overrides: Partial<RelationConfig> = {}): RelationConfig {
   return {
     objectType: "doc",
     relation: "viewer",
-    directlyAssignable: ["user"],
+    directlyAssignable: [{ type: "user" }],
     impliedBy: null,
     computedUserset: null,
     tupleToUserset: null,
@@ -107,7 +107,12 @@ describe("listSubjects applies the relation's type restrictions", () => {
 
   test("a wildcard row is kept when `type:*` is admitted", async () => {
     const store = storeWith(
-      makeConfig({ directlyAssignable: ["user", "user:*"] }),
+      makeConfig({
+        directlyAssignable: [
+          { type: "user" },
+          { type: "user", wildcard: true },
+        ],
+      }),
       [makeTuple({ subjectId: "*" })],
     );
 
@@ -120,7 +125,12 @@ describe("listSubjects applies the relation's type restrictions", () => {
     // The gate is not the bare subject type: a relation admitting
     // `team#member` must still drop `team#owner`.
     const store = storeWith(
-      makeConfig({ directlyAssignable: ["user", "team#member"] }),
+      makeConfig({
+        directlyAssignable: [
+          { type: "user" },
+          { type: "team", relation: "member" },
+        ],
+      }),
       [
         makeTuple({
           subjectType: "team",
@@ -170,28 +180,28 @@ describe("listSubjects applies the relation's type restrictions", () => {
 describe("the exported gate agrees with check()", () => {
   const cases: Array<{
     label: string;
-    admits: string[];
+    admits: TypeRestriction[];
     tuple: Partial<Tuple>;
   }> = [
-    { label: "admitted type", admits: ["user"], tuple: {} },
+    { label: "admitted type", admits: [{ type: "user" }], tuple: {} },
     {
       label: "unadmitted type",
-      admits: ["user"],
+      admits: [{ type: "user" }],
       tuple: { subjectType: "svc" },
     },
     {
       label: "wildcard admitted",
-      admits: ["user:*"],
+      admits: [{ type: "user", wildcard: true }],
       tuple: { subjectId: "*" },
     },
     {
       label: "wildcard not admitted",
-      admits: ["user"],
+      admits: [{ type: "user" }],
       tuple: { subjectId: "*" },
     },
     {
       label: "userset admitted",
-      admits: ["team#member"],
+      admits: [{ type: "team", relation: "member" }],
       tuple: {
         subjectType: "team",
         subjectId: "eng",
@@ -200,7 +210,7 @@ describe("the exported gate agrees with check()", () => {
     },
     {
       label: "userset relation not admitted",
-      admits: ["team#member"],
+      admits: [{ type: "team", relation: "member" }],
       tuple: {
         subjectType: "team",
         subjectId: "eng",
@@ -222,7 +232,7 @@ describe("the exported gate agrees with check()", () => {
         makeConfig({
           objectType: "team",
           relation: row.subjectRelation ?? "member",
-          directlyAssignable: ["user"],
+          directlyAssignable: [{ type: "user" }],
         }),
       );
       store.tuples.push(
@@ -238,7 +248,12 @@ describe("the exported gate agrees with check()", () => {
       const config = await store.findRelationConfig("doc", "viewer");
       const admitted = admitsSubjectRef(
         config,
-        directSubjectRef(row.subjectType, row.subjectId, row.subjectRelation),
+        directSubjectRef(
+          row.subjectType,
+          row.subjectId,
+          row.subjectRelation,
+          row.conditionName,
+        ),
       );
 
       const granted = await createTsfga(store).check({

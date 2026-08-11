@@ -57,7 +57,7 @@ describe("Custom Roles Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "role",
       relation: "assignee",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -67,7 +67,10 @@ describe("Custom Roles Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "asset-category",
       relation: "editor",
-      directlyAssignable: ["user", "role#assignee"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "role", relation: "assignee" },
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -77,7 +80,10 @@ describe("Custom Roles Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "asset-category",
       relation: "viewer",
-      directlyAssignable: ["user", "role#assignee"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "role", relation: "assignee" },
+      ],
       impliedBy: ["editor"],
       computedUserset: null,
       tupleToUserset: null,

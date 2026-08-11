@@ -22,12 +22,25 @@ export interface TupleStore {
    * check latency. An implementation is free to run three queries
    * instead; it just gives that up.
    *
-   * The `include*` flags are there so a store can **narrow** its
+   * The three ref sets are there so a store can **narrow** its
    * query — that is where the saving is. They are not a contract
    * you can breach dangerously: the check algorithm re-clamps
    * every reply against the query it sent, so returning a part
    * that was not asked for, or filing a row under the wrong slot,
    * loses that row. It cannot widen what the model admits.
+   *
+   * **`null` and `[]` are opposites, and this is the one place an
+   * adapter can get it catastrophically wrong.** `null` is
+   * *unrestricted* — return every row of that shape. `[]` is
+   * *excluded* — return none. A store that treats a missing or
+   * empty list as "no filter" answers a query that asked for
+   * nothing with everything, and while the clamp then drops those
+   * rows, the store has done unbounded work to produce them.
+   *
+   * Matching a ref means matching all four of its fields — type,
+   * userset relation, wildcard, **and condition**. A row whose
+   * `condition_name` is not among those the ref set names is not a
+   * row this relation admits, exactly as a wrong type is not.
    *
    * Slots are exact. `direct` is the tuple for this subject with
    * no subject relation; `wildcard` is the one for

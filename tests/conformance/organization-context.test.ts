@@ -60,7 +60,7 @@ describe("Organization Context Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "member",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -72,7 +72,7 @@ describe("Organization Context Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "user_in_context",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -84,7 +84,7 @@ describe("Organization Context Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "project_manager",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -99,7 +99,7 @@ describe("Organization Context Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "organization",
       relation: "base_project_editor",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: ["project_manager"],
       computedUserset: null,
       tupleToUserset: null,
@@ -126,7 +126,7 @@ describe("Organization Context Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "project",
       relation: "owner",
-      directlyAssignable: ["organization"],
+      directlyAssignable: [{ type: "organization" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -138,7 +138,7 @@ describe("Organization Context Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "project",
       relation: "partner",
-      directlyAssignable: ["organization"],
+      directlyAssignable: [{ type: "organization" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

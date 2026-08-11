@@ -64,7 +64,7 @@ describe("Google Drive Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "group",
       relation: "member",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -76,7 +76,7 @@ describe("Google Drive Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "owner",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -88,7 +88,7 @@ describe("Google Drive Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "parent",
-      directlyAssignable: ["folder"],
+      directlyAssignable: [{ type: "folder" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -112,7 +112,11 @@ describe("Google Drive Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "folder",
       relation: "viewer",
-      directlyAssignable: ["user", "user:*", "group#member"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "user", wildcard: true },
+        { type: "group", relation: "member" },
+      ],
       impliedBy: ["owner"],
       computedUserset: null,
       tupleToUserset: [{ tupleset: "parent", computedUserset: "viewer" }],
@@ -124,7 +128,7 @@ describe("Google Drive Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "doc",
       relation: "owner",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -136,7 +140,7 @@ describe("Google Drive Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "doc",
       relation: "parent",
-      directlyAssignable: ["folder"],
+      directlyAssignable: [{ type: "folder" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -148,7 +152,11 @@ describe("Google Drive Model Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "doc",
       relation: "viewer",
-      directlyAssignable: ["user", "user:*", "group#member"],
+      directlyAssignable: [
+        { type: "user" },
+        { type: "user", wildcard: true },
+        { type: "group", relation: "member" },
+      ],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,

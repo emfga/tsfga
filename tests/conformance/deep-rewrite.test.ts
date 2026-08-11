@@ -99,7 +99,7 @@ describe("Deep Rewrite Ladder Conformance", () => {
       await tsfgaClient.writeRelationConfig({
         objectType: "document",
         relation,
-        directlyAssignable: ["user"],
+        directlyAssignable: [{ type: "user" }],
         impliedBy: null,
         computedUserset: null,
         tupleToUserset: null,

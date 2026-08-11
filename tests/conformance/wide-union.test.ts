@@ -70,7 +70,7 @@ describe("Wide Union Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "team",
       relation: "member",
-      directlyAssignable: ["user"],
+      directlyAssignable: [{ type: "user" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
@@ -80,7 +80,7 @@ describe("Wide Union Conformance", () => {
     await tsfgaClient.writeRelationConfig({
       objectType: "document",
       relation: "viewer",
-      directlyAssignable: ["team#member"],
+      directlyAssignable: [{ type: "team", relation: "member" }],
       impliedBy: null,
       computedUserset: null,
       tupleToUserset: null,
