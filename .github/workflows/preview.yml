@@ -52,6 +52,5 @@ jobs:
         run: >-
           bunx pkg-pr-new@0.0.86 publish
           --comment=update
-          --template './examples/node-kysely'
           './packages/core'
           './packages/kysely'
