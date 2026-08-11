@@ -478,6 +478,25 @@ each with the tuple's condition — must appear in
 `RelationConfigNotFoundError`, `InvalidSubjectTypeError` or
 `InvalidConditionalTupleError`.
 
+### What an error message says, and what it does not
+
+`InvalidSubjectTypeError` names the subject that was refused and
+the relation that refused it, and nothing else. It does **not**
+enumerate what the relation admits, because `addTuple`'s errors
+are the ones a service is most likely to hand back to whoever
+attempted the write, and that list describes the authorization
+model: every admitted type, every userset relation, every
+condition name. OpenFGA names only the offending type.
+
+The list is still reachable, on the error rather than in the
+string:
+
+| field | what it holds |
+|---|---|
+| `subject` | the subject ref the write named |
+| `objectType`, `relation` | what refused it |
+| `allowed` | every `TypeRestriction` the relation admits |
+
 ## Write-time condition validation
 
 `addTuple` refuses a tuple whose condition the model cannot

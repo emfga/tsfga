@@ -7,6 +7,32 @@ releases may contain breaking changes).
 
 ## 0.6.0 — 2026-08
 
+### Changed
+
+- **`InvalidSubjectTypeError` no longer names what the relation
+  admits.** Its message rendered the relation's whole type
+  restriction list — every admitted type, every userset relation
+  and, since this release made the fourth constructor argument
+  `TypeRestriction[]`, every condition name. `addTuple`'s errors
+  are the ones a service is most likely to return to whoever
+  attempted the write, so that list was a description of the
+  authorization model disclosed to anyone who could attempt one.
+  OpenFGA names only the offending type.
+
+  The message now names the subject and the relation. The list
+  moves onto the error as `allowed`, alongside new `subject`,
+  `objectType` and `relation` fields — the constructor previously
+  rendered all four arguments and assigned none, so dropping the
+  rendering without adding the fields would have lost them.
+
+  This also removes an instability: the list rendered in
+  `directlyAssignable` order, i.e. whatever the JSON column held,
+  so the message changed when a config was rewritten with the same
+  restrictions in a different order.
+
+  **Breaking** if you matched on the message text. Nothing in this
+  repo did; every assertion on this class is an `instanceof`.
+
 ### Fixed
 
 - **`addTuple` validates the condition, all five ways OpenFGA

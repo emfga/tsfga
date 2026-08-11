@@ -45,6 +45,24 @@ export function formatRestriction(restriction: TypeRestriction): string {
  * allowed`, naming a type that does not exist.
  */
 export class InvalidSubjectTypeError extends TsfgaError {
+  /** The subject ref the write named. */
+  readonly subject: SubjectShape;
+  readonly objectType: string;
+  readonly relation: string;
+  /**
+   * Everything the relation admits.
+   *
+   * Deliberately not in the message. `addTuple`'s errors are the
+   * ones a service is most likely to hand back to whoever
+   * attempted the write, and the list names every admitted type,
+   * every userset relation and every condition -- a description of
+   * the authorization model, disclosed to anyone who can attempt a
+   * write and get the message back. OpenFGA names only the
+   * offending type. A caller with a legitimate reason to see the
+   * list reads it here.
+   */
+  readonly allowed: readonly TypeRestriction[];
+
   constructor(
     subject: SubjectShape,
     objectType: string,
@@ -53,10 +71,13 @@ export class InvalidSubjectTypeError extends TsfgaError {
   ) {
     super(
       `Subject type '${formatRestriction(subject)}' is not allowed for ` +
-        `${objectType}.${relation}. Allowed: ` +
-        `${allowed.map(formatRestriction).join(", ")}`,
+        `${objectType}.${relation}`,
     );
     this.name = "InvalidSubjectTypeError";
+    this.subject = subject;
+    this.objectType = objectType;
+    this.relation = relation;
+    this.allowed = allowed;
   }
 }
 
