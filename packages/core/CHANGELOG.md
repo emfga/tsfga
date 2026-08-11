@@ -9,6 +9,17 @@ releases may contain breaking changes).
 
 ### Fixed
 
+- **A store row whose `subjectRelation` is absent reads as null.**
+  `clampToQuery` tested `=== null`, so an `undefined` failed the
+  direct and wildcard slots, passed the userset test on `!== null`
+  and was then dropped by the falsy guard in `checkBase`: the same
+  store and the same row granted with `null` and denied with
+  `undefined`, silently either way. Not reachable through shipped
+  code — the field is required, `ContextualTupleStore` normalizes
+  it and the Kysely adapter maps a real `NULL` — but `TupleStore`
+  is the documented extension point, and a hand-written or
+  JavaScript adapter has nothing stopping it.
+
 - **`int` and `uint` context values reach CEL as integers.** They
   were passed to cel-js as JS numbers, which CEL reads as
   `double`. Every arithmetic binary operator — `+ - * / %` —

@@ -970,12 +970,22 @@ function clampToQuery(
     tuple.objectId === query.objectId &&
     tuple.relation === query.relation;
 
+  // A row whose subject relation is absent rather than null means
+  // the same thing — no subject relation — and must be read that
+  // way. Testing `=== null` alone sorts an `undefined` into
+  // neither the probe slots nor, usefully, the userset slot: it
+  // passes `!== null`, is filed as a userset, and is then dropped
+  // by `checkBase`'s falsy guard, so the same row grants with
+  // `null` and denies with `undefined`, silently.
+  const relationOf = (tuple: Tuple): string | null =>
+    tuple.subjectRelation ?? null;
+
   /** The restriction this row would have to be admitted under. */
   const refOf = (tuple: Tuple): TypeRestriction =>
     directSubjectRef(
       tuple.subjectType,
       tuple.subjectId,
-      tuple.subjectRelation,
+      relationOf(tuple),
       tuple.conditionName,
     );
 
@@ -996,7 +1006,7 @@ function clampToQuery(
     onNode(tuple) &&
     tuple.subjectType === query.subjectType &&
     tuple.subjectId === subjectId &&
-    tuple.subjectRelation === null &&
+    relationOf(tuple) === null &&
     refsAdmit(refs, refOf(tuple));
 
   // Usersets carry their own subject type — `team:eng#member` on a
@@ -1010,7 +1020,7 @@ function clampToQuery(
   // than having it expanded and granted.
   const isUserset = (tuple: Tuple): boolean =>
     onNode(tuple) &&
-    tuple.subjectRelation !== null &&
+    relationOf(tuple) !== null &&
     refsAdmit(query.usersetRefs, refOf(tuple));
 
   let usersets: readonly Tuple[] = NO_TUPLES.usersets;

@@ -256,6 +256,23 @@ describe("a store cannot widen what the model admits", () => {
       );
     });
 
+    test("an absent subject relation still grants", async () => {
+      // `Tuple.subjectRelation` is required, so shipped code
+      // cannot reach this — but `TupleStore` is the documented
+      // extension point, and a hand-written or JavaScript adapter
+      // that simply omits the field has nothing stopping it. The
+      // row is a valid direct grant; an omitted field must read as
+      // the null it stands for, not as a third state that falls
+      // through every slot.
+      const loose = makeTuple({ ...request });
+      Reflect.deleteProperty(loose, "subjectRelation");
+      store = new RogueStore({ direct: loose });
+
+      expect(await checkWith({ directlyAssignable: [{ type: "user" }] })).toBe(
+        true,
+      );
+    });
+
     test("a valid userset row is still expanded", async () => {
       store = new RogueStore({
         usersets: [
