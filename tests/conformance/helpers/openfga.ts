@@ -161,6 +161,52 @@ export async function fgaCheck(
   }
 }
 
+export interface FgaListObjectsParams {
+  objectType: string;
+  relation: string;
+  subjectType: string;
+  subjectId: string;
+}
+
+/**
+ * The object ids of one type the subject reaches, as OpenFGA's
+ * ListObjects reports them.
+ *
+ * Ids, not `type:id`, because that is what tsfga's `listObjects`
+ * returns and a comparison has to be of the same thing. The prefix
+ * is asserted rather than trimmed blindly: an object of another
+ * type coming back would otherwise be silently renamed into one of
+ * the type asked for.
+ *
+ * Unsorted, because sorting belongs to the comparison rather than
+ * to the binding — the two engines do not agree on order and need
+ * not, and hiding that here would hide it from every caller.
+ */
+export async function fgaListObjects(
+  storeId: string,
+  authorizationModelId: string,
+  params: FgaListObjectsParams,
+): Promise<string[]> {
+  const client = createClient(storeId);
+  const response = await client.listObjects(
+    {
+      user: `${params.subjectType}:${params.subjectId}`,
+      relation: params.relation,
+      type: params.objectType,
+    },
+    { authorizationModelId },
+  );
+  const prefix = `${params.objectType}:`;
+  return (response.objects ?? []).map((object) => {
+    if (!object.startsWith(prefix)) {
+      throw new Error(
+        `ListObjects returned ${object} for type ${params.objectType}`,
+      );
+    }
+    return object.slice(prefix.length);
+  });
+}
+
 /**
  * Write one tuple and report whether OpenFGA accepted it.
  *

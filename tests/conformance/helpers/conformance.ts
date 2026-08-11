@@ -6,11 +6,11 @@ import {
   type CheckRequest,
   formatRestriction,
   type RelationConfig,
-  TsfgaError,
   type TsfgaClient,
+  TsfgaError,
   type TypeRestriction,
 } from "@tsfga/core";
-import { fgaCheck, fgaWrite } from "./openfga.ts";
+import { fgaCheck, fgaListObjects, fgaWrite } from "./openfga.ts";
 
 /**
  * What a check may do: answer, or decline to answer.
@@ -75,6 +75,48 @@ export async function expectConformance(
   expect(tsfgaResult).toBe(openFgaResult);
   // And match expected value
   expect(tsfgaResult).toBe(expected);
+}
+
+export interface ListObjectsParams {
+  objectType: string;
+  relation: string;
+  subjectType: string;
+  subjectId: string;
+}
+
+/**
+ * Assert that tsfga and OpenFGA reach the same objects.
+ *
+ * **Compared as sorted sets.** tsfga returns candidates in
+ * candidate order and OpenFGA streams them in completion order
+ * from a worker pool, so order carries no meaning on either side
+ * and comparing it would make the suite flaky for a reason that
+ * has nothing to do with parity.
+ *
+ * `expected` is asserted too, so a shape both engines get wrong in
+ * the same direction — the reason a one-sided suite is not enough —
+ * still fails.
+ */
+export async function expectListObjectsConformance(
+  storeId: string,
+  authorizationModelId: string,
+  tsfgaClient: TsfgaClient,
+  params: ListObjectsParams,
+  expected: readonly string[],
+): Promise<void> {
+  const [tsfgaObjects, openFgaObjects] = await Promise.all([
+    tsfgaClient.listObjects(
+      params.objectType,
+      params.relation,
+      params.subjectType,
+      params.subjectId,
+    ),
+    fgaListObjects(storeId, authorizationModelId, params),
+  ]);
+
+  const tsfgaResult = [...tsfgaObjects].sort();
+  expect(tsfgaResult).toEqual([...openFgaObjects].sort());
+  expect(tsfgaResult).toEqual([...expected].sort());
 }
 
 /**
