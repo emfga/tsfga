@@ -9,6 +9,32 @@ releases may contain breaking changes).
 
 ### Fixed
 
+- **A context value is now read as its declared parameter type.**
+  An ill-typed value raised nothing and resolved the condition
+  `false`, which on the subtract side of an `excludedBy` means the
+  exclusion does not fire — so `n: int` given `4.5` **granted**.
+  The mirror was fail-closed: `n: int` given `"42"` threw, where
+  OpenFGA accepts it.
+
+  ```
+  n=42    (declared int)  tsfga true    OpenFGA true
+  n=4.5   (declared int)  tsfga false   OpenFGA parameter type error
+  n="42"  (declared int)  tsfga throws  OpenFGA true
+  ```
+
+  `coerceContext` ports OpenFGA's
+  `internal/condition/types/converters.go`, probed case by case
+  against v1.18.2. A `typeof` check diverges on six of them: the
+  numeric types accept numeric **strings**, because JSON has no
+  integer type and upstream parses rather than asserts, while
+  `duration` and `timestamp` accept **only** strings. It is
+  exported, and shared with the write path so a tuple cannot be
+  writable but unevaluable.
+
+  Only the keys actually present are read. A context key the
+  condition does not declare is accepted at check time — probed —
+  and refused only on write.
+
 - **A tuple-to-userset's tupleset row is now condition-checked.**
   `define parent: [folder with flag]` with
   `define viewer: viewer from parent` means the link exists only

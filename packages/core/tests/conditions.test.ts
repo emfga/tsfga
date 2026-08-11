@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { evaluateTupleCondition } from "../src/conditions.ts";
+import { coerceContext, evaluateTupleCondition } from "../src/conditions.ts";
 import {
   ConditionEvaluationError,
   ConditionNotFoundError,
 } from "../src/errors.ts";
-import type { Tuple } from "../src/types.ts";
+import type { ConditionParameterType, Tuple } from "../src/types.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
 
 function makeTuple(overrides: Partial<Tuple> = {}): Tuple {
@@ -217,5 +217,114 @@ describe("evaluateTupleCondition", () => {
     expect(
       await evaluateTupleCondition(store, tuple, { count: 10, limit: 10 }),
     ).toBe(false);
+  });
+});
+
+/**
+ * The coercion table, ported from OpenFGA's
+ * `internal/condition/types/converters.go` and probed against the
+ * container at v1.18.2.
+ *
+ * `4.5` declared `int` is the case that motivates it. tsfga read
+ * it as an ordinary number, CEL compared it, and the condition
+ * resolved `false` — which on the subtract side of an `excludedBy`
+ * means the exclusion does not fire, so a mistyped context value
+ * *granted*. `"42"` declared `int` is the mirror: tsfga threw
+ * where OpenFGA accepts.
+ */
+describe("condition parameter coercion", () => {
+  const ACCEPTED: Array<[ConditionParameterType, unknown]> = [
+    ["int", 42],
+    ["int", "42"],
+    ["int", -7],
+    ["uint", 7],
+    ["uint", "7"],
+    ["uint", 0],
+    ["double", 1.5],
+    ["double", "1.5"],
+    ["double", 2],
+    ["bool", true],
+    ["bool", false],
+    ["string", "x"],
+    ["string", ""],
+    ["duration", "1h"],
+    ["duration", "1.5h"],
+    ["duration", "2h45m"],
+    ["duration", "300ms"],
+    ["timestamp", "2026-01-01T00:00:00Z"],
+    ["timestamp", "2026-01-01T00:00:00+01:00"],
+    ["list", []],
+    ["list", ["a"]],
+    ["map", {}],
+    ["map", { a: "x" }],
+    ["any", { x: 1 }],
+    ["any", "anything"],
+  ];
+
+  const REFUSED: Array<[ConditionParameterType, unknown]> = [
+    // Numeric types take numeric strings but not everything.
+    ["int", 4.5],
+    ["int", "abc"],
+    ["int", true],
+    ["int", ""],
+    ["int", null],
+    ["uint", -1],
+    ["uint", "-1"],
+    ["uint", 1.5],
+    ["double", "abc"],
+    ["double", true],
+    // Exact, no coercion in either direction.
+    ["bool", "true"],
+    ["bool", 1],
+    ["string", 1],
+    ["string", null],
+    // Strings only, and only in the accepted grammar.
+    ["duration", "1d"],
+    ["duration", 3600],
+    ["duration", "later"],
+    ["timestamp", 1700000000],
+    ["timestamp", "not a date"],
+    ["timestamp", "2026-01-01"],
+    ["list", "a"],
+    ["list", { a: 1 }],
+    ["map", ["a"]],
+    ["map", "a"],
+    ["map", null],
+  ];
+
+  for (const [paramType, value] of ACCEPTED) {
+    test(`${paramType} accepts ${JSON.stringify(value) ?? String(value)}`, () => {
+      expect(() => coerceContext({ p: paramType }, { p: value })).not.toThrow();
+    });
+  }
+
+  for (const [paramType, value] of REFUSED) {
+    test(`${paramType} refuses ${JSON.stringify(value) ?? String(value)}`, () => {
+      // Refused, not resolved `false`. A `false` here would mean an
+      // enclosing `but not` does not fire, which grants.
+      expect(() => coerceContext({ p: paramType }, { p: value })).toThrow();
+    });
+  }
+
+  test("a key the condition does not declare is left alone", () => {
+    // Probed: a check carrying a stray context key is accepted.
+    // Refusing it is a write-path rule, not an evaluation one.
+    const { coerced, missing } = coerceContext(
+      { p: "int" },
+      { p: 1, stray: "kept" },
+    );
+    expect(coerced["stray"]).toBe("kept");
+    expect(missing).toEqual([]);
+  });
+
+  test("an absent declared parameter is reported, not thrown", () => {
+    const { missing } = coerceContext({ p: "int", q: "string" }, { p: 1 });
+    expect(missing).toEqual(["q"]);
+  });
+
+  test("null parameters coerce nothing", () => {
+    const { coerced, missing } = coerceContext(null, { anything: 4.5 });
+    expect(coerced["anything"]).toBe(4.5);
+    expect(missing).toEqual([]);
   });
 });

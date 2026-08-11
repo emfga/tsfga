@@ -214,7 +214,7 @@ export function createTsfga(
 // Re-exports
 export { check } from "./check.ts";
 export { type CheckOutcome, checkMany } from "./check-many.ts";
-export { evaluateTupleCondition } from "./conditions.ts";
+export { coerceContext, evaluateTupleCondition } from "./conditions.ts";
 export { ContextualTupleStore } from "./contextual-store.ts";
 export {
   type ConditionalTupleCause,

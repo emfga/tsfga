@@ -112,10 +112,31 @@ node plus `maxDepth - 1` dispatches.
   sibling error, matching OpenFGA — an intersection operand
   resolving `false`, or an exclusion branch resolving `true`,
   denies even when the other branch errored.
-- Condition evaluation with missing declared parameters is an
-  error (`ConditionEvaluationError`), not an unmet condition —
-  matching OpenFGA's check behavior. A silently-unmet
-  condition would fail open through an exclusion branch.
+- Condition evaluation with missing declared parameters, or with
+  a value that cannot be read as its declared type, is an error
+  (`ConditionEvaluationError`), not an unmet condition — matching
+  OpenFGA's check behavior. A silently-unmet condition would fail
+  open through an exclusion branch.
+
+  Values are coerced by a port of OpenFGA's converter table, not
+  by a `typeof` check, which diverges on six cases. The numeric
+  types accept numeric **strings** — JSON has no integer type, so
+  upstream parses rather than asserts — while `duration` and
+  `timestamp` accept **only** strings:
+
+  | value | declared | verdict |
+  |---|---|---|
+  | `42`, `"42"` | int | accepted |
+  | `4.5`, `"abc"`, `true` | int | refused |
+  | `-1`, `"-1"` | uint | refused |
+  | `"1.5"`, `1.5` | double | accepted |
+  | `"1h"`, `"2h45m"` | duration | accepted |
+  | `"1d"`, `3600` | duration | refused |
+  | `"2026-01-01T00:00:00Z"` | timestamp | accepted |
+  | `1700000000` | timestamp | refused |
+
+  A context key the condition does not declare is accepted at
+  check time and refused on write.
 
 ## Cycles and indeterminacy
 

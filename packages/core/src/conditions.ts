@@ -17,22 +17,173 @@ const coerceTimestamp = parse("timestamp(val)");
 const coerceDuration = parse("duration(val)");
 
 /**
- * Coerce a context value to its declared CEL type.
- * Timestamps and durations arrive as strings from JSON storage
- * and must be converted to proper cel-js objects.
+ * Read a context value as its declared parameter type, or say why
+ * it cannot be.
+ *
+ * A port of OpenFGA's `internal/condition/types/converters.go`,
+ * because a `typeof` check diverges from it on six of the cases
+ * probed against v1.18.2:
+ *
+ * | value | declared | verdict |
+ * |---|---|---|
+ * | `42`, `"42"` | int | accepted |
+ * | `4.5`, `"abc"`, `true` | int | refused |
+ * | `-1`, `"-1"` | uint | refused |
+ * | `"7"` | uint | accepted |
+ * | `"1.5"`, `1.5` | double | accepted |
+ * | `"2026-01-01T00:00:00Z"` | timestamp | accepted |
+ * | `1700000000`, `"not a date"` | timestamp | refused |
+ * | `"1h"`, `"1.5h"`, `"2h45m"` | duration | accepted |
+ * | `"1d"`, `3600` | duration | refused |
+ * | `"true"` | bool | refused |
+ * | `1` | string | refused |
+ *
+ * The shape of it: the **numeric** types accept numeric strings,
+ * because JSON has no integer type and upstream parses rather than
+ * asserts. `duration` and `timestamp` accept **only** strings.
+ * Everything else is exact.
+ *
+ * Refusing rather than answering `false` is the point. On the
+ * subtract side of an `excludedBy` a `false` condition means the
+ * exclusion does not fire, so a mistyped context value would
+ * *grant*. That is the same hazard this file already documents for
+ * *missing* parameters, which was closed while ill-typed ones were
+ * left open.
+ *
+ * Throws a plain `Error`; callers wrap it in whichever of
+ * `ConditionEvaluationError` or `InvalidConditionalTupleError`
+ * fits their path.
  */
+
+/** Go's `time.ParseDuration` grammar: `-1.5h`, `2h45m`, `300ms`. */
+const DURATION =
+  /^[+-]?(\d+(\.\d*)?|\.\d+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h)([+-]?(\d+(\.\d*)?|\.\d+)(ns|us|\u00b5s|\u03bcs|ms|s|m|h))*$/;
+
+/** RFC 3339, as `time.Parse(time.RFC3339, …)` accepts it. */
+const RFC3339 =
+  /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/;
+
+/**
+ * A JSON number or numeric string as a finite number, or `null`.
+ *
+ * Booleans are excluded deliberately: upstream's type assertion
+ * refuses `true` for an int, where a bare `Number(true)` would
+ * happily produce `1`.
+ */
+function asNumber(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  // `Number("")` and `Number(" ")` are `0`; upstream's parser
+  // rejects both.
+  if (value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function coerceValue(
+  parameter: string,
   value: unknown,
   paramType: ConditionParameterType,
 ): unknown {
-  if (value === null || value === undefined) return value;
-  if (paramType === "timestamp" && typeof value === "string") {
-    return coerceTimestamp({ val: value });
+  // Explicitly typed so TypeScript treats it as never-returning
+  // and narrows after each call.
+  const refuse: (expected: string) => never = (expected) => {
+    throw new Error(
+      `parameter '${parameter}' expected ${expected}, but found ` +
+        `${JSON.stringify(value) ?? typeof value}`,
+    );
+  };
+
+  switch (paramType) {
+    case "any":
+      return value;
+
+    case "bool":
+      if (typeof value !== "boolean") refuse("a bool");
+      return value;
+
+    case "string":
+      if (typeof value !== "string") refuse("a string");
+      return value;
+
+    case "int":
+    case "uint": {
+      const numeric = asNumber(value);
+      if (numeric === null) refuse(`an ${paramType} value`);
+      if (!Number.isInteger(numeric)) {
+        refuse(`an ${paramType} value, but found a non-integer`);
+      }
+      if (paramType === "uint" && numeric < 0) {
+        refuse("a uint value, but found a negative");
+      }
+      return numeric;
+    }
+
+    case "double": {
+      const numeric = asNumber(value);
+      if (numeric === null) refuse("a double value");
+      return numeric;
+    }
+
+    case "duration":
+      // String only. `3600` is refused rather than read as
+      // seconds — upstream asserts the string before parsing.
+      if (typeof value !== "string") refuse("a duration string");
+      if (!DURATION.test(value)) refuse("a valid duration string");
+      return coerceDuration({ val: value });
+
+    case "timestamp":
+      if (typeof value !== "string") refuse("an RFC 3339 timestamp string");
+      if (!RFC3339.test(value)) refuse("a valid RFC 3339 timestamp string");
+      return coerceTimestamp({ val: value });
+
+    case "list":
+      if (!Array.isArray(value)) refuse("a list");
+      return value;
+
+    case "map":
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        refuse("a map");
+      }
+      return value;
+
+    default:
+      // `paramType` is `never` here; a new member of the union
+      // must decide its own rule rather than falling through
+      // unvalidated.
+      return paramType;
   }
-  if (paramType === "duration" && typeof value === "string") {
-    return coerceDuration({ val: value });
+}
+
+/**
+ * Coerce every declared parameter present in `context`, and report
+ * the ones that are absent.
+ *
+ * Only the keys actually present are read. A context key the
+ * condition does not declare is *not* an error here — probed
+ * against v1.18.2, a check carrying a stray key is accepted. That
+ * refusal belongs to the write path.
+ *
+ * Shared with `validateTupleWrite` so a tuple cannot be writable
+ * but unevaluable: if the two used different rules, a value the
+ * write path accepted could raise at every check that read it.
+ */
+export function coerceContext(
+  parameters: Record<string, ConditionParameterType> | null,
+  context: Record<string, unknown>,
+): { coerced: Record<string, unknown>; missing: string[] } {
+  const coerced = { ...context };
+  const missing: string[] = [];
+  if (!parameters) return { coerced, missing };
+
+  for (const [key, paramType] of Object.entries(parameters)) {
+    if (key in coerced) {
+      coerced[key] = coerceValue(key, coerced[key], paramType);
+    } else {
+      missing.push(key);
+    }
   }
-  return value;
+  return { coerced, missing };
 }
 
 /**
@@ -42,9 +193,10 @@ function coerceValue(
  * Returns false if the condition evaluates to false.
  * Throws ConditionNotFoundError if conditionName references a missing definition.
  * Throws ConditionEvaluationError if a declared parameter is
- * absent from the merged context or CEL evaluation fails —
- * matching OpenFGA's check path, where missing parameters are an
- * evaluation error, not an unmet condition.
+ * absent from the merged context, if a present one cannot be read
+ * as its declared type, or if CEL evaluation fails — matching
+ * OpenFGA's check path, where all three are evaluation errors
+ * rather than an unmet condition.
  */
 export async function evaluateTupleCondition(
   store: TupleStore,
@@ -61,24 +213,19 @@ export async function evaluateTupleCondition(
   }
 
   // Merge contexts: tuple context wins over request context
-  const context = { ...requestContext, ...tuple.conditionContext };
+  const merged = { ...requestContext, ...tuple.conditionContext };
 
   // Every declared parameter must be present in the merged
-  // context. OpenFGA's check path rejects evaluation with missing
-  // parameters as an evaluation error rather than treating the
-  // condition as unmet — an unmet condition would fail open
-  // through an exclusion branch ("not excluded" grants).
-  const missing: string[] = [];
-
-  // Coerce values based on declared parameter types
-  if (condDef.parameters) {
-    for (const [key, paramType] of Object.entries(condDef.parameters)) {
-      if (key in context) {
-        context[key] = coerceValue(context[key], paramType);
-      } else {
-        missing.push(key);
-      }
-    }
+  // context, and every present one must be readable as its
+  // declared type. OpenFGA treats both as evaluation errors rather
+  // than as an unmet condition — an unmet condition would fail
+  // open through an exclusion branch ("not excluded" grants).
+  let context: Record<string, unknown>;
+  let missing: string[];
+  try {
+    ({ coerced: context, missing } = coerceContext(condDef.parameters, merged));
+  } catch (error) {
+    throw new ConditionEvaluationError(condDef.name, error);
   }
   if (missing.length > 0) {
     throw new ConditionEvaluationError(

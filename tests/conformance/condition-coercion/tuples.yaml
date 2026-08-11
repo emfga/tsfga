@@ -1,0 +1,5 @@
+- user: user:alice
+  relation: v
+  object: doc:d1
+  condition:
+    name: at_least
