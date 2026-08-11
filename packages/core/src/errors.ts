@@ -134,6 +134,24 @@ export class ConditionNotFoundError extends TsfgaError {
   }
 }
 
+/**
+ * The expression does not compile.
+ *
+ * Distinct from `ConditionEvaluationError`, which is a condition
+ * that compiled and then could not be *evaluated* against a
+ * context. This one has no context and no tuple: the definition is
+ * unusable on its own, and OpenFGA refuses the model write that
+ * carries it rather than deferring to the first check.
+ */
+export class ConditionCompileError extends TsfgaError {
+  override readonly cause: unknown;
+  constructor(conditionName: string, cause: unknown) {
+    super(`Failed to compile condition '${conditionName}': ${cause}`);
+    this.name = "ConditionCompileError";
+    this.cause = cause;
+  }
+}
+
 export class ConditionEvaluationError extends TsfgaError {
   override cause: unknown;
   constructor(conditionName: string, cause: unknown) {

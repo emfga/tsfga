@@ -116,6 +116,29 @@ releases may contain breaking changes).
   relation, and two tuple-to-userset entries on one relation keep
   two decisions — measured both ways against v1.18.2.
 
+- **BREAKING: `writeConditionDefinition` compiles the
+  expression.** It was infallible; it now throws the new
+  `ConditionCompileError` when the expression does not parse.
+  OpenFGA compiles every condition while validating the model
+  write that carries it, so such an expression never reaches a
+  check upstream. Here it was accepted three times over — the
+  definition write, every tuple write beneath it, and every check
+  until someone ran one.
+
+  The deferred failure was also raised as cel-js's own
+  `ParseError`, which is not a `TsfgaError`, because `parse` sat
+  outside the `try` that wraps evaluation. It is inside now, so
+  the condition path raises only `TsfgaError`. That claim is
+  scoped to the condition path: the Kysely adapter still surfaces
+  the driver's own error for a malformed id, which is a separate
+  gap and not addressed here.
+
+  Compilation is parse-only. Upstream additionally type-checks
+  the expression against its declared parameters, so
+  `not_a_function(x)` is refused there and accepted here, failing
+  at evaluation instead. Documented in the README and pinned
+  two-sided.
+
 ### Documented
 
 - **Sub-millisecond timestamps are a known divergence.** Go's

@@ -1,5 +1,9 @@
 import { type ParseResult, parse } from "@marcbachmann/cel-js";
-import { ConditionEvaluationError, ConditionNotFoundError } from "./errors.ts";
+import {
+  ConditionCompileError,
+  ConditionEvaluationError,
+  ConditionNotFoundError,
+} from "./errors.ts";
 import type { TupleStore } from "./store-interface.ts";
 import type {
   ConditionParameterScalarType,
@@ -15,6 +19,31 @@ import type {
  * even across condition names and stores.
  */
 const exprCache = new Map<string, ParseResult>();
+
+/**
+ * Compile an expression, or raise `ConditionCompileError`.
+ *
+ * The one place `parse` is called on a stored expression, so that
+ * a parse failure has exactly one error class wherever it is
+ * discovered. It used to be called outside the `try` that wraps
+ * evaluation, which let cel-js's own `ParseError` — not a
+ * `TsfgaError` — escape `check()`.
+ */
+export function compileCondition(
+  conditionName: string,
+  expression: string,
+): ParseResult {
+  const cached = exprCache.get(expression);
+  if (cached) return cached;
+  let compiled: ParseResult;
+  try {
+    compiled = parse(expression);
+  } catch (error) {
+    throw new ConditionCompileError(conditionName, error);
+  }
+  exprCache.set(expression, compiled);
+  return compiled;
+}
 
 /** Pre-compiled coercion helper for duration strings */
 const coerceDuration = parse("duration(val)");
@@ -555,11 +584,7 @@ export async function evaluateTupleCondition(
     );
   }
 
-  let compiled = exprCache.get(condDef.expression);
-  if (!compiled) {
-    compiled = parse(condDef.expression);
-    exprCache.set(condDef.expression, compiled);
-  }
+  const compiled = compileCondition(condDef.name, condDef.expression);
 
   try {
     const result = compiled(context);

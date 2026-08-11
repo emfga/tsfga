@@ -591,6 +591,21 @@ string:
 
 ## Write-time condition validation
 
+`writeConditionDefinition` compiles the expression and throws
+`ConditionCompileError` when it does not parse. OpenFGA compiles
+every condition while validating the model write that carries it,
+so an expression that cannot be parsed never reaches a check
+there; without this it was accepted three times over — the
+definition write, every tuple write beneath it, and every check
+until someone ran one.
+
+Compilation is parse-only. OpenFGA also type-checks the
+expression against its declared parameters and refuses, for
+example, `not_a_function(x)`; cel-js parses that and fails only
+when it is evaluated, so tsfga accepts the definition and raises
+a `ConditionEvaluationError` at check time. Pinned two-sided in
+`tests/conformance/condition-compile.test.ts`.
+
 `addTuple` refuses a tuple whose condition the model cannot
 accept, with the cause on `InvalidConditionalTupleError.cause`:
 

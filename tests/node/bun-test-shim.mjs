@@ -173,6 +173,24 @@ function expect(actual) {
         await assert.rejects(actual, (/** @type {any} */ err) => err instanceof ctor);
       },
     },
+    /**
+     * The awaited value, matched. A rejection propagates rather
+     * than being reported as a mismatch, so `.resolves` asserting
+     * "this settles, and settles to X" fails with the real error.
+     */
+    resolves: {
+      async toBeUndefined() {
+        assert.strictEqual(await actual, undefined);
+      },
+      /** @param {any} expected */
+      async toBe(expected) {
+        assert.strictEqual(await actual, expected);
+      },
+      /** @param {any} expected */
+      async toEqual(expected) {
+        assert.deepStrictEqual(await actual, expected);
+      },
+    },
   };
   return matchers;
 }

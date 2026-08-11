@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import type { WriteAuthorizationModelRequest } from "@openfga/sdk";
 import { ErrorCode, FgaApiValidationError, OpenFgaClient } from "@openfga/sdk";
 import { transformer } from "@openfga/syntax-transformer";
 import { parse as parseYaml } from "yaml";
@@ -69,6 +70,52 @@ export async function fgaWriteModel(
   const modelJson = transformer.transformDSLToJSONObject(dsl);
   const response = await client.writeAuthorizationModel(modelJson);
   return response.authorization_model_id;
+}
+
+/**
+ * The refusal codes a *model* write reports.
+ *
+ * Kept apart from `MODEL_REFUSAL_CODES` because they are refusals
+ * of a different request: `invalid_authorization_model` cannot
+ * come back from a check or a tuple write, and treating it as a
+ * refusal there would report a mis-addressed request as a
+ * behavioural agreement.
+ */
+const MODEL_WRITE_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  ErrorCode.InvalidAuthorizationModel,
+  ErrorCode.ValidationError,
+]);
+
+/**
+ * Write a model given as JSON and report whether OpenFGA took it.
+ *
+ * Takes the JSON rather than a DSL path because the shapes worth
+ * asserting here are ones the DSL cannot express: a condition
+ * whose expression does not compile is rejected by the
+ * transformer before it can ever reach the server.
+ */
+export async function fgaWriteModelOutcome(
+  storeId: string,
+  model: WriteAuthorizationModelRequest,
+): Promise<"accepted" | FgaRefusal> {
+  const client = createClient(storeId);
+  try {
+    await client.writeAuthorizationModel(model);
+    return "accepted";
+  } catch (error) {
+    if (
+      error instanceof FgaApiValidationError &&
+      typeof error.apiErrorCode === "string" &&
+      MODEL_WRITE_REFUSAL_CODES.has(error.apiErrorCode)
+    ) {
+      return {
+        outcome: "refused",
+        code: error.apiErrorCode,
+        reason: error.apiErrorMessage ?? error.message,
+      };
+    }
+    throw error;
+  }
 }
 
 export interface FgaTupleYaml {

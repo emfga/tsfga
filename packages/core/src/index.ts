@@ -1,5 +1,6 @@
 import { check } from "./check.ts";
 import { type CheckOutcome, checkMany } from "./check-many.ts";
+import { compileCondition } from "./conditions.ts";
 import { listObjects } from "./list-objects.ts";
 import type { TupleStore } from "./store-interface.ts";
 import {
@@ -104,6 +105,14 @@ export interface TsfgaClient {
   >;
   writeRelationConfig(config: RelationConfig): Promise<void>;
   deleteRelationConfig(objectType: string, relation: string): Promise<boolean>;
+  /**
+   * Define a named CEL condition.
+   *
+   * @throws ConditionCompileError when the expression does not
+   *   compile. OpenFGA refuses the model write that carries such
+   *   an expression, rather than deferring the failure to the
+   *   first check that reads it.
+   */
   writeConditionDefinition(condition: ConditionDefinition): Promise<void>;
   deleteConditionDefinition(name: string): Promise<boolean>;
 }
@@ -201,8 +210,16 @@ export function createTsfga(
       return store.deleteRelationConfig(objectType, relation);
     },
 
-    writeConditionDefinition(condition: ConditionDefinition): Promise<void> {
-      return store.upsertConditionDefinition(condition);
+    async writeConditionDefinition(
+      condition: ConditionDefinition,
+    ): Promise<void> {
+      // Compiled here, not at the first check that reads it. An
+      // expression that does not parse was accepted at three
+      // points — this write, every tuple write beneath it, and
+      // every check until someone ran one — where OpenFGA refuses
+      // the model write that carries it.
+      compileCondition(condition.name, condition.expression);
+      await store.upsertConditionDefinition(condition);
     },
 
     deleteConditionDefinition(name: string): Promise<boolean> {
@@ -218,6 +235,7 @@ export { coerceContext, evaluateTupleCondition } from "./conditions.ts";
 export { ContextualTupleStore } from "./contextual-store.ts";
 export {
   type ConditionalTupleCause,
+  ConditionCompileError,
   ConditionEvaluationError,
   ConditionNotFoundError,
   DepthExceededError,

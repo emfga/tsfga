@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { coerceContext, evaluateTupleCondition } from "../src/conditions.ts";
 import {
+  ConditionCompileError,
   ConditionEvaluationError,
   ConditionNotFoundError,
+  TsfgaError,
 } from "../src/errors.ts";
+import { createTsfga } from "../src/index.ts";
 import type { ConditionParameterType, Tuple } from "../src/types.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
 
@@ -642,5 +645,66 @@ describe("a bigint context value", () => {
 
   test("is refused as a negative uint", () => {
     expect(() => coerceContext({ n: "uint" }, { n: -7n })).toThrow();
+  });
+});
+
+/**
+ * An expression that does not compile is refused where it is
+ * written, and whatever compiles it raises a `TsfgaError`.
+ *
+ * The two-sided half lives in
+ * `tests/conformance/condition-compile.test.ts`, where the same
+ * expressions are put to OpenFGA as a model write.
+ */
+describe("an expression that does not compile", () => {
+  const UNPARSEABLE = ["x +", "x ==", "((x", "x = 1", ""];
+
+  for (const expression of UNPARSEABLE) {
+    test(`writeConditionDefinition refuses ${JSON.stringify(
+      expression,
+    )}`, async () => {
+      const client = createTsfga(new MockTupleStore());
+      await expect(
+        client.writeConditionDefinition({
+          name: "gate",
+          expression,
+          parameters: { x: "int" },
+        }),
+      ).rejects.toBeInstanceOf(ConditionCompileError);
+    });
+  }
+
+  test("a compiling expression is still accepted", async () => {
+    const client = createTsfga(new MockTupleStore());
+    await expect(
+      client.writeConditionDefinition({
+        name: "gate",
+        expression: "x > 3",
+        parameters: { x: "int" },
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  /**
+   * Injected through the store, because the public API can no
+   * longer create this state -- and because a database written by
+   * an earlier version is in it. `parse` used to sit outside the
+   * `try` that wraps evaluation, so cel-js's own `ParseError`
+   * escaped `check()` and could not be caught by the documented
+   * class.
+   */
+  test("evaluation raises a TsfgaError, not cel-js's ParseError", async () => {
+    const store = new MockTupleStore();
+    store.conditionDefinitions.push({
+      name: "gate",
+      expression: "x +",
+      parameters: { x: "int" },
+    });
+    const failure = evaluateTupleCondition(
+      store,
+      makeTuple({ conditionName: "gate", conditionContext: { x: 1 } }),
+    );
+    await expect(failure).rejects.toBeInstanceOf(ConditionCompileError);
+    await expect(failure).rejects.toBeInstanceOf(TsfgaError);
   });
 });
