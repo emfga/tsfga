@@ -6,7 +6,8 @@
   "scripts": {
     "test": "bun test",
     "test:node": "node --import tsx --import ../node/register.mjs --test *.test.ts",
-    "test:deno": "deno test --no-check --allow-all --config ../deno/deno.json ."
+    "test:deno": "deno test --no-check --allow-all --config ../deno/deno.json .",
+    "tsc": "tsc --noEmit"
   },
   "devDependencies": {
     "@tsfga/core": "workspace:*",
@@ -17,6 +18,7 @@
     "@types/pg": "8.20.4",
     "kysely": "0.29.4",
     "pg": "8.22.0",
+    "typescript": "6.0.3",
     "yaml": "2.9.0"
   }
 }

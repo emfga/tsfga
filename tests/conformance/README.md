@@ -28,6 +28,10 @@ identical results for every test case using
 bun run turbo:test:conformance
 ```
 
+To type-check this workspace, run `bun run tsc` from the
+repo root — it covers the fixtures and helpers here along
+with the published packages.
+
 ## Test models
 
 **Basic patterns:**
