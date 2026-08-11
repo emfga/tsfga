@@ -195,6 +195,24 @@ export function refsAdmit(
 }
 
 /**
+ * Whether the tuple says only what the model already says:
+ * `doc:1#blocked@doc:1#blocked`.
+ *
+ * A predicate, not a gate, and deliberately **not** called from
+ * `validateTupleWrite`. That function is shared by `addTuple` and
+ * by contextual-tuple validation, and the two paths differ here:
+ * upstream refuses the write and *accepts* the contextual tuple.
+ * Only `addTuple` applies it.
+ */
+export function isSelfDefining(request: AddTupleRequest): boolean {
+  return (
+    request.subjectType === request.objectType &&
+    request.subjectId === request.objectId &&
+    request.subjectRelation === request.relation
+  );
+}
+
+/**
  * Validate that a tuple is writable under the relation's config.
  * Used by both `addTuple` and contextual-tuple validation so the
  * two paths cannot drift apart.

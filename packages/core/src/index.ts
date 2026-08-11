@@ -1,11 +1,14 @@
 import { check } from "./check.ts";
 import { type CheckOutcome, checkMany } from "./check-many.ts";
 import { compileCondition } from "./conditions.ts";
+import { validateRelationConfigWrite } from "./config-validation.ts";
+import { ImplicitTupleError } from "./errors.ts";
 import { listObjects } from "./list-objects.ts";
 import type { TupleStore } from "./store-interface.ts";
 import {
   admitsSubjectRef,
   directSubjectRef,
+  isSelfDefining,
   validateTupleWrite,
 } from "./tuple-validation.ts";
 import type {
@@ -103,6 +106,17 @@ export interface TsfgaClient {
       subjectRelation: string | null;
     }>
   >;
+  /**
+   * Insert or update a relation config.
+   *
+   * @throws InvalidRelationConfigError for a config OpenFGA's
+   *   typesystem would reject: an `intersection` with fewer than
+   *   two operands, a type restriction naming an undefined
+   *   condition, or a tuple-to-userset whose tupleset relation
+   *   admits a userset or a wildcard. The last two are only
+   *   checked when the tupleset relation's config already exists
+   *   -- see `config-validation.ts` for why.
+   */
   writeRelationConfig(config: RelationConfig): Promise<void>;
   deleteRelationConfig(objectType: string, relation: string): Promise<boolean>;
   /**
@@ -131,6 +145,17 @@ export function createTsfga(
     },
 
     async addTuple(request: AddTupleRequest): Promise<void> {
+      // Refused here rather than in the shared validation, which
+      // contextual tuples also run: upstream refuses this write and
+      // accepts the same tuple contextually. Measured on v1.18.2,
+      // with a control proving the contextual field was honoured.
+      if (isSelfDefining(request)) {
+        throw new ImplicitTupleError(
+          request.objectType,
+          request.objectId,
+          request.relation,
+        );
+      }
       await validateTupleWrite(store, request);
       return store.insertTuple(request);
     },
@@ -185,8 +210,9 @@ export function createTsfga(
         }));
     },
 
-    writeRelationConfig(config: RelationConfig): Promise<void> {
-      return store.upsertRelationConfig(config);
+    async writeRelationConfig(config: RelationConfig): Promise<void> {
+      await validateRelationConfigWrite(store, config);
+      await store.upsertRelationConfig(config);
     },
 
     deleteRelationConfig(
@@ -218,6 +244,7 @@ export function createTsfga(
 export { check } from "./check.ts";
 export { type CheckOutcome, checkMany } from "./check-many.ts";
 export { coerceContext, evaluateTupleCondition } from "./conditions.ts";
+export { validateRelationConfigWrite } from "./config-validation.ts";
 export { ContextualTupleStore } from "./contextual-store.ts";
 export {
   type ConditionalTupleCause,
@@ -226,9 +253,12 @@ export {
   ConditionNotFoundError,
   DepthExceededError,
   formatRestriction,
+  ImplicitTupleError,
   InvalidConditionalTupleError,
+  InvalidRelationConfigError,
   InvalidStoredDataError,
   InvalidSubjectTypeError,
+  type RelationConfigDefect,
   RelationConfigNotFoundError,
   TsfgaError,
 } from "./errors.ts";
@@ -237,6 +267,7 @@ export {
   admitsSubjectRef,
   admitsSubjectShape,
   directSubjectRef,
+  isSelfDefining,
   type SubjectShape,
   subjectShape,
   validateTupleWrite,

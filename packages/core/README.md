@@ -601,6 +601,50 @@ string:
 | `objectType`, `relation` | what refused it |
 | `allowed` | every `TypeRestriction` the relation admits |
 
+## Write-time model validation
+
+OpenFGA validates a whole model when it is written. tsfga has no
+model document, so the same rules are applied where the pieces
+arrive.
+
+`writeRelationConfig` throws `InvalidRelationConfigError`, with
+the reason on `.cause`:
+
+| cause | meaning |
+|---|---|
+| `intersection has fewer than two operands` | a set operation with one child or none; upstream: "as intersection has less than 2 children" |
+| `undefined condition` | a type restriction names a condition the store has not got |
+| `tupleset relation admits a userset` | the relation a tuple-to-userset reads is assignable to `type#relation` |
+| `tupleset relation admits a wildcard` | that relation is assignable to `type:*` |
+
+The first two were fail-open: a single-operand intersection
+resolved to whatever that operand said, and a tupleset relation
+admitting a userset had its subject relation discarded on
+dispatch, landing on a different relation of the linked object and
+granting.
+
+**The last two have a stated gap.** They are properties of a
+*different* relation than the one being written — the one named as
+`tupleset` — so they can only be checked when that relation's
+config already exists. A tuple-to-userset declared **before** its
+tupleset relation is not validated, and neither is a later
+widening of that relation. Closing either would need a reverse
+lookup (*which configs name me as a tupleset?*) that `TupleStore`
+does not have. A validator that fired on write order would be
+worse: it would refuse correct models for arriving in an order
+nothing documents. Conditions have no such gap — define them
+before the configs that name them, which is the order upstream's
+atomic model write imposes anyway.
+
+`addTuple` throws `ImplicitTupleError` for a tuple that says only
+what the model already says — `doc:1#blocked@doc:1#blocked`.
+Upstream refuses it: "cannot write a tuple that is implicit".
+
+**On the write path only.** The same tuple supplied as a
+*contextual* tuple is accepted upstream and answered over, so the
+gate is deliberately not in the validation `addTuple` and
+contextual tuples share. Both halves are pinned two-sided.
+
 ## Write-time condition validation
 
 `writeConditionDefinition` compiles the expression and throws

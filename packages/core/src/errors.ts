@@ -127,6 +127,74 @@ export class InvalidConditionalTupleError extends TsfgaError {
   }
 }
 
+/**
+ * The tuple says only what the model already says.
+ *
+ * `doc:1#blocked@doc:1#blocked` asserts that the relation contains
+ * itself, which is true by definition, so upstream refuses to
+ * store it: `Reason: cannot write a tuple that is implicit`.
+ *
+ * Refused on the **write** path only. A contextual tuple of the
+ * same shape is accepted upstream — measured on v1.18.2, with a
+ * control proving the field was honoured — so the asymmetry is
+ * deliberate, not an oversight about where the check belongs.
+ */
+export class ImplicitTupleError extends TsfgaError {
+  readonly objectType: string;
+  readonly objectId: string;
+  readonly relation: string;
+
+  constructor(objectType: string, objectId: string, relation: string) {
+    const ref = `${objectType}:${objectId}#${relation}`;
+    super(`Cannot write a tuple that is implicit: ${ref}@${ref}`);
+    this.name = "ImplicitTupleError";
+    this.objectType = objectType;
+    this.objectId = objectId;
+    this.relation = relation;
+  }
+}
+
+/**
+ * Every way a relation config can be malformed against the rules
+ * OpenFGA's typesystem enforces when it validates a model.
+ *
+ * A cause string rather than a class each, for the same reason
+ * `ConditionalTupleCause` is: upstream reports these as one
+ * invalid-model error discriminated by its message.
+ */
+export type RelationConfigDefect =
+  /** A set operation with fewer than two children. */
+  | "intersection has fewer than two operands"
+  /** A tupleset relation may not be assignable to a userset. */
+  | "tupleset relation admits a userset"
+  /** A tupleset relation may not be assignable to a wildcard. */
+  | "tupleset relation admits a wildcard"
+  /** A type restriction names a condition the store has not got. */
+  | "undefined condition";
+
+/** A relation config the model would not admit. */
+export class InvalidRelationConfigError extends TsfgaError {
+  override readonly cause: RelationConfigDefect;
+  readonly objectType: string;
+  readonly relation: string;
+
+  constructor(
+    cause: RelationConfigDefect,
+    objectType: string,
+    relation: string,
+    detail?: string,
+  ) {
+    super(
+      `Invalid relation config for ${objectType}.${relation}: ${cause}` +
+        (detail === undefined ? "" : ` (${detail})`),
+    );
+    this.name = "InvalidRelationConfigError";
+    this.cause = cause;
+    this.objectType = objectType;
+    this.relation = relation;
+  }
+}
+
 export class ConditionNotFoundError extends TsfgaError {
   constructor(conditionName: string) {
     super(`Condition definition not found: ${conditionName}`);

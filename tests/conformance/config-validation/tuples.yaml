@@ -1,0 +1,10 @@
+# alice is a viewer and a member of doc1, and nothing blocks her.
+# The self-referential rows are the thing under test and are
+# written by the tests themselves, not from here.
+- user: user:alice
+  relation: viewer
+  object: document:doc1
+
+- user: user:alice
+  relation: member
+  object: document:doc1

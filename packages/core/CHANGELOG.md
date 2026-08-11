@@ -169,6 +169,43 @@ releases may contain breaking changes).
   and passing the pool through unchanged left it out with no
   error.
 
+- **BREAKING: `writeRelationConfig` and `addTuple` refuse shapes
+  OpenFGA rejects.** `writeRelationConfig` was infallible; it now
+  throws the new `InvalidRelationConfigError`, whose `cause` is
+  one of `intersection has fewer than two operands`, `undefined
+  condition`, `tupleset relation admits a userset` or `tupleset
+  relation admits a wildcard`. All four are an
+  `invalid_authorization_model` upstream, measured on v1.18.2.
+
+  Two were fail-open. A single-operand `intersection` resolved to
+  whatever that one operand said, so a config that means nothing
+  granted. A tupleset relation admitting a userset had its subject
+  relation **discarded** on dispatch, landing on a different
+  relation of the linked object and granting.
+
+  **Stated gap.** The two tupleset rules are properties of a
+  different relation than the one being written, so they are
+  checked only when that relation's config already exists. A
+  tuple-to-userset declared before its tupleset relation is not
+  validated, and neither is a later widening of that relation.
+  Closing either needs a reverse lookup `TupleStore` has not got;
+  a validator that fired on write order would refuse correct
+  models for arriving in an order nothing documents. Conditions
+  have no such gap, but must be defined before the configs naming
+  them.
+
+  `addTuple` throws the new `ImplicitTupleError` for a tuple that
+  says only what the model already says
+  (`doc:1#blocked@doc:1#blocked`), which upstream refuses as
+  "implicit". **On the write path only**: the same tuple supplied
+  as a contextual tuple is accepted upstream and answered over, so
+  the gate is deliberately not in the validation `addTuple` and
+  contextual tuples share. Putting it there — as an earlier
+  reading proposed — would have refused a tuple OpenFGA takes.
+
+  `isSelfDefining` and `validateRelationConfigWrite` are exported
+  for store authors applying the same gates.
+
 ### Documented
 
 - **Sub-millisecond timestamps are a known divergence.** Go's
