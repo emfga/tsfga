@@ -86,7 +86,11 @@ with the published packages.
 1. Create a directory under `tests/conformance/` with a
    `model.dsl` file (OpenFGA DSL) and a `tuples.yaml`
    file (relationship tuples)
-2. Write a test file using `expectConformance()` — see
+2. Write a test file using `expectConformance()`, and
+   `expectWriteConformance()` where a write must be
+   refused. Wrap the client with `recordFixture()` and
+   assert `expectConfigsMatchModel()` against the model,
+   so a config that drifts from the DSL is caught — see
    existing tests for the pattern
 3. Pick an unused UUID prefix for deterministic IDs (see
    existing test files for allocated ranges)

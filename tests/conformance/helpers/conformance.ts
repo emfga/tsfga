@@ -103,11 +103,29 @@ export interface FixtureRecord {
  * methods in place.
  *
  * Deliberately not a refactor of the fixtures into arrays of
- * configs. Three of them build configs in loops with
- * template-literal relation names, which no array literal
- * expresses, and an array refactor would touch every config in the
- * suite — a large diff whose whole purpose is to change nothing.
- * Wrapping is one line per fixture and leaves the literals alone.
+ * configs the suite hands over. This records the write path, so
+ * what `expectConfigsMatchModel` compares is what tsfga was
+ * actually told, and not a second list kept alongside the
+ * writes it is meant to describe. Such a list drifts:
+ * `condition-restrictions` builds its record by hand and states
+ * `team.member` twice, once in the write and once in the
+ * record, with nothing holding the two together. It has a
+ * reason its own comment gives; nothing else here needs one.
+ *
+ * Not that an array could not hold them. `theopenlane/setup.ts`
+ * keeps 225 configs in `RELATION_CONFIGS` and writes them in a
+ * loop, and still wraps with this — the array is its source,
+ * not its assertion. But eight `writeRelationConfig` sites
+ * across four fixtures compute the relation name per iteration
+ * — `intersection-cycle-precedence` (3), `cycles` (2),
+ * `deep-rewrite` (2), `userset-restrictions` (1) — as do six
+ * `addTuple` sites across five files. Written out as literals
+ * they would unroll `DEPTH = 30` and `CHAIN_LENGTH = 9`, the
+ * constants those fixtures exist to set.
+ *
+ * The asymmetry is why this is the general mechanism: a fixture
+ * later rewritten as an array is still recorded correctly here,
+ * while a hand-kept list has to be kept correct forever.
  *
  * Call it immediately after `createTsfga`, before the fixture
  * writes anything.
