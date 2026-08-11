@@ -40,6 +40,27 @@ releases may contain breaking changes).
   README: cel-js has no `uint`, so `type(n) == uint` is `false`
   and a bare `u`-suffixed literal finds no overload.
 
+### Documented
+
+- **Sub-millisecond timestamps are a known divergence.** Go's
+  `time.Time` is nanosecond-resolution and cel-js maps a CEL
+  timestamp onto a JS `Date`, which is millisecond, so finer
+  precision is discarded from the context value and from the
+  `timestamp('…')` literal alike. Both engines answer and the
+  booleans differ in four cells, two of them granting: under an
+  equality predicate a truncated value compares equal here and
+  unequal upstream.
+
+  Not reachable through `@marcbachmann/cel-js` 8.0.0. A
+  nanosecond carrier can be registered as a host type, but the
+  built-in `timestamp(string)` overload cannot be displaced and
+  the standard library cannot be declined, so the literal side of
+  every comparison truncates regardless. Recorded in the README
+  beside the other known divergences and pinned two-sided in the
+  conformance suite, so a cel-js release that changes the
+  resolution is a failing test rather than a silent change of
+  answer.
+
 ### Changed
 
 - **`InvalidSubjectTypeError` no longer names what the relation

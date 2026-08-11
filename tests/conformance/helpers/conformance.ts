@@ -36,6 +36,61 @@ export async function expectConformance(
   params: CheckRequest,
   expected: CheckOutcome,
 ): Promise<void> {
+  const [tsfgaResult, openFgaResult] = await runBoth(
+    storeId,
+    authorizationModelId,
+    tsfgaClient,
+    params,
+  );
+
+  // Both systems must agree
+  expect(tsfgaResult).toBe(openFgaResult);
+  // And match expected value
+  expect(tsfgaResult).toBe(expected);
+}
+
+/**
+ * Pin a divergence: assert what **each** engine answers, knowing
+ * they answer differently.
+ *
+ * The counterpart to `expectConformance`, for the shapes tsfga
+ * documents as known divergences. A divergence nothing asserts is
+ * indistinguishable from one nobody has noticed: the answers can
+ * move — a dependency upgrade is enough — and the README goes on
+ * describing the old ones. Pinning both sides means the day either
+ * engine changes, a test says so.
+ *
+ * Refuses to pass on agreement. A pinned cell that has stopped
+ * diverging is not a passing test, it is a README paragraph to
+ * delete and an `expectConformance` to write.
+ */
+export async function expectPinnedDivergence(
+  storeId: string,
+  authorizationModelId: string,
+  tsfgaClient: TsfgaClient,
+  params: CheckRequest,
+  expected: { openfga: CheckOutcome; tsfga: CheckOutcome },
+): Promise<void> {
+  expect(expected.openfga).not.toBe(expected.tsfga);
+
+  const [tsfgaResult, openFgaResult] = await runBoth(
+    storeId,
+    authorizationModelId,
+    tsfgaClient,
+    params,
+  );
+
+  expect(openFgaResult).toBe(expected.openfga);
+  expect(tsfgaResult).toBe(expected.tsfga);
+}
+
+/** Run one check on both engines, in parallel. */
+async function runBoth(
+  storeId: string,
+  authorizationModelId: string,
+  tsfgaClient: TsfgaClient,
+  params: CheckRequest,
+): Promise<[CheckOutcome, CheckOutcome]> {
   const contextualTuples = params.contextualTuples?.map((t) => ({
     user: t.subjectRelation
       ? `${t.subjectType}:${t.subjectId}#${t.subjectRelation}`
@@ -71,10 +126,7 @@ export async function expectConformance(
   const openFgaResult: CheckOutcome =
     typeof openFgaRaw === "boolean" ? openFgaRaw : "refused";
 
-  // Both systems must agree
-  expect(tsfgaResult).toBe(openFgaResult);
-  // And match expected value
-  expect(tsfgaResult).toBe(expected);
+  return [tsfgaResult, openFgaResult];
 }
 
 export interface ListObjectsParams {

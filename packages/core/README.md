@@ -188,6 +188,35 @@ Every other integer cell agrees, including the arithmetic
 operators, exact comparison past 2^53, saturation at the int64
 bounds, and overflow past them.
 
+### Known divergence: sub-millisecond timestamps
+
+Go's `time.Time` is nanosecond-resolution; cel-js maps a CEL
+timestamp onto a JS `Date`, which is millisecond. Anything finer
+is discarded silently — from the context value and from the
+`timestamp('…')` literal alike — and both engines still answer,
+so the booleans differ:
+
+| expression | context `n` | OpenFGA | tsfga |
+|---|---|---|---|
+| `n == timestamp('…T00:00:00Z')` | `…00.000000001Z` | `false` | `true` |
+| `n == timestamp('…T00:00:00Z')` | `…00.000001Z` | `false` | `true` |
+| `n > timestamp('…T00:00:00Z')` | `…00.0005Z` | `true` | `false` |
+| `n > timestamp('…00.000000000Z')` | `…00.000000500Z` | `true` | `false` |
+
+The first two rows are the granting direction. Everything at
+millisecond resolution or coarser agrees, so a condition that
+compares whole seconds, minutes or dates — which is what an
+expiry or a business-hours window is — is unaffected. All four
+cells and both boundary controls are pinned two-sided in the
+conformance suite.
+
+Unlike the `uint` divergence, this one was found unreachable
+rather than judged too costly. `@marcbachmann/cel-js` 8.0.0
+declines to displace its own `timestamp(string)` overload, and
+its standard library cannot be turned off, so the literal side of
+the comparison truncates whatever a custom carrier held. It will
+close if cel-js changes its timestamp representation.
+
 ### Known divergence: recursive relations
 
 OpenFGA has dedicated resolvers for *recursive* relation shapes
