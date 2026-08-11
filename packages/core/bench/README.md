@@ -16,6 +16,10 @@ live in graph shapes nobody would think to write down.
 | `breadth-equivalence.ts` | `maxBreadth` — 1 vs 2, 3, 5, 10, `Infinity` |
 | `batch-equivalence.ts` | `checkMany` vs the same requests one at a time |
 
+Both share one generator, which lives in `harness.ts`: the relation-graph
+builder, the seeded scenario stream, the coverage counters and the summary
+tail. Each file above holds only its own driver.
+
 ## Running them
 
 ```bash
@@ -24,12 +28,12 @@ bun run bench:breadth
 bun run bench:batch
 ```
 
-Each takes a few minutes. There is no CI job — they are run by hand
-before a change to the resolution machinery, and they are in the repo so
-that the generator itself is reviewable. That is the point: the version
-these replace lived outside the repo, and when its generator drifted out
-of agreement with the model it generated, there was no diff for anyone
-to notice.
+Breadth takes about three seconds and batch about six. There is no CI job
+— they are run by hand before a change to the resolution machinery, and
+they are in the repo so that the generator itself is reviewable. That is
+the point: the version these replace lived outside the repo, and when its
+generator drifted out of agreement with the model it generated, there was
+no diff for anyone to notice.
 
 ## Two phases, two different bars
 
