@@ -238,21 +238,32 @@ denies, and so does tsfga.
 
 ### Known divergence: `uint`
 
-cel-js has no `uint` representation. An `int` and a `uint`
-parameter both reach CEL as a `bigint`, which is CEL's `int`, so
-two cells still differ from upstream:
+A `uint` parameter reaches CEL as a `bigint`, which is CEL's
+`int`, so two cells differ from upstream:
 
 | expression | OpenFGA | tsfga |
 |---|---|---|
 | `type(n) == uint` | `true` | `false` |
 | `n + 1u == 8u` | `true` | error, no overload |
 
-Both are pinned two-sided in the conformance suite, so they
-cannot change without being noticed. `uint(n) + 1u == 8u` works
-on both, and `type(n) == int` agrees. `Environment.registerType`
-makes a real `uint` reachable in principle; it was judged not
-worth its cost rather than found impossible, and that judgement
-is the thing to revisit if these cells start mattering.
+Both are pinned two-sided, so they cannot change unnoticed.
+`uint(n) + 1u == 8u`, `string(n)`, `int(n)`, `n * 2u == 14u` and
+`n in [1u, 7u, 9u]` all agree, as does `type(n) == int`.
+
+**This is a representation trade, not a missing capability.**
+cel-js does have a `uint` carrier — `UnsignedInt`, from its
+`./evaluator` subpath export — and using it makes both rows above
+agree. It is not used because cel-js has no `int(uint)` overload
+at all (even `int(7u)` fails), so adopting it would fix these two
+cells and break `int(n) == 7`, which OpenFGA answers `true`.
+Two exotic expressions for one ordinary one is not obviously the
+right direction, so the current representation stands until
+somebody decides deliberately.
+
+Note that a mixed-type comparison such as `n >= 7`, `n == 7` or
+`n in [1, 7, 9]` on a `uint` parameter is **refused by OpenFGA at
+model-write time**, so those cells are unreachable in a valid
+model and do not bear on the trade.
 
 Every other integer cell agrees, including the arithmetic
 operators, exact comparison past 2^53, saturation at the int64

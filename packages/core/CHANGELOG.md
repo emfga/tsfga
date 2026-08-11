@@ -376,8 +376,13 @@ releases may contain breaking changes).
   operators moved from an error to a wrong answer.
 
   Two `uint` cells remain divergent and are documented in the
-  README: cel-js has no `uint`, so `type(n) == uint` is `false`
-  and a bare `u`-suffixed literal finds no overload.
+  README. The reason stated there is a representation trade, not
+  a missing capability: cel-js does expose an `UnsignedInt`
+  carrier on its `./evaluator` subpath, and using it makes both
+  cells agree — but cel-js has no `int(uint)` overload at all, so
+  it would break `int(n) == 7`, which OpenFGA answers. Two exotic
+  expressions for one ordinary one, left as a deliberate open
+  decision rather than taken silently.
 
 - **Context values are read by OpenFGA's grammar, everywhere it
   differs from JavaScript's.** An exhaustive sweep of the coercion

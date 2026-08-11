@@ -46,7 +46,10 @@ const LIMIT = 25;
 
 const uuidMap = new Map<string, string>();
 for (let i = 0; i <= LIMIT + 1; i++) {
-  uuidMap.set(`d${i}`, `00000000-0000-4000-d300-${String(i).padStart(12, "0")}`);
+  uuidMap.set(
+    `d${i}`,
+    `00000000-0000-4000-d300-${String(i).padStart(12, "0")}`,
+  );
 }
 uuidMap.set("alice", "00000000-0000-4000-d300-0000000000ff");
 uuidMap.set("side", "00000000-0000-4000-d300-0000000000fe");
@@ -73,7 +76,10 @@ describe("Depth Boundary Conformance", () => {
     const relation = (
       name: string,
       directlyAssignable: Array<{ type: string; relation?: string }>,
-      tupleToUserset: Array<{ tupleset: string; computedUserset: string }> | null,
+      tupleToUserset: Array<{
+        tupleset: string;
+        computedUserset: string;
+      }> | null,
     ) => ({
       objectType: "doc",
       relation: name,
@@ -85,19 +91,31 @@ describe("Depth Boundary Conformance", () => {
       intersection: null,
     });
 
-    await tsfgaClient.writeRelationConfig(relation("parent", [{ type: "doc" }], null));
-    await tsfgaClient.writeRelationConfig(relation("other", [{ type: "doc" }], null));
-    await tsfgaClient.writeRelationConfig(relation("m", [{ type: "user" }], null));
     await tsfgaClient.writeRelationConfig(
-      relation("plain", [{ type: "user" }], [
-        { tupleset: "parent", computedUserset: "plain" },
-      ]),
+      relation("parent", [{ type: "doc" }], null),
     );
     await tsfgaClient.writeRelationConfig(
-      relation("leafw2", [{ type: "user" }], [
-        { tupleset: "other", computedUserset: "m" },
-        { tupleset: "parent", computedUserset: "leafw2" },
-      ]),
+      relation("other", [{ type: "doc" }], null),
+    );
+    await tsfgaClient.writeRelationConfig(
+      relation("m", [{ type: "user" }], null),
+    );
+    await tsfgaClient.writeRelationConfig(
+      relation(
+        "plain",
+        [{ type: "user" }],
+        [{ tupleset: "parent", computedUserset: "plain" }],
+      ),
+    );
+    await tsfgaClient.writeRelationConfig(
+      relation(
+        "leafw2",
+        [{ type: "user" }],
+        [
+          { tupleset: "other", computedUserset: "m" },
+          { tupleset: "parent", computedUserset: "leafw2" },
+        ],
+      ),
     );
 
     // One chain, long enough for both boundary probes.
@@ -156,7 +174,13 @@ describe("Depth Boundary Conformance", () => {
    * every depth.
    */
   test("one hop inside both budgets, both answer", async () => {
-    await expectConformance(storeId, modelId, tsfgaClient, from(1, "plain"), true);
+    await expectConformance(
+      storeId,
+      modelId,
+      tsfgaClient,
+      from(1, "plain"),
+      true,
+    );
   });
 
   /**
@@ -164,10 +188,16 @@ describe("Depth Boundary Conformance", () => {
    * answers; tsfga dispatches for it and exhausts.
    */
   test("at the limit, upstream answers where tsfga exhausts", async () => {
-    await expectPinnedDivergence(storeId, modelId, tsfgaClient, from(0, "plain"), {
-      openfga: true,
-      tsfga: "refused",
-    });
+    await expectPinnedDivergence(
+      storeId,
+      modelId,
+      tsfgaClient,
+      from(0, "plain"),
+      {
+        openfga: true,
+        tsfga: "refused",
+      },
+    );
   });
 
   /**
@@ -189,6 +219,12 @@ describe("Depth Boundary Conformance", () => {
   });
 
   test("a weight-2 leaf one hop shallower, both answer", async () => {
-    await expectConformance(storeId, modelId, tsfgaClient, from(1, "leafw2"), true);
+    await expectConformance(
+      storeId,
+      modelId,
+      tsfgaClient,
+      from(1, "leafw2"),
+      true,
+    );
   });
 });
