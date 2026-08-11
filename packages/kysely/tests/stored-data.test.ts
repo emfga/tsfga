@@ -23,7 +23,9 @@ import {
  * inserts a malformed row directly (bypassing the adapter's write
  * path) and asserts the corresponding read throws
  * InvalidStoredDataError. Together these cover every throw site in
- * the four JSON parsers of KyselyTupleStore.
+ * the four JSON parsers of KyselyTupleStore — one test per site,
+ * each confirmed by deleting its throw and watching exactly that
+ * test go red, since coverage has no failing baseline of its own.
  */
 describe("Invalid stored data", () => {
   let db: Kysely<DB>;
@@ -51,6 +53,7 @@ describe("Invalid stored data", () => {
   });
 
   async function insertConfigRow(columns: {
+    relation?: string;
     directly_assignable?: Json;
     tuple_to_userset?: Json;
     intersection?: Json;
@@ -59,7 +62,7 @@ describe("Invalid stored data", () => {
       .insertInto("tsfga.relation_configs")
       .values({
         object_type: "malformed",
-        relation: "rel",
+        relation: columns.relation ?? "rel",
         directly_assignable: columns.directly_assignable ?? JSON.stringify([]),
         implied_by: null,
         computed_userset: null,
@@ -91,8 +94,72 @@ describe("Invalid stored data", () => {
       ).rejects.toBeInstanceOf(InvalidStoredDataError);
     });
 
-    test("throws when an element is not a string", async () => {
-      await insertConfigRow({ directly_assignable: JSON.stringify([1]) });
+    // One test per throw site, so a deleted throw reddens exactly
+    // one of them. Both payloads a single site rejects therefore
+    // sit in the same test rather than in one each.
+    test("throws when an element is not an object", async () => {
+      for (const [i, payload] of [1, null, ["user"]].entries()) {
+        await insertConfigRow({
+          relation: `element${i}`,
+          directly_assignable: JSON.stringify([payload]),
+        });
+        await expect(
+          store.findRelationConfig("malformed", `element${i}`),
+        ).rejects.toBeInstanceOf(InvalidStoredDataError);
+      }
+    });
+
+    test("throws when 'type' is absent or not a non-empty string", async () => {
+      for (const [i, payload] of [
+        { relation: "member" },
+        { type: 1 },
+        { type: "" },
+      ].entries()) {
+        await insertConfigRow({
+          relation: `type${i}`,
+          directly_assignable: JSON.stringify([payload]),
+        });
+        await expect(
+          store.findRelationConfig("malformed", `type${i}`),
+        ).rejects.toBeInstanceOf(InvalidStoredDataError);
+      }
+    });
+
+    test("throws when 'relation' is not a string", async () => {
+      await insertConfigRow({
+        directly_assignable: JSON.stringify([{ type: "team", relation: 1 }]),
+      });
+      await expect(
+        store.findRelationConfig("malformed", "rel"),
+      ).rejects.toBeInstanceOf(InvalidStoredDataError);
+    });
+
+    test("throws when 'condition' is not a string", async () => {
+      await insertConfigRow({
+        directly_assignable: JSON.stringify([{ type: "user", condition: 1 }]),
+      });
+      await expect(
+        store.findRelationConfig("malformed", "rel"),
+      ).rejects.toBeInstanceOf(InvalidStoredDataError);
+    });
+
+    test("throws when 'wildcard' is not a boolean", async () => {
+      await insertConfigRow({
+        directly_assignable: JSON.stringify([
+          { type: "user", wildcard: "yes" },
+        ]),
+      });
+      await expect(
+        store.findRelationConfig("malformed", "rel"),
+      ).rejects.toBeInstanceOf(InvalidStoredDataError);
+    });
+
+    test("throws when 'relation' and 'wildcard' are both set", async () => {
+      await insertConfigRow({
+        directly_assignable: JSON.stringify([
+          { type: "team", relation: "member", wildcard: true },
+        ]),
+      });
       await expect(
         store.findRelationConfig("malformed", "rel"),
       ).rejects.toBeInstanceOf(InvalidStoredDataError);
