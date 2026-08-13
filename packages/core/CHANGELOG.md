@@ -5,7 +5,7 @@ Notable changes to `@tsfga/core`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
-## Unreleased
+## 0.7.0 — 2026-08
 
 ### Added
 

@@ -55,7 +55,7 @@ npm install @tsfga/kysely @tsfga/core kysely pg
 ```
 
 `@tsfga/core`, `kysely` and `pg` are peer dependencies. This
-version accepts `@tsfga/core` `>=0.6.0 <0.7.0` — the adapter
+version accepts `@tsfga/core` `>=0.7.0 <0.8.0` — the adapter
 implements the `TupleStore` interface as that release shapes it.
 The range carries an explicit ceiling rather than a caret: below
 1.0.0 a core minor may change that interface, so each minor is

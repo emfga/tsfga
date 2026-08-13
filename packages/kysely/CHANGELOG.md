@@ -5,9 +5,19 @@ Notable changes to `@tsfga/kysely`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
-## Unreleased
+## 0.6.0 — 2026-08
 
 ### Changed
+
+- **BREAKING: the peer range on `@tsfga/core` moves to
+  `>=0.7.0 <0.8.0`.** The floor rises rather than the ceiling
+  widening, because this is not an adapter that happens to still
+  work against a newer core: `TupleStore` gained a required
+  `idDomain`, `insertTuple` and `upsertRelationConfig` take the
+  branded write types, and `insertTuple` returns whether it
+  inserted. An adapter built for core 0.6.x cannot satisfy the
+  0.7.0 interface, and one built for 0.7.0 cannot run against
+  0.6.x. Upgrade both together.
 
 - **BREAKING: ids must be canonical lower-case hyphenated UUIDs.**
   `KyselyTupleStore` declares `CANONICAL_UUID_IDS` as its
