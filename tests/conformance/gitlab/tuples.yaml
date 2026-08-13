@@ -1,0 +1,61 @@
+# Group chain: root -> mid -> leaf -> deep -> deeper -> deepest
+- user: group_a6g:root
+  relation: parent
+  object: group_a6g:mid
+- user: group_a6g:mid
+  relation: parent
+  object: group_a6g:leaf
+- user: group_a6g:leaf
+  relation: parent
+  object: group_a6g:deep
+- user: group_a6g:deep
+  relation: parent
+  object: group_a6g:deeper
+- user: group_a6g:deeper
+  relation: parent
+  object: group_a6g:deepest
+
+# Roles, each granted at a different height of the chain
+- user: user_a6g:alice
+  relation: direct_owner
+  object: group_a6g:root
+- user: user_a6g:erin
+  relation: direct_owner
+  object: group_a6g:root
+- user: user_a6g:erin
+  relation: banned
+  object: group_a6g:root
+- user: user_a6g:bob
+  relation: direct_maintainer
+  object: group_a6g:mid
+- user: user_a6g:carol
+  relation: direct_developer
+  object: group_a6g:leaf
+- user: user_a6g:dave
+  relation: direct_guest
+  object: group_a6g:leaf
+
+# A detached, publicly readable group
+- user: user_a6g:*
+  relation: direct_guest
+  object: group_a6g:other
+
+# Projects
+- user: group_a6g:leaf
+  relation: group
+  object: project_a6g:web
+- user: group_a6g:root
+  relation: group
+  object: project_a6g:api
+- user: user_a6g:frank
+  relation: direct_guest
+  object: project_a6g:api
+- user: group_a6g:mid
+  relation: group
+  object: project_a6g:legacy
+- user: user_a6g:*
+  relation: archived
+  object: project_a6g:legacy
+- user: group_a6g:deepest
+  relation: group
+  object: project_a6g:sandbox

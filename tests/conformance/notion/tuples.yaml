@@ -1,0 +1,96 @@
+# Workspace roles: owner -> admin -> member is a concentric chain,
+# guest sits outside it.
+- user: user_a6:alice
+  relation: owner
+  object: workspace_a6:acme
+- user: user_a6:bob
+  relation: admin
+  object: workspace_a6:acme
+- user: user_a6:carol
+  relation: member
+  object: workspace_a6:acme
+- user: user_a6:gina
+  relation: guest
+  object: workspace_a6:acme
+
+# Teamspaces
+- user: workspace_a6:acme
+  relation: workspace
+  object: teamspace_a6:eng
+- user: user_a6:dave
+  relation: owner
+  object: teamspace_a6:eng
+- user: workspace_a6:acme#member
+  relation: member
+  object: teamspace_a6:eng
+- user: workspace_a6:acme
+  relation: workspace
+  object: teamspace_a6:design
+
+# Page tree: handbook -> roadmap -> spec, plus handbook -> secret
+- user: teamspace_a6:eng
+  relation: parent_teamspace
+  object: page_a6:handbook
+- user: teamspace_a6:eng#member
+  relation: full_access
+  object: page_a6:handbook
+- user: workspace_a6:acme#guest
+  relation: can_comment_direct
+  object: page_a6:handbook
+
+- user: page_a6:handbook
+  relation: parent_page
+  object: page_a6:roadmap
+- user: teamspace_a6:eng
+  relation: parent_teamspace
+  object: page_a6:roadmap
+- user: user_a6:erin
+  relation: viewer
+  object: page_a6:roadmap
+
+- user: page_a6:roadmap
+  relation: parent_page
+  object: page_a6:spec
+- user: user_a6:carol
+  relation: restricted
+  object: page_a6:spec
+
+- user: page_a6:handbook
+  relation: parent_page
+  object: page_a6:secret
+- user: user_a6:dave
+  relation: restricted
+  object: page_a6:secret
+
+# Public link sharing on the design teamspace
+- user: teamspace_a6:design
+  relation: parent_teamspace
+  object: page_a6:public_faq
+- user: user_a6:*
+  relation: public_viewer
+  object: page_a6:public_faq
+  condition:
+    name: link_shared_a6
+    context:
+      link_enabled: true
+
+- user: teamspace_a6:design
+  relation: parent_teamspace
+  object: page_a6:draft_faq
+- user: user_a6:*
+  relation: public_viewer
+  object: page_a6:draft_faq
+  condition:
+    name: link_shared_a6
+    context:
+      link_enabled: false
+
+# Same link condition, but the flag comes from the request context
+- user: teamspace_a6:design
+  relation: parent_teamspace
+  object: page_a6:ctx_faq
+- user: user_a6:*
+  relation: public_viewer
+  object: page_a6:ctx_faq
+  condition:
+    name: link_shared_a6

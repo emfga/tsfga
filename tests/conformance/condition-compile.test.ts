@@ -10,6 +10,7 @@ import {
 import type { DB } from "@tsfga/kysely";
 import { KyselyTupleStore } from "@tsfga/kysely";
 import type { Kysely } from "kysely";
+import { expectModelWriteConformance } from "./helpers/conformance.ts";
 import {
   beginTransaction,
   destroyDb,
@@ -17,6 +18,7 @@ import {
   rollbackTransaction,
 } from "./helpers/db.ts";
 import { fgaCreateStore, fgaWriteModelOutcome } from "./helpers/openfga.ts";
+import { ungatedConfig, ungatedTuple } from "./helpers/ungated.ts";
 
 /**
  * A condition expression that does not compile is refused where it
@@ -95,28 +97,17 @@ describe("Condition Compilation Conformance", () => {
 
   for (const [i, expression] of UNPARSEABLE.entries()) {
     test(`both refuse to define ${JSON.stringify(expression)}`, async () => {
-      const [tsfgaOutcome, openFgaOutcome] = await Promise.all([
-        tsfgaClient
-          .writeConditionDefinition({
+      await expectModelWriteConformance(
+        storeId,
+        modelWith(expression),
+        () =>
+          tsfgaClient.writeConditionDefinition({
             name: `gate_${i}`,
             expression,
             parameters: { x: "int" },
-          })
-          .then(() => "accepted" as const)
-          .catch((error: unknown) => {
-            // Only tsfga's own refusal counts. A dropped connection
-            // reported as a refusal would satisfy the assertion it
-            // exists to make.
-            if (error instanceof TsfgaError) return "refused" as const;
-            throw error;
           }),
-        fgaWriteModelOutcome(storeId, modelWith(expression)).then((outcome) =>
-          outcome === "accepted" ? "accepted" : "refused",
-        ),
-      ]);
-
-      expect(tsfgaOutcome).toBe(openFgaOutcome);
-      expect(tsfgaOutcome).toBe("refused");
+        "refused",
+      );
     });
   }
 
@@ -134,15 +125,21 @@ describe("Condition Compilation Conformance", () => {
   });
 
   /**
-   * Measured while sweeping the neighbourhood of the parse gate,
-   * and **not** closed by it: OpenFGA compiles against the declared
-   * parameters and rejects an undeclared reference, while cel-js
-   * parses the call and only fails when it is evaluated. Pinned
-   * rather than left unstated, so a cel-js release that starts
-   * checking references is a failing test rather than a silent
-   * change of behaviour.
+   * Once a pinned divergence, now agreement.
+   *
+   * OpenFGA compiles against the declared parameters and rejects an
+   * undeclared reference. cel-js only parsed, so the call was stored
+   * and failed at evaluation -- pinned here so that a cel-js release
+   * which started checking references would show up as a failing
+   * test rather than a silent change.
+   *
+   * It was not a cel-js release that closed it. `compileCondition`
+   * now type-checks against the declared parameters on a clone that
+   * registers them as variables, which is what upstream does, so
+   * both engines refuse the write. The pin has become the
+   * conformance assertion it existed to wait for.
    */
-  test("an undeclared reference is refused only upstream", async () => {
+  test("an undeclared reference is refused by both", async () => {
     const expression = "not_a_function(x)";
     const [tsfgaOutcome, openFgaOutcome] = await Promise.all([
       tsfgaClient
@@ -162,7 +159,7 @@ describe("Condition Compilation Conformance", () => {
     ]);
 
     expect(openFgaOutcome).toBe("refused");
-    expect(tsfgaOutcome).toBe("accepted");
+    expect(tsfgaOutcome).toBe("refused");
   });
 
   /**
@@ -177,25 +174,29 @@ describe("Condition Compilation Conformance", () => {
       expression: "x +",
       parameters: { x: "int" },
     });
-    await store.upsertRelationConfig({
-      objectType: "doc",
-      relation: "viewer",
-      directlyAssignable: [{ type: "user", condition: "gate_stored" }],
-      impliedBy: null,
-      computedUserset: null,
-      tupleToUserset: null,
-      excludedBy: null,
-      intersection: null,
-    });
-    await store.insertTuple({
-      objectType: "doc",
-      objectId: "00000000-0000-4000-ce00-000000000001",
-      relation: "viewer",
-      subjectType: "user",
-      subjectId: "00000000-0000-4000-ce00-000000000002",
-      conditionName: "gate_stored",
-      conditionContext: { x: 1 },
-    });
+    await store.upsertRelationConfig(
+      ungatedConfig({
+        objectType: "doc",
+        relation: "viewer",
+        directlyAssignable: [{ type: "user", condition: "gate_stored" }],
+        impliedBy: null,
+        computedUserset: null,
+        tupleToUserset: null,
+        excludedBy: null,
+        intersection: null,
+      }),
+    );
+    await store.insertTuple(
+      ungatedTuple({
+        objectType: "doc",
+        objectId: "00000000-0000-4000-ce00-000000000001",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "00000000-0000-4000-ce00-000000000002",
+        conditionName: "gate_stored",
+        conditionContext: { x: 1 },
+      }),
+    );
 
     const failure = tsfgaClient.check({
       objectType: "doc",

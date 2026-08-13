@@ -1,0 +1,61 @@
+# Service accounts live in a namespace
+- user: namespace_a6k:web
+  relation: namespace
+  object: serviceaccount_a6k:sa_ci
+- user: namespace_a6k:kube_system
+  relation: namespace
+  object: serviceaccount_a6k:sa_bot
+
+# A group holding a human and a service account side by side
+- user: user_a6k:bob
+  relation: member
+  object: group_a6k:devs
+- user: serviceaccount_a6k:sa_ci
+  relation: member
+  object: group_a6k:devs
+
+# Cluster role bindings. crb_view is the system:authenticated
+# wildcard, and it is a user_a6k wildcard specifically.
+- user: user_a6k:alice
+  relation: crb_admin
+  object: cluster_a6k:prod
+- user: user_a6k:*
+  relation: crb_view
+  object: cluster_a6k:prod
+
+# Namespaces
+- user: cluster_a6k:prod
+  relation: cluster
+  object: namespace_a6k:web
+- user: group_a6k:devs#member
+  relation: rb_edit
+  object: namespace_a6k:web
+- user: user_a6k:carol
+  relation: rb_view
+  object: namespace_a6k:web
+
+- user: cluster_a6k:prod
+  relation: cluster
+  object: namespace_a6k:kube_system
+- user: serviceaccount_a6k:sa_bot
+  relation: rb_view
+  object: namespace_a6k:kube_system
+
+# Pods. `orphan` is owned by a cluster, and cluster_a6k defines
+# none of can_get / can_update / can_admin, so every rewrite over
+# it drops the row instead of failing. `mixed` is owned by both.
+- user: namespace_a6k:web
+  relation: owner
+  object: pod_a6k:nginx
+- user: namespace_a6k:kube_system
+  relation: owner
+  object: pod_a6k:etcd
+- user: cluster_a6k:prod
+  relation: owner
+  object: pod_a6k:orphan
+- user: namespace_a6k:web
+  relation: owner
+  object: pod_a6k:mixed
+- user: cluster_a6k:prod
+  relation: owner
+  object: pod_a6k:mixed

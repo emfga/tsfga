@@ -1,0 +1,216 @@
+import { afterAll, beforeAll, describe, test } from "bun:test";
+import { createTsfga, type TsfgaClient } from "@tsfga/core";
+import type { DB } from "@tsfga/kysely";
+import { KyselyTupleStore } from "@tsfga/kysely";
+import type { Kysely } from "kysely";
+import {
+  type CheckOutcome,
+  expectConfigsMatchModel,
+  expectConformance,
+  type FixtureRecord,
+  recordFixture,
+} from "./helpers/conformance.ts";
+import {
+  beginTransaction,
+  destroyDb,
+  getDb,
+  rollbackTransaction,
+} from "./helpers/db.ts";
+import {
+  fgaCreateStore,
+  fgaWriteModel,
+  fgaWriteTuplesRaw,
+} from "./helpers/openfga.ts";
+
+/**
+ * `matches()` is RE2 upstream and a JavaScript `RegExp` here.
+ *
+ * The two regex dialects are not a superset of one another, so the
+ * divergence ran in both directions and in three different
+ * flavours, all reachable from a single condition `s.matches(r)`
+ * whose pattern arrives in the request context:
+ *
+ * - a pattern RE2 compiles and JavaScript rejects — `(?i)`,
+ *   `(?U)`, `(?P<name>…)` — made tsfga refuse a check OpenFGA
+ *   answers `true`. An outage, not a leak.
+ * - a pattern both compile but read differently — `[[:alpha:]]`,
+ *   `\pL`, `\p{L}` (a JS `RegExp` without the `u` flag reads the
+ *   last two as a literal `p`) — made tsfga answer **`false`
+ *   where OpenFGA answers `true`**, silently. Nothing errored; the
+ *   grant simply disappeared.
+ * - a pattern JavaScript compiles and RE2 refuses — a lookahead,
+ *   a backreference — made tsfga **grant** where OpenFGA refuses
+ *   to answer at all. That is the granting direction.
+ *
+ * `conditions.ts` closes all three by translating the pattern
+ * before it reaches a `RegExp`: the inline flags become JavaScript
+ * flags (`(?U)` by inverting every quantifier), `(?P<x>` becomes
+ * `(?<x>`, the POSIX classes and `\pL` become their JavaScript
+ * spellings under the `u` flag, and the constructs RE2 does not
+ * accept are refused rather than run. No RE2 engine is involved:
+ * a native binding would break the Node, Deno and smoke matrix.
+ * So the cells below are conformance assertions, and the names
+ * keep their `GAP-020` prefix only so the issue stays findable.
+ *
+ * A constant pattern is a different matter: OpenFGA compiles the
+ * program while validating the model write, so `s.matches('a(?=b)')`
+ * written as a literal is refused at model-write time. That falls
+ * under the parse-only divergence `packages/core/README.md`
+ * already documents and is not re-litigated here — the cells below
+ * take the pattern from the context precisely so the comparison is
+ * of evaluation, not of validation.
+ */
+
+const uuidMap = new Map<string, string>([
+  ["alice", "00000000-0000-4000-d410-000000000001"],
+  ["doc", "00000000-0000-4000-d410-000000000002"],
+]);
+
+function uuid(name: string): string {
+  const id = uuidMap.get(name);
+  if (!id) throw new Error(`No UUID for ${name}`);
+  return id;
+}
+
+describe("CEL regex dialect conformance", () => {
+  let db: Kysely<DB>;
+  let storeId: string;
+  let modelId: string;
+  let tsfgaClient: TsfgaClient;
+  let fixture: FixtureRecord;
+
+  beforeAll(async () => {
+    db = getDb();
+    await beginTransaction(db);
+
+    tsfgaClient = createTsfga(new KyselyTupleStore(db));
+    fixture = recordFixture(tsfgaClient);
+
+    await tsfgaClient.writeConditionDefinition({
+      name: "re_gate_a2",
+      expression: "s.matches(r)",
+      parameters: { s: "string", r: "string" },
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "doc_a2",
+      relation: "re_match_a2",
+      directlyAssignable: [{ type: "user_a2", condition: "re_gate_a2" }],
+      impliedBy: null,
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.addTuple({
+      objectType: "doc_a2",
+      objectId: uuid("doc"),
+      relation: "re_match_a2",
+      subjectType: "user_a2",
+      subjectId: uuid("alice"),
+      conditionName: "re_gate_a2",
+    });
+
+    storeId = await fgaCreateStore("cel-regex");
+    modelId = await fgaWriteModel(storeId, "./cel-regex/model.dsl");
+    await fgaWriteTuplesRaw(storeId, modelId, [
+      {
+        user: `user_a2:${uuid("alice")}`,
+        relation: "re_match_a2",
+        object: `doc_a2:${uuid("doc")}`,
+        condition: { name: "re_gate_a2" },
+      },
+    ]);
+  });
+
+  afterAll(async () => {
+    await rollbackTransaction(db);
+    await destroyDb();
+  });
+
+  const match = (s: string, r: string, expected: CheckOutcome) =>
+    expectConformance(
+      storeId,
+      modelId,
+      tsfgaClient,
+      {
+        objectType: "doc_a2",
+        objectId: uuid("doc"),
+        relation: "re_match_a2",
+        subjectType: "user_a2",
+        subjectId: uuid("alice"),
+        context: { s, r },
+      },
+      expected,
+    );
+
+  describe("patterns both dialects share", () => {
+    test("an anchored pattern matches", async () => {
+      await match("abc", "^a.c$", true);
+    });
+
+    test("an unanchored pattern is a substring search", async () => {
+      // RE2's `matches` is a partial match, as JavaScript's `.test`
+      // is. The control for the anchoring convention.
+      await match("abc", "b", true);
+    });
+
+    test("a pattern that does not match denies", async () => {
+      await match("abc", "^z", false);
+    });
+
+    test("a word boundary works in both", async () => {
+      await match("a b", "\\ba\\b", true);
+    });
+  });
+
+  describe("GAP-020: RE2 syntax JavaScript cannot compile", () => {
+    test("GAP-020: an inline case-insensitive flag", async () => {
+      await match("ABC", "(?i)abc", true);
+    });
+
+    test("GAP-020: an inline ungreedy flag", async () => {
+      await match("abc", "(?U)a.+", true);
+    });
+
+    test("GAP-020: an RE2-spelled named group", async () => {
+      await match("abc", "(?P<x>a)b", true);
+    });
+  });
+
+  describe("GAP-020: syntax both compile and read differently", () => {
+    test("GAP-020: a POSIX character class", async () => {
+      // The silent half. JavaScript reads `[[:alpha:]]` as a class
+      // of the characters `[:alph`, so `abc` fails to match and
+      // the grant vanishes with no error anywhere.
+      await match("abc", "^[[:alpha:]]+$", true);
+    });
+
+    test("GAP-020: a bare unicode class", async () => {
+      await match("ab", "^\\pL+$", true);
+    });
+
+    test("GAP-020: a braced unicode class", async () => {
+      // A JS `RegExp` without the `u` flag reads `\p{L}` as a
+      // literal `p{L}`.
+      await match("ab", "^\\p{L}+$", true);
+    });
+  });
+
+  describe("GAP-020: syntax RE2 refuses and JavaScript accepts", () => {
+    test("GAP-020: a lookahead", async () => {
+      // The granting direction: OpenFGA declines to answer, tsfga
+      // matches and lets the tuple through.
+      await match("abc", "a(?=b)", "refused");
+    });
+
+    test("GAP-020: a backreference", async () => {
+      await match("aa", "(a)\\1", "refused");
+    });
+  });
+
+  test("the relation configs say what the model says", () => {
+    expectConfigsMatchModel("./cel-regex/model.dsl", fixture, {
+      coverage: "complete",
+    });
+  });
+});

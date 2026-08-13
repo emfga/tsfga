@@ -1,0 +1,102 @@
+# The host organisation
+- user: user_d4x:ann
+  relation: member
+  object: org_d4x:acme
+- user: user_d4x:bea
+  relation: member
+  object: org_d4x:acme
+  condition:
+    name: verified_domain_d4x
+    context:
+      domain: "acme.com"
+- user: user_d4x:ann
+  relation: admin
+  object: org_d4x:acme
+- user: user_d4x:gus
+  relation: guest
+  object: org_d4x:acme
+  condition:
+    name: guest_window_d4x
+    context:
+      expires_at: "2026-06-01T00:00:00Z"
+
+# The partner organisation, with one suspended member
+- user: user_d4x:vic
+  relation: member
+  object: org_d4x:vendor
+- user: user_d4x:wes
+  relation: member
+  object: org_d4x:vendor
+- user: user_d4x:wes
+  relation: suspended
+  object: org_d4x:vendor
+
+# An unrelated organisation
+- user: user_d4x:rob
+  relation: member
+  object: org_d4x:rogue
+
+# The shared channel
+- user: org_d4x:acme
+  relation: owner_org
+  object: channel_d4x:c_general
+- user: org_d4x:vendor
+  relation: shared_org
+  object: channel_d4x:c_general
+- user: org_d4x:acme#member
+  relation: invited
+  object: channel_d4x:c_general
+- user: org_d4x:vendor#active_principal
+  relation: invited
+  object: channel_d4x:c_general
+- user: user_d4x:gus
+  relation: invited
+  object: channel_d4x:c_general
+- user: user_d4x:bea
+  relation: banned
+  object: channel_d4x:c_general
+
+# An internal-only channel that is nonetheless shared
+- user: org_d4x:acme
+  relation: owner_org
+  object: channel_d4x:c_ops
+- user: org_d4x:vendor
+  relation: shared_org
+  object: channel_d4x:c_ops
+- user: org_d4x:acme#member
+  relation: invited
+  object: channel_d4x:c_ops
+- user: org_d4x:vendor#active_principal
+  relation: invited
+  object: channel_d4x:c_ops
+- user: user_d4x:*
+  relation: internal_only
+  object: channel_d4x:c_ops
+
+# A read-only announcements channel
+- user: org_d4x:acme
+  relation: owner_org
+  object: channel_d4x:c_ann
+- user: org_d4x:vendor
+  relation: shared_org
+  object: channel_d4x:c_ann
+- user: org_d4x:acme#member
+  relation: invited
+  object: channel_d4x:c_ann
+- user: user_d4x:*
+  relation: readonly
+  object: channel_d4x:c_ann
+
+# Messages
+- user: channel_d4x:c_general
+  relation: channel
+  object: message_d4x:m1
+- user: user_d4x:ann
+  relation: author
+  object: message_d4x:m1
+- user: channel_d4x:c_general
+  relation: channel
+  object: message_d4x:m2
+- user: user_d4x:vic
+  relation: author
+  object: message_d4x:m2

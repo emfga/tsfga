@@ -1,0 +1,56 @@
+# Every rewrite kind reachable, plus an object in the candidate
+# pool that grants nothing.
+- user: user_a4:alice
+  relation: direct_viewer
+  object: doc_a4:d_direct
+
+- user: user_a4:alice
+  relation: required
+  object: doc_a4:d_direct
+
+- user: user_a4:*
+  relation: public_viewer
+  object: doc_a4:d_public
+
+- user: user_a4:bob
+  relation: member
+  object: group_a4:g1
+
+- user: group_a4:g1#member
+  relation: group_viewer
+  object: doc_a4:d_group
+
+- user: user_a4:alice
+  relation: viewer
+  object: folder_a4:f1
+
+- user: folder_a4:f1
+  relation: parent
+  object: doc_a4:d_folder
+
+# Reached by three separate paths at once.
+- user: user_a4:alice
+  relation: direct_viewer
+  object: doc_a4:d_multi
+
+- user: group_a4:g1#member
+  relation: group_viewer
+  object: doc_a4:d_multi
+
+- user: folder_a4:f1
+  relation: parent
+  object: doc_a4:d_multi
+
+# Granted and then excluded.
+- user: user_a4:alice
+  relation: direct_viewer
+  object: doc_a4:d_blocked
+
+- user: user_a4:alice
+  relation: blocked
+  object: doc_a4:d_blocked
+
+# In the candidate pool, grants nothing anyone asks for.
+- user: user_a4:carol
+  relation: unused
+  object: doc_a4:d_none

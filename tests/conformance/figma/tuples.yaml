@@ -1,0 +1,89 @@
+# Org
+- user: user_a6f:alice
+  relation: admin
+  object: org_a6f:acme
+- user: user_a6f:alice
+  relation: member
+  object: org_a6f:acme
+- user: user_a6f:bob
+  relation: member
+  object: org_a6f:acme
+- user: user_a6f:carol
+  relation: member
+  object: org_a6f:acme
+- user: user_a6f:dave
+  relation: member
+  object: org_a6f:acme
+
+# Team
+- user: org_a6f:acme
+  relation: org
+  object: team_a6f:product
+- user: org_a6f:acme#member
+  relation: member
+  object: team_a6f:product
+
+# Projects
+- user: team_a6f:product
+  relation: team
+  object: project_a6f:web
+- user: team_a6f:product#member
+  relation: editor
+  object: project_a6f:web
+- user: user_a6f:erin
+  relation: viewer
+  object: project_a6f:web
+- user: team_a6f:product
+  relation: team
+  object: project_a6f:mobile
+
+# Files
+- user: project_a6f:web
+  relation: project
+  object: file_a6f:home
+- user: user_a6f:dave
+  relation: owner
+  object: file_a6f:home
+- user: user_a6f:bob
+  relation: publisher
+  object: file_a6f:home
+
+- user: project_a6f:web
+  relation: project
+  object: file_a6f:about
+- user: user_a6f:*
+  relation: locked
+  object: file_a6f:about
+
+# draft lives in an empty project and is reachable only by link
+- user: project_a6f:mobile
+  relation: project
+  object: file_a6f:draft
+- user: user_a6f:*
+  relation: link_viewer
+  object: file_a6f:draft
+  condition:
+    name: link_active_a6f
+    context:
+      link_enabled: true
+- user: user_a6f:*
+  relation: link_editor
+  object: file_a6f:draft
+  condition:
+    name: link_active_a6f
+    context:
+      link_enabled: false
+
+# Branches
+- user: file_a6f:home
+  relation: source_file
+  object: branch_a6f:b1
+- user: user_a6f:carol
+  relation: author
+  object: branch_a6f:b1
+- user: file_a6f:about
+  relation: source_file
+  object: branch_a6f:b2
+- user: user_a6f:carol
+  relation: author
+  object: branch_a6f:b2

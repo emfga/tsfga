@@ -1,0 +1,112 @@
+# Org
+- user: user_c3v:alice
+  relation: owner
+  object: org_c3v:acme
+- user: user_c3v:bob
+  relation: member
+  object: org_c3v:acme
+- user: user_c3v:carol
+  relation: member
+  object: org_c3v:acme
+
+# Teams
+- user: org_c3v:acme
+  relation: org
+  object: team_c3v:platform
+- user: user_c3v:bob
+  relation: member
+  object: team_c3v:platform
+- user: user_c3v:carol
+  relation: member
+  object: team_c3v:platform
+- user: user_c3v:bob
+  relation: maintainer
+  object: team_c3v:platform
+
+# Workspaces
+- user: org_c3v:acme
+  relation: org
+  object: workspace_c3v:dev
+- user: team_c3v:platform#member
+  relation: reader
+  object: workspace_c3v:dev
+- user: user_c3v:dan
+  relation: reader
+  object: workspace_c3v:dev
+  condition:
+    name: ip_allowed_c3v
+- user: user_c3v:erin
+  relation: reader
+  object: workspace_c3v:dev
+  condition:
+    name: ip_allowed_c3v
+    context:
+      ip: "10.0.4.7"
+
+- user: org_c3v:acme
+  relation: org
+  object: workspace_c3v:prod
+- user: team_c3v:platform#member
+  relation: writer
+  object: workspace_c3v:prod
+  condition:
+    name: business_hours_c3v
+- user: team_c3v:platform#maintainer
+  relation: admin
+  object: workspace_c3v:prod
+- user: user_c3v:carol
+  relation: deployer
+  object: workspace_c3v:prod
+  condition:
+    name: env_tagged_c3v
+
+# staging is locked: nobody applies, whatever they may queue
+- user: org_c3v:acme
+  relation: org
+  object: workspace_c3v:staging
+- user: user_c3v:carol
+  relation: writer
+  object: workspace_c3v:staging
+- user: user_c3v:*
+  relation: locked
+  object: workspace_c3v:staging
+
+# Runs
+- user: workspace_c3v:prod
+  relation: workspace
+  object: run_c3v:run1
+- user: user_c3v:carol
+  relation: requester
+  object: run_c3v:run1
+- user: user_c3v:bob
+  relation: approver
+  object: run_c3v:run1
+  condition:
+    name: under_budget_c3v
+    context:
+      budget: 100.0
+
+- user: workspace_c3v:staging
+  relation: workspace
+  object: run_c3v:run2
+- user: user_c3v:carol
+  relation: approver
+  object: run_c3v:run2
+  condition:
+    name: under_budget_c3v
+    context:
+      budget: 100.0
+
+# Secrets
+- user: workspace_c3v:prod
+  relation: workspace
+  object: secret_c3v:db-creds
+- user: user_c3v:carol
+  relation: path_reader
+  object: secret_c3v:db-creds
+  condition:
+    name: path_allowed_c3v
+    context:
+      allowed:
+        - secret/db
+        - secret/cache

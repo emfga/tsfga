@@ -83,6 +83,27 @@ function declareRelations(store: MockTupleStore, ...names: string[]): void {
   }
 }
 
+/**
+ * Define the types a fixture names as subjects, without declaring
+ * the relation the test is about.
+ *
+ * A type is defined by the restrictions that name it, so a fixture
+ * with no relation config at all — or one whose restrictions name
+ * only other types — defines no `user` either, and `check` now
+ * refuses the *subject* before reaching the gate under test. That
+ * ordering is upstream's: `ValidateUser` runs ahead of
+ * `ValidateObject` and `ValidateRelation`
+ * (`internal/validation/validation.go:18-32`). One config on a type
+ * nothing else mentions carries `makeConfig`'s whole restriction
+ * list and puts every subject type back, without adding a relation
+ * to the model under test.
+ */
+function declareSubjectTypes(store: MockTupleStore): void {
+  store.relationConfigs.push(
+    makeConfig({ objectType: "subject_types", relation: "declared" }),
+  );
+}
+
 describe("check algorithm", () => {
   let store: MockTupleStore;
 
@@ -1900,6 +1921,9 @@ describe("check algorithm", () => {
     };
 
     beforeEach(() => {
+      // The model has to define `user` for the test to be about the
+      // relation gate at all — the subject gate is checked first.
+      declareSubjectTypes(store);
       store.tuples.push(
         makeTuple({
           objectType: "doc",
@@ -2287,6 +2311,7 @@ describe("check algorithm", () => {
 
   describe("Contextual tuple validation", () => {
     test("throws when relation config is missing", async () => {
+      declareSubjectTypes(store);
       await expect(
         check(store, {
           objectType: "doc",
@@ -2421,6 +2446,152 @@ describe("check algorithm", () => {
           ],
         }),
       ).rejects.toBeInstanceOf(InvalidSubjectTypeError);
+    });
+  });
+
+  /**
+   * Upstream's `ValidateUser` refuses a `user` whose type the model
+   * does not define, before any resolution runs. tsfga read such a
+   * type as one no row mentions, so every read missed and the
+   * answer was `false` — a misspelled type indistinguishable from a
+   * real denial.
+   */
+  describe("An undefined subject type", () => {
+    beforeEach(() => {
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignable: [{ type: "user" }, { type: "team" }],
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+    });
+
+    test("is refused rather than answered", async () => {
+      await expect(
+        check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "no_such_type",
+          subjectId: "alice",
+        }),
+      ).rejects.toBeInstanceOf(InvalidSubjectTypeError);
+    });
+
+    test("names the cause, and no allow-list", async () => {
+      // `allowed` is empty because the restrictions were never
+      // consulted — the refusal is decided ahead of them.
+      const error = await check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "viewer",
+        subjectType: "no_such_type",
+        subjectId: "alice",
+      }).catch((raised: unknown) => raised);
+      expect(error).toBeInstanceOf(InvalidSubjectTypeError);
+      if (error instanceof InvalidSubjectTypeError) {
+        expect(error.cause).toBe("undefined subject type");
+        expect(error.allowed).toEqual([]);
+      }
+    });
+
+    test("is decided before the subject relation is resolved", async () => {
+      // Upstream reports the type first, and the order is
+      // observable: a userset subject of an undefined type is
+      // refused for its type, not for its relation.
+      const error = await check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "viewer",
+        subjectType: "no_such_type",
+        subjectId: "writers",
+        subjectRelation: "member",
+      }).catch((raised: unknown) => raised);
+      expect(error).toBeInstanceOf(InvalidSubjectTypeError);
+    });
+
+    test("listObjects inherits the same refusal", async () => {
+      await expect(
+        createTsfga(store).listObjects({
+          objectType: "doc",
+          relation: "viewer",
+          subjectType: "no_such_type",
+          subjectId: "alice",
+        }),
+      ).rejects.toBeInstanceOf(InvalidSubjectTypeError);
+    });
+
+    test("a defined type the relation does not admit still answers", async () => {
+      // The boundary the gate must not cross: `team` is defined —
+      // `doc.viewer` names it — and a `team` subject with no row
+      // simply does not hold. Definedness, not admissibility.
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "team",
+          subjectId: "writers",
+        }),
+      ).toBe(false);
+    });
+
+    test("a type with no relations of its own is defined", async () => {
+      // `user` has no relation config anywhere in this fixture. It
+      // is defined by the restriction that admits it, and that is
+      // the half of the rule the whole corpus depends on.
+      expect(store.relationConfigs.some((c) => c.objectType === "user")).toBe(
+        false,
+      );
+      expect(
+        await check(store, {
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      ).toBe(true);
+    });
+
+    test("the store is asked about a type once per call", async () => {
+      // The gate runs per check, and `listObjects` runs one check
+      // per candidate. Without the scope's cache a thousand
+      // candidates would be a thousand identical reads.
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "2",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+        makeTuple({
+          objectType: "doc",
+          objectId: "3",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+      );
+      store.resetCounts();
+      await createTsfga(store).listObjects({
+        objectType: "doc",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+      });
+      expect(store.counts.hasTypeDefinition).toBe(1);
     });
   });
 
@@ -2999,5 +3170,502 @@ describe("createTsfga client", () => {
       const deep = createTsfga(store, { maxDepth: 2 });
       expect(await deep.check(request)).toBe(true);
     });
+  });
+});
+
+/**
+ * The model-shape prune (`type-graph.ts`). Upstream refuses a node
+ * whose `objectType#relation` the subject's type cannot reach, at
+ * every node, before the rewrite is resolved. These fix the shape
+ * of that answer rather than only its boolean: a prune is a
+ * *definitive* denial, and the difference between a definitive
+ * `false` and a cycle-truncated one is visible one level up.
+ */
+describe("reachability prune", () => {
+  /** `bot` is the only entrypoint, so no `user` ever reaches it. */
+  function seedUnreachable(store: MockTupleStore): MockTupleStore {
+    store.relationConfigs.push(
+      makeConfig({
+        objectType: "ring",
+        relation: "member",
+        directlyAssignable: [
+          { type: "bot" },
+          { type: "ring", relation: "member" },
+        ],
+      }),
+      makeConfig({
+        objectType: "doc",
+        relation: "via_ring",
+        directlyAssignable: [{ type: "ring", relation: "member" }],
+      }),
+      makeConfig({
+        objectType: "doc",
+        relation: "granted",
+        directlyAssignable: [{ type: "user" }],
+      }),
+      makeConfig({
+        objectType: "doc",
+        relation: "ring_excluded",
+        directlyAssignable: [],
+        computedUserset: "granted",
+        excludedBy: "via_ring",
+      }),
+    );
+    store.tuples.push(
+      makeTuple({
+        objectType: "ring",
+        objectId: "r1",
+        relation: "member",
+        subjectType: "ring",
+        subjectId: "r2",
+        subjectRelation: "member",
+      }),
+      makeTuple({
+        objectType: "doc",
+        objectId: "1",
+        relation: "via_ring",
+        subjectType: "ring",
+        subjectId: "r1",
+        subjectRelation: "member",
+      }),
+      makeTuple({
+        objectType: "doc",
+        objectId: "1",
+        relation: "granted",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    );
+    return store;
+  }
+
+  const alice = { subjectType: "user", subjectId: "alice" };
+
+  test("a subtree the subject's type cannot reach denies", async () => {
+    const store = seedUnreachable(new MockTupleStore());
+    expect(
+      await check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "via_ring",
+        ...alice,
+      }),
+    ).toBe(false);
+  });
+
+  test("the prune reads no tuples for the node it denies", async () => {
+    const store = seedUnreachable(new MockTupleStore());
+    store.resetCounts();
+    await check(store, {
+      objectType: "doc",
+      objectId: "1",
+      relation: "via_ring",
+      ...alice,
+    });
+    expect(store.counts.findCheckTuples ?? 0).toBe(0);
+  });
+
+  // The whole reason the prune returns the unflagged `DENIED`: on
+  // the subtract side of an exclusion a cycle-truncated `false`
+  // *denies*, so a prune that reported a cycle would leave this
+  // case answering `false` where OpenFGA answers `true`.
+  test("a pruned subtrahend does not deny the exclusion", async () => {
+    const store = seedUnreachable(new MockTupleStore());
+    expect(
+      await check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "ring_excluded",
+        ...alice,
+      }),
+    ).toBe(true);
+  });
+
+  test("a typed wildcard keeps a subject reachable", async () => {
+    const store = new MockTupleStore();
+    store.relationConfigs.push(
+      makeConfig({
+        objectType: "doc",
+        relation: "public",
+        directlyAssignable: [{ type: "user", wildcard: true }],
+      }),
+    );
+    store.tuples.push(
+      makeTuple({
+        objectType: "doc",
+        objectId: "1",
+        relation: "public",
+        subjectType: "user",
+        subjectId: "*",
+      }),
+    );
+    expect(
+      await check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "public",
+        ...alice,
+      }),
+    ).toBe(true);
+  });
+
+  test("a relation with no config is still refused, not pruned", async () => {
+    const store = seedUnreachable(new MockTupleStore());
+    await expect(
+      check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "undefined_here",
+        ...alice,
+      }),
+    ).rejects.toBeInstanceOf(RelationConfigNotFoundError);
+  });
+
+  // A rewrite naming a relation the model does not define leaves
+  // the walk unable to settle the question. It must then prune
+  // nothing, so the node's own resolution raises as it always did.
+  test("an unresolvable rewrite leaves the answer open", async () => {
+    const store = new MockTupleStore();
+    // `viewer` admits only `bot`, so nothing else here defines the
+    // subject's type and the refusal under test would be preempted
+    // by the subject gate.
+    declareSubjectTypes(store);
+    store.relationConfigs.push(
+      makeConfig({
+        objectType: "doc",
+        relation: "viewer",
+        directlyAssignable: [{ type: "bot" }],
+        impliedBy: ["missing"],
+      }),
+    );
+    await expect(
+      check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "viewer",
+        ...alice,
+      }),
+    ).rejects.toBeInstanceOf(RelationConfigNotFoundError);
+  });
+
+  // A TTU reaches whoever holds the computed relation on a type the
+  // tupleset admits — and only those. `folder#viewer` admits users;
+  // `org` does not define `viewer` at all, so it contributes no
+  // edge and no refusal.
+  test("a tuple-to-userset carries reachability through", async () => {
+    const store = new MockTupleStore();
+    store.relationConfigs.push(
+      makeConfig({
+        objectType: "doc",
+        relation: "parent",
+        directlyAssignable: [{ type: "folder" }, { type: "org" }],
+      }),
+      makeConfig({
+        objectType: "doc",
+        relation: "viewer",
+        directlyAssignable: [],
+        tupleToUserset: [{ tupleset: "parent", computedUserset: "viewer" }],
+      }),
+      makeConfig({
+        objectType: "folder",
+        relation: "viewer",
+        directlyAssignable: [{ type: "user" }],
+      }),
+      // `robot` is checked below as a subject the walk prunes. It
+      // has to be a type the model *defines* for that to be what
+      // the second assertion measures: an undefined one is refused
+      // instead, one gate earlier.
+      makeConfig({
+        objectType: "shed",
+        relation: "keeps",
+        directlyAssignable: [{ type: "robot" }],
+      }),
+    );
+    store.tuples.push(
+      makeTuple({
+        objectType: "doc",
+        objectId: "1",
+        relation: "parent",
+        subjectType: "folder",
+        subjectId: "f1",
+      }),
+      makeTuple({
+        objectType: "folder",
+        objectId: "f1",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    );
+    expect(
+      await check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "viewer",
+        ...alice,
+      }),
+    ).toBe(true);
+    expect(
+      await check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "viewer",
+        subjectType: "robot",
+        subjectId: "r2d2",
+      }),
+    ).toBe(false);
+  });
+});
+
+/**
+ * Each `tupleToUserset` entry is its own union branch, as upstream
+ * makes each `checkTTU` its own child of the union. One arm whose
+ * tupleset row cannot be evaluated must not sink an arm beside it
+ * that grants.
+ */
+describe("tuple-to-userset arms are independent", () => {
+  function seedArms(): MockTupleStore {
+    const store = new MockTupleStore();
+    store.conditionDefinitions.push({
+      name: "valid_ip",
+      expression: 'user_ip == "192.168.0.1"',
+      parameters: { user_ip: "string" },
+    });
+    store.relationConfigs.push(
+      makeConfig({
+        objectType: "doc",
+        relation: "parent",
+        directlyAssignable: [{ type: "folder", condition: "valid_ip" }],
+      }),
+      makeConfig({
+        objectType: "doc",
+        relation: "owner",
+        directlyAssignable: [{ type: "org" }],
+      }),
+      makeConfig({
+        objectType: "doc",
+        relation: "two_arms",
+        directlyAssignable: [],
+        tupleToUserset: [
+          { tupleset: "parent", computedUserset: "viewer" },
+          { tupleset: "owner", computedUserset: "viewer" },
+        ],
+      }),
+      makeConfig({
+        objectType: "folder",
+        relation: "viewer",
+        directlyAssignable: [{ type: "user" }],
+      }),
+      makeConfig({
+        objectType: "org",
+        relation: "viewer",
+        directlyAssignable: [{ type: "user" }],
+      }),
+    );
+    store.tuples.push(
+      // The broken arm: a condition with no stored context, which a
+      // context-free check cannot evaluate.
+      makeTuple({
+        objectType: "doc",
+        objectId: "1",
+        relation: "parent",
+        subjectType: "folder",
+        subjectId: "f1",
+        conditionName: "valid_ip",
+      }),
+      makeTuple({
+        objectType: "doc",
+        objectId: "1",
+        relation: "owner",
+        subjectType: "org",
+        subjectId: "o1",
+      }),
+    );
+    return store;
+  }
+
+  test("a broken arm does not sink the arm beside it", async () => {
+    const store = seedArms();
+    store.tuples.push(
+      makeTuple({
+        objectType: "org",
+        objectId: "o1",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    );
+    expect(
+      await check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "two_arms",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    ).toBe(true);
+  });
+
+  // The swallow rule is unchanged: an arm's error is discarded only
+  // because something else granted. With nothing granting, it is
+  // still the answer.
+  test("a broken arm still raises when nothing grants", async () => {
+    const store = seedArms();
+    await expect(
+      check(store, {
+        objectType: "doc",
+        objectId: "1",
+        relation: "two_arms",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    ).rejects.toBeInstanceOf(Error);
+  });
+});
+
+/**
+ * A tuple-to-userset dispatch lands on the object the tupleset row
+ * names, so that row has to *name an object*. A userset row would
+ * have its subject relation discarded and the dispatch would land
+ * on a different relation of the linked object; a wildcard row
+ * names no object at all and the dispatch would ask for object id
+ * `"*"`.
+ *
+ * `config-validation.ts` refuses both shapes at model write —
+ * `tupleset relation admits a userset` and `tupleset relation
+ * admits a wildcard` — but only against the tupleset config that
+ * exists *at the time the TTU is written*. Widening the tupleset
+ * afterwards is not revalidated, which is the documented
+ * write-order gap and the write order both tests below use. The
+ * clamp in `resolveTupleset` is what makes that gap harmless, the
+ * same call `clampToQuery` makes for `findCheckTuples`.
+ */
+describe("a tupleset row must name a concrete object", () => {
+  test("a tupleset row naming a userset does not dispatch", async () => {
+    const store = new MockTupleStore();
+    const client = createTsfga(store);
+    await client.writeRelationConfig(
+      makeConfig({
+        objectType: "folder",
+        relation: "member",
+        directlyAssignable: [{ type: "user" }],
+      }),
+    );
+    await client.writeRelationConfig(
+      makeConfig({
+        objectType: "folder",
+        relation: "viewer",
+        directlyAssignable: [{ type: "user" }],
+      }),
+    );
+    await client.writeRelationConfig(
+      makeConfig({
+        objectType: "doc",
+        relation: "viewer",
+        directlyAssignable: [{ type: "user" }],
+        tupleToUserset: [{ tupleset: "parent", computedUserset: "viewer" }],
+      }),
+    );
+    // Written *after* the TTU, so the "tupleset relation admits a
+    // userset" rule never sees it.
+    await client.writeRelationConfig(
+      makeConfig({
+        objectType: "doc",
+        relation: "parent",
+        directlyAssignable: [{ type: "folder", relation: "member" }],
+      }),
+    );
+    await client.addTuple({
+      objectType: "doc",
+      objectId: "d1",
+      relation: "parent",
+      subjectType: "folder",
+      subjectId: "f1",
+      subjectRelation: "member",
+    });
+    // Alice is a viewer of the folder and deliberately not a
+    // member, so a `true` here is the discarded `#member`.
+    await client.addTuple({
+      objectType: "folder",
+      objectId: "f1",
+      relation: "viewer",
+      subjectType: "user",
+      subjectId: "alice",
+    });
+
+    expect(
+      await client.check({
+        objectType: "doc",
+        objectId: "d1",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    ).toBe(false);
+  });
+
+  test("a tupleset row naming a wildcard does not dispatch", async () => {
+    const store = new MockTupleStore();
+    const client = createTsfga(store);
+    await client.writeRelationConfig(
+      makeConfig({
+        objectType: "folder",
+        relation: "viewer",
+        directlyAssignable: [{ type: "user" }],
+      }),
+    );
+    await client.writeRelationConfig(
+      makeConfig({
+        objectType: "doc",
+        relation: "viewer",
+        directlyAssignable: [{ type: "user" }],
+        tupleToUserset: [{ tupleset: "parent", computedUserset: "viewer" }],
+      }),
+    );
+    await client.writeRelationConfig(
+      makeConfig({
+        objectType: "doc",
+        relation: "parent",
+        directlyAssignable: [{ type: "folder" }],
+      }),
+    );
+    // The widening, again after the TTU was written.
+    await client.writeRelationConfig(
+      makeConfig({
+        objectType: "doc",
+        relation: "parent",
+        directlyAssignable: [
+          { type: "folder" },
+          { type: "folder", wildcard: true },
+        ],
+      }),
+    );
+    await client.addTuple({
+      objectType: "doc",
+      objectId: "d1",
+      relation: "parent",
+      subjectType: "folder",
+      subjectId: "*",
+    });
+
+    store.resetCounts();
+    expect(
+      await client.check({
+        objectType: "doc",
+        objectId: "d1",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    ).toBe(false);
+
+    // The answer is `false` on an opaque store either way; what
+    // makes this a bug is the node the dispatch asks for. A store
+    // holding its ids in a `uuid` column answers that read with a
+    // driver error rather than a row.
+    const dispatched = store.calls
+      .filter((call) => call.method === "findCheckTuples")
+      .map((call) => call.args[1]);
+    expect(dispatched).not.toContain("*");
   });
 });

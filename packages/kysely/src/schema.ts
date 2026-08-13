@@ -52,9 +52,10 @@ export interface TsfgaTuples {
   object_id: string;
   object_type: string;
   relation: string;
-  subject_id: string;
+  subject_id: string | null;
   subject_relation: string | null;
   subject_type: string;
+  subject_wildcard: boolean;
   updated_at: Timestamp;
 }
 

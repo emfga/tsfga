@@ -1,0 +1,401 @@
+import { afterAll, beforeAll, describe, test } from "bun:test";
+import { createTsfga, type TsfgaClient } from "@tsfga/core";
+import type { DB } from "@tsfga/kysely";
+import { KyselyTupleStore } from "@tsfga/kysely";
+import type { Kysely } from "kysely";
+import {
+  type CheckOutcome,
+  expectConfigsMatchModel,
+  expectConformance,
+  expectPinnedDivergence,
+  type FixtureRecord,
+  recordFixture,
+} from "./helpers/conformance.ts";
+import {
+  beginTransaction,
+  destroyDb,
+  getDb,
+  rollbackTransaction,
+} from "./helpers/db.ts";
+import {
+  fgaCreateStore,
+  fgaWriteModel,
+  fgaWriteTuplesRaw,
+} from "./helpers/openfga.ts";
+
+/**
+ * The RE2 syntax surface, swept against the translator round 2
+ * built.
+ *
+ * `cel-regex.test.ts` established the shape: one condition
+ * `s.matches(p)` whose subject *and* pattern both arrive in the
+ * request context, so one model covers every cell and each pattern
+ * is compiled at check time by both engines rather than folded at
+ * model-write time.
+ *
+ * The translator's job is to rewrite an RE2 pattern as the nearest
+ * JavaScript one, or refuse. Round 2 verified the constructs it
+ * *handles* — POSIX classes, `\pL`, the leading inline flags, the
+ * RE2-spelled named group, lookahead and backreference refusals.
+ * What it never swept is the rest of RE2, and the rest of RE2
+ * divides into three families, each with its own failure mode:
+ *
+ * - constructs the translator passes through untouched that
+ *   JavaScript compiles and reads *differently* — the silent half,
+ *   and the worst of the three;
+ * - constructs RE2 accepts that the translator refuses — an
+ *   outage, loud but wrong;
+ * - constructs RE2 refuses that the translator compiles — the
+ *   granting half, where tsfga answers a check upstream declines.
+ */
+
+const uuidMap = new Map<string, string>([
+  ["alice", "00000000-0000-4000-d510-000000000001"],
+  ["doc", "00000000-0000-4000-d510-000000000002"],
+]);
+
+function uuid(name: string): string {
+  const id = uuidMap.get(name);
+  if (!id) throw new Error(`No UUID for ${name}`);
+  return id;
+}
+
+describe("CEL RE2 dialect conformance", () => {
+  let db: Kysely<DB>;
+  let storeId: string;
+  let modelId: string;
+  let tsfgaClient: TsfgaClient;
+  let fixture: FixtureRecord;
+
+  beforeAll(async () => {
+    db = getDb();
+    await beginTransaction(db);
+
+    tsfgaClient = createTsfga(new KyselyTupleStore(db));
+    fixture = recordFixture(tsfgaClient);
+
+    await tsfgaClient.writeConditionDefinition({
+      name: "re_gate_c5",
+      expression: "s.matches(p)",
+      parameters: { s: "string", p: "string" },
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "doc_c5",
+      relation: "re_c5",
+      directlyAssignable: [{ type: "user_c5", condition: "re_gate_c5" }],
+      impliedBy: null,
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.addTuple({
+      objectType: "doc_c5",
+      objectId: uuid("doc"),
+      relation: "re_c5",
+      subjectType: "user_c5",
+      subjectId: uuid("alice"),
+      conditionName: "re_gate_c5",
+    });
+
+    storeId = await fgaCreateStore("cel-re2");
+    modelId = await fgaWriteModel(storeId, "./cel-re2/model.dsl");
+    await fgaWriteTuplesRaw(storeId, modelId, [
+      {
+        user: `user_c5:${uuid("alice")}`,
+        relation: "re_c5",
+        object: `doc_c5:${uuid("doc")}`,
+        condition: { name: "re_gate_c5" },
+      },
+    ]);
+  });
+
+  afterAll(async () => {
+    await rollbackTransaction(db);
+    await destroyDb();
+  });
+
+  const match = (s: string, p: string, expected: CheckOutcome) =>
+    expectConformance(
+      storeId,
+      modelId,
+      tsfgaClient,
+      {
+        objectType: "doc_c5",
+        objectId: uuid("doc"),
+        relation: "re_c5",
+        subjectType: "user_c5",
+        subjectId: uuid("alice"),
+        context: { s, p },
+      },
+      expected,
+    );
+
+  /** `match`, for the cells the two engines answer differently. */
+  const matchPinned = (
+    s: string,
+    p: string,
+    expected: { openfga: CheckOutcome; tsfga: CheckOutcome },
+  ) =>
+    expectPinnedDivergence(
+      storeId,
+      modelId,
+      tsfgaClient,
+      {
+        objectType: "doc_c5",
+        objectId: uuid("doc"),
+        relation: "re_c5",
+        subjectType: "user_c5",
+        subjectId: uuid("alice"),
+        context: { s, p },
+      },
+      expected,
+    );
+
+  /**
+   * The controls. Every family below has a neighbour here that
+   * must keep agreeing, so a fix that made the whole translator
+   * refuse would not pass this file.
+   */
+  describe("what the translator already gets right", () => {
+    test("an anchored pattern", async () => {
+      await match("abc", "^a.c$", true);
+    });
+
+    test("a POSIX class", async () => {
+      await match("ab", "[[:alpha:]]+", true);
+    });
+
+    test("a negated POSIX class over the whole code point space", async () => {
+      await match("é", "[[:^alpha:]]", true);
+    });
+
+    test("two POSIX classes in one bracket expression", async () => {
+      await match("a1", "[[:alpha:][:digit:]]+", true);
+    });
+
+    test("a bare unicode class", async () => {
+      await match("é", "\\pL", true);
+    });
+
+    test("a braced unicode class inside a bracket expression", async () => {
+      await match("a", "[\\p{L}]", true);
+    });
+
+    test("a leading case-insensitive flag", async () => {
+      await match("ABC", "(?i)abc", true);
+    });
+
+    test("two leading flag groups", async () => {
+      await match("abc", "(?i)(?s)abc", true);
+    });
+
+    test("the ungreedy flag", async () => {
+      await match("aaa", "(?U)a+", true);
+    });
+
+    test("an RE2-spelled named group", async () => {
+      await match("a", "(?P<n>a)", true);
+    });
+
+    test("a Go-1.22-spelled named group", async () => {
+      await match("a", "(?<n>a)", true);
+    });
+
+    test("an escaped ] leading a bracket expression", async () => {
+      await match("]", "[]]", true);
+    });
+
+    test("a repetition, exact and open", async () => {
+      await match("aaa", "a{3}", true);
+      await match("aaa", "a{2,}", true);
+    });
+
+    test("a repetition at RE2's ceiling", async () => {
+      // `maxRepeat` is inclusive: `parse.go` refuses `min > 1000`,
+      // so this is a valid pattern and both engines answer. It
+      // used to sit in the GAP-385 block below, asserting a
+      // refusal it got for another reason entirely — the subject
+      // was a thousand characters long, and it was the CEL
+      // evaluation cost limit that refused, not the bound (issue
+      // 400). A short subject asks the question the cell means to.
+      await match("a", "a{1000}", false);
+    });
+
+    test("`{,2}` is a literal in RE2, not a repetition", async () => {
+      await match("a{2}", "a{,2}", false);
+    });
+
+    test("the empty pattern matches everything", async () => {
+      await match("a", "", true);
+    });
+
+    test("an empty group and an empty non-capturing group", async () => {
+      await match("a", "()", true);
+      await match("a", "(?:)", true);
+    });
+
+    test("an empty alternation branch", async () => {
+      await match("", "a|", true);
+    });
+
+    test("both refuse an unknown POSIX class", async () => {
+      await match("a", "[[:bogus:]]", "refused");
+    });
+
+    test("both refuse an empty bracket expression", async () => {
+      await match("a", "[]", "refused");
+    });
+
+    test("both refuse a lookahead and a backreference", async () => {
+      await match("ab", "(?=a)ab", "refused");
+      await match("ab", "(a)\\1", "refused");
+    });
+
+    test("both refuse an unbalanced paren, either way", async () => {
+      await match("a", "(", "refused");
+      await match("a", ")", "refused");
+    });
+
+    test("both refuse a doubled quantifier", async () => {
+      await match("aa", "a**", "refused");
+    });
+  });
+
+  /**
+   * The silent family, and the reason this sweep was worth doing.
+   *
+   * Each construct below is one RE2 spells and JavaScript *also*
+   * compiles, with a different meaning. `translateRe2Pattern`
+   * copies them through verbatim — none is in `takeEscape`'s
+   * handled set, so the `\A` of `\Aabc` reaches `new RegExp` and
+   * means "the literal letter A" (the `u` flag rejects it, and the
+   * `needsUnicode` fallback then recompiles without `u`, where
+   * Annex B web-compatibility reads it as a literal).
+   *
+   * There is no error on either side. A grant appears or vanishes
+   * and nothing says so, which is exactly the failure mode issue
+   * 020 was filed to remove for the POSIX classes.
+   */
+  describe("GAP-383: RE2 syntax JavaScript reads as a literal", () => {
+    test("GAP-383: \\A anchors the start of the text", async () => {
+      await match("abc", "\\Aabc", true);
+    });
+
+    test("GAP-383: \\A is not the letter A", async () => {
+      await match("Aabc", "\\Aabc", false);
+    });
+
+    test("GAP-383: \\z anchors the end of the text", async () => {
+      await match("abc", "abc\\z", true);
+    });
+
+    test("GAP-383: \\z is not the letter z", async () => {
+      await match("abcz", "abc\\z", false);
+    });
+
+    test("GAP-383: \\Q…\\E quotes its contents literally", async () => {
+      await match("a.c", "\\Qa.c\\E", true);
+    });
+
+    test("GAP-383: \\x{…} is a wide hex escape", async () => {
+      await match("\u{1F600}", "\\x{1F600}", true);
+    });
+  });
+
+  /**
+   * The outage family: RE2 compiles the pattern and answers, and
+   * the translator refuses it.
+   *
+   * `(?i:…)` and a mid-pattern `(?i)` were both seen in round 2
+   * and deliberately left — the refusal is loud and
+   * runtime-independent. They are asserted here rather than
+   * re-argued, so the decision is visible in the suite. The other
+   * four are not deliberate: an octal escape, a script name, a
+   * negated brace class and a duplicate group name are all RE2 the
+   * translator never considered.
+   */
+  describe("GAP-384: RE2 syntax the translator refuses", () => {
+    test("GAP-384: an octal escape", async () => {
+      await match("A", "\\101", true);
+    });
+
+    test("GAP-384: a unicode script name", async () => {
+      await match("α", "\\p{Greek}", true);
+    });
+
+    test("GAP-384: a negation inside a unicode class", async () => {
+      await match("a", "\\p{^L}", false);
+    });
+
+    // The three inline-flag forms are pinned rather than fixed:
+    // they have no portable JavaScript spelling before V8 12.5's
+    // modifier groups, and the translator refuses by default, so
+    // the divergence is **fail-closed** — tsfga refuses a pattern
+    // upstream compiles and answers. A leading `(?i)` translates
+    // to the `i` flag and still agrees; it is the control two
+    // families up.
+
+    test("GAP-384: a case-insensitive flag mid-pattern", async () => {
+      await matchPinned("aBC", "a(?i)bc", {
+        openfga: true,
+        tsfga: "refused",
+      });
+    });
+
+    test("GAP-384: a scoped case-insensitive group", async () => {
+      await matchPinned("ABC", "(?i:abc)", {
+        openfga: true,
+        tsfga: "refused",
+      });
+    });
+
+    test("GAP-384: a flag-removal group", async () => {
+      await matchPinned("abc", "(?-i)abc", {
+        openfga: true,
+        tsfga: "refused",
+      });
+    });
+
+    test("GAP-384: a duplicate group name", async () => {
+      await match("a", "(?P<n>a)(?P<n>a)", false);
+    });
+  });
+
+  /**
+   * The granting family: RE2 refuses the pattern, and the
+   * translator compiles it and answers.
+   *
+   * This is the direction issue 020 closed for lookahead and
+   * backreference, and these three slipped through it. A range
+   * whose endpoint is a class and `\b` inside a bracket expression
+   * are both errors in `regexp/syntax`; JavaScript's Annex B
+   * fallback accepts the first and reads the second as a
+   * backspace. RE2's repetition ceiling is 1000 and is inclusive,
+   * so `a{1001}` is the first count it refuses — the cell for
+   * `a{1000}` itself is an agreement cell above.
+   */
+  describe("GAP-385: patterns RE2 refuses and the translator takes", () => {
+    test("GAP-385: a range whose endpoint is a class", async () => {
+      await match("a", "[a-\\w]", "refused");
+    });
+
+    test("GAP-385: \\b inside a bracket expression", async () => {
+      await match("a", "[\\b]", "refused");
+    });
+
+    test("GAP-385: a repetition past RE2's ceiling", async () => {
+      await match("a".repeat(1001), "a{1001}", "refused");
+    });
+
+    test("GAP-385: \\C, RE2's any-byte escape", async () => {
+      await match("a", "\\C", "refused");
+    });
+  });
+
+  test("the relation configs say what the model says", () => {
+    expectConfigsMatchModel("./cel-re2/model.dsl", fixture, {
+      coverage: "complete",
+    });
+  });
+});

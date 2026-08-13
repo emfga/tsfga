@@ -5,6 +5,119 @@ Notable changes to `@tsfga/kysely`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
+## Unreleased
+
+### Changed
+
+- **BREAKING: ids must be canonical lower-case hyphenated UUIDs.**
+  `KyselyTupleStore` declares `CANONICAL_UUID_IDS` as its
+  `TupleStore.idDomain`, and core refuses anything else with
+  `IdDomainError` before any query — on `check`, `checkMany`,
+  `listObjects`, `listSubjects`, `addTuple`, `removeTuple` and
+  contextual tuples. Requires `@tsfga/core` with `IdDomain`
+  exported.
+
+  **`user:alice` is an ordinary subject in OpenFGA and this store
+  refuses it, permanently.** So are `user:café` and a
+  300-character id. It is a declared design limit, not a bug
+  awaiting a fix, and it is stated at the top of the README.
+
+  The domain is narrower than the `uuid` column's own input
+  grammar, which accepts a UUID uppercased, hyphenless, braced or
+  oddly hyphenated and folds all of them onto one value while
+  OpenFGA holds them apart. Admitting more than the canonical
+  spelling would let a grant written for one answer `true` for
+  another — the one granting-direction hole this could have had,
+  and the reason `identifiers`' three id-spelling rows now record
+  a refusal instead of a wrong `true`.
+
+  Nothing about the version or variant digits is checked; the nil
+  UUID is an ordinary id.
+
+  If your ids are not UUIDs, this adapter is not the one to use.
+  `@tsfga/core` is database-agnostic and a store declaring
+  `OPAQUE_IDS` has none of these restrictions.
+
+- **`KyselyTupleStore.insertTuple` and `upsertRelationConfig` take
+  the branded `GatedTuple` and `GatedRelationConfig`.** Type-level
+  only — nothing changes at runtime — and it is what stops a
+  seeding or backfill script holding the exported store from
+  writing a row `addTuple` refuses. Requires `@tsfga/core` with
+  those types exported.
+
+- **BREAKING: `KyselyTupleStore.insertTuple` no longer updates an
+  existing row.** It returns `true` when a row was inserted and
+  `false` when the natural key already existed, leaving the stored
+  condition and context alone — core's `addTuple` turns the
+  `false` into `DuplicateTupleError`. The conflict clause is
+  `doNothing()` where it was `doUpdateSet(...)`.
+
+- **BREAKING: migration `006-wildcard-subject`, and the removal of
+  two pre-release migrations.** `006-subject-id-text` and
+  `007-object-id-text` are **deleted**, not superseded, so
+  `object_id` and `subject_id` are `uuid` columns as `001` created
+  them. The new `006` adds
+  `tsfga.tuples.subject_wildcard boolean`, makes `subject_id`
+  nullable, and recreates `idx_tuples_unique` with
+  `NULLS NOT DISTINCT`. It contains no type change at all — there
+  is nothing to narrow, because the chain a database runs is
+  `001`…`005` and then this.
+
+  **This fixes a grant to everybody.** `subject_id` is a `uuid`
+  column and `"*"` is not a UUID, so the adapter stored the typed
+  wildcard as the nil UUID. A tuple written for a real subject
+  whose ID was `00000000-0000-0000-0000-000000000000` landed in
+  the wildcard's slot: it read back as `"*"`, granted every
+  subject of its type on any relation admitting `type:*`, and
+  stopped matching the subject it was written for. The shape now
+  lives in a column of its own, so **no id value is reserved** and
+  the class of bug has nowhere left to live — where widening the
+  column to `text` only removed the instance, and did so by making
+  every id a `text` comparison.
+
+  **PostgreSQL 15 or later.** `NULLS NOT DISTINCT` is what makes a
+  second wildcard row on one key a duplicate while leaving a real
+  nil-UUID subject free beside it. The floor is claimed by feature
+  inspection, not by a CI matrix — CI runs PostgreSQL 18, and the
+  README says which it is. The `COALESCE(subject_id::text, '*')`
+  expression index is the documented fallback if the floor is
+  unacceptable; it costs 25 MB against 18 MB at 242 000 rows.
+
+  **Rolling `006` back refuses rather than merging.** A real
+  subject holding the nil UUID is legal here and *is* the wildcard
+  under `005`; folding the two would grant a relation to every
+  subject of the type on the strength of a row written for one.
+  `down` counts those rows and names them.
+
+  **A database that ran the deleted `006`/`007` cannot reach this
+  one.** Kysely's migrator throws `corrupted migrations: previously
+  executed migration … is missing` and `db:latest` fails before
+  anything else runs — re-provision it. No published
+  `@tsfga/kysely` carried either: 0.5.0 stops at `005`.
+
+- **The peer range on `@tsfga/core` must be raised to a floor
+  before this ships.** Core's next release changes `TupleStore`
+  twice over — `insertTuple` is insert-and-report rather than
+  upsert, and the interface gains a required `idDomain` — so per
+  the cross-package rules this is the floor case, not the ceiling
+  one: the floor moves to the core release that carries them, and
+  this package takes a **minor**. At the cut that is
+  `>=0.7.0 <0.8.0`, hand-written, never a caret or a tilde. The
+  range is left at `>=0.6.0 <0.7.0` in the repo because it cannot
+  name a core version that does not exist yet; it moves in the
+  release PR, together with the installation section of the
+  README.
+
+### Documentation
+
+- The reachability prune core added is accounted for in the
+  pool-sizing section: it reads relation configs the resolution
+  would not have asked for — 11 to 192 distinct configs per scope
+  on a 225-relation model, about +18 % wall clock on a one-shot
+  check — through the same request-scoped cache, and serialized
+  within a scope, so it lengthens the read sequence without
+  widening it.
+
 ## 0.5.0 — 2026-08
 
 ### Changed

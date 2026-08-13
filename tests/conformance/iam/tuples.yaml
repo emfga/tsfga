@@ -1,0 +1,64 @@
+# Nested groups: leads is a member-set of devs
+- user: user_a6i:bob
+  relation: member
+  object: group_a6i:devs
+- user: group_a6i:leads#member
+  relation: member
+  object: group_a6i:devs
+- user: user_a6i:carol
+  relation: member
+  object: group_a6i:leads
+- user: user_a6i:dave
+  relation: member
+  object: group_a6i:leads
+
+# Policies
+- user: user_a6i:*
+  relation: allowed_principal
+  object: policy_a6i:p_read
+- user: group_a6i:devs#member
+  relation: allowed_principal
+  object: policy_a6i:p_admin
+- user: user_a6i:carol
+  relation: denied_principal
+  object: policy_a6i:p_deny_ext
+# A service control policy denying every principal outside the VPC
+- user: user_a6i:*
+  relation: denied_principal
+  object: policy_a6i:p_scp_vpc
+  condition:
+    name: outside_vpc_a6i
+
+# Accounts
+- user: user_a6i:alice
+  relation: root_user
+  object: account_a6i:prod
+- user: policy_a6i:p_admin
+  relation: attached_policy
+  object: account_a6i:prod
+- user: policy_a6i:p_scp_vpc
+  relation: scp
+  object: account_a6i:prod
+
+- user: user_a6i:erin
+  relation: root_user
+  object: account_a6i:dev
+- user: policy_a6i:p_read
+  relation: attached_policy
+  object: account_a6i:dev
+
+# Resources
+- user: account_a6i:prod
+  relation: account
+  object: resource_a6i:bucket
+- user: policy_a6i:p_deny_ext
+  relation: resource_policy
+  object: resource_a6i:bucket
+
+- user: account_a6i:prod
+  relation: account
+  object: resource_a6i:queue
+
+- user: account_a6i:dev
+  relation: account
+  object: resource_a6i:table

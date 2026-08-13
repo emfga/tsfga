@@ -1,0 +1,49 @@
+# A three-level folder chain: f3 -> f2 -> f1
+- user: folder_a7r:f1
+  relation: parent
+  object: folder_a7r:f2
+- user: folder_a7r:f2
+  relation: parent
+  object: folder_a7r:f3
+- user: user_a7r:alice
+  relation: viewer
+  object: folder_a7r:f1
+- user: user_a7r:bob
+  relation: viewer
+  object: folder_a7r:f1
+- user: user_a7r:alice
+  relation: blocked
+  object: folder_a7r:f2
+
+# A two-folder cycle, granting into it from outside the loop
+- user: folder_a7r:fc2
+  relation: parent
+  object: folder_a7r:fc1
+- user: folder_a7r:fc1
+  relation: parent
+  object: folder_a7r:fc2
+- user: user_a7r:alice
+  relation: viewer
+  object: folder_a7r:fc1
+
+# A three-level team chain, for the mutually recursive pair
+- user: team_a7r:t1
+  relation: parent
+  object: team_a7r:t2
+- user: team_a7r:t2
+  relation: parent
+  object: team_a7r:t3
+- user: user_a7r:carol
+  relation: lead
+  object: team_a7r:t1
+- user: user_a7r:dave
+  relation: member
+  object: team_a7r:t1
+
+# A two-team cycle with nothing granted inside it
+- user: team_a7r:tc2
+  relation: parent
+  object: team_a7r:tc1
+- user: team_a7r:tc1
+  relation: parent
+  object: team_a7r:tc2

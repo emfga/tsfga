@@ -1,0 +1,63 @@
+# Departments
+- user: user_c3h:dra
+  relation: member
+  object: department_c3h:cardiology
+- user: user_c3h:drb
+  relation: member
+  object: department_c3h:cardiology
+- user: user_c3h:drc
+  relation: member
+  object: department_c3h:research
+
+# p1 has opted out of research access
+- user: user_c3h:dra
+  relation: primary_physician
+  object: patient_c3h:p1
+- user: department_c3h:cardiology#member
+  relation: care_team
+  object: patient_c3h:p1
+- user: user_c3h:drc
+  relation: care_team
+  object: patient_c3h:p1
+- user: department_c3h:research#member
+  relation: opted_out
+  object: patient_c3h:p1
+- user: user_c3h:dre
+  relation: emergency_responder
+  object: patient_c3h:p1
+  condition:
+    name: active_emergency_c3h
+
+# p2 has opted nobody out
+- user: user_c3h:drb
+  relation: primary_physician
+  object: patient_c3h:p2
+- user: department_c3h:cardiology#member
+  relation: care_team
+  object: patient_c3h:p2
+
+# r1 is a sealed record on p1
+- user: patient_c3h:p1
+  relation: patient
+  object: record_c3h:r1
+- user: user_c3h:dra
+  relation: author
+  object: record_c3h:r1
+- user: user_c3h:*
+  relation: sensitivity_locked
+  object: record_c3h:r1
+- user: user_c3h:drc
+  relation: clearance_reader
+  object: record_c3h:r1
+  condition:
+    name: min_clearance_c3h
+    context:
+      required: 5
+
+# r2 is an ordinary record on p2
+- user: patient_c3h:p2
+  relation: patient
+  object: record_c3h:r2
+- user: user_c3h:drb
+  relation: author
+  object: record_c3h:r2

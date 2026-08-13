@@ -1,0 +1,45 @@
+- user: user_c4:alice
+  relation: member
+  object: group_c4:g1
+
+- user: group_c4:g1#member
+  relation: member
+  object: group_c4:g2
+
+- user: user_c4:bob
+  relation: viewer
+  object: folder_c4:f1
+
+- user: folder_c4:f1
+  relation: parent
+  object: doc_c4:d1
+
+- user: group_c4:g2#member
+  relation: direct_viewer
+  object: doc_c4:d1
+
+- user: user_c4:carol
+  relation: owner
+  object: doc_c4:d1
+
+- user: user_c4:carol
+  relation: blocked
+  object: doc_c4:d1
+
+- user: user_c4:*
+  relation: direct_viewer
+  object: doc_c4:d2
+
+- user: user_c4:dave
+  relation: blocked
+  object: doc_c4:d2
+
+- user: user_c4:alice
+  relation: direct_viewer
+  object: doc_c4:d3
+  condition:
+    name: weekday_c4
+
+- user: user_c4:bob
+  relation: direct_viewer
+  object: doc_c4:d3

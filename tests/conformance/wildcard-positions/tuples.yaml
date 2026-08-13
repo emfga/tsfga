@@ -1,0 +1,62 @@
+# w1: the relation admits both the bare type and the wildcard, and
+# both rows are present. The named row is bob's; the wildcard
+# covers everyone.
+- user: user_a1:*
+  relation: both
+  object: doc_a1:w1
+- user: user_a1:bob
+  relation: both
+  object: doc_a1:w1
+- user: user_a1:alice
+  relation: blocked
+  object: doc_a1:w1
+
+# w2: only the named row, so the wildcard probe finds nothing.
+- user: user_a1:bob
+  relation: both
+  object: doc_a1:w2
+
+# w3: a conditioned wildcard.
+- user: user_a1:*
+  relation: conditioned
+  object: doc_a1:w3
+  condition:
+    name: valid_ip_a1
+- user: user_a1:*
+  relation: both
+  object: doc_a1:w3
+
+# t1's membership is a conditioned wildcard, reached through a
+# userset hop.
+- user: user_a1:*
+  relation: member
+  object: team_a1:t1
+  condition:
+    name: valid_ip_a1
+    context:
+      user_ip: 192.168.0.1
+- user: team_a1:t1#member
+  relation: via_team
+  object: doc_a1:w4
+
+# t2's is the same shape with no stored context, so a context-free
+# check cannot evaluate it.
+- user: user_a1:*
+  relation: member
+  object: team_a1:t2
+  condition:
+    name: valid_ip_a1
+- user: team_a1:t2#member
+  relation: via_team
+  object: doc_a1:w5
+
+# t3's membership is a conditioned *named* row with no stored
+# context -- the same shape as t2's, without the wildcard.
+- user: user_a1:alice
+  relation: member
+  object: team2_a1:t3
+  condition:
+    name: valid_ip_a1
+- user: team2_a1:t3#member
+  relation: via_team2
+  object: doc_a1:w6

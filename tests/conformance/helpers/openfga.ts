@@ -59,9 +59,25 @@ function createClient(storeId?: string): OpenFgaClient {
   });
 }
 
+/**
+ * `CreateStoreRequest.Name` is bounded at 64 characters, and a
+ * store name here is diagnostic rather than load-bearing — it is
+ * what identifies the store in the playground and nothing reads it
+ * back. A fixture that composes its name from a file slug and a
+ * case name can cross the bound just by being renamed, and the
+ * failure that produces is a 400 on store creation followed by a
+ * cascade of unrelated-looking errors from the case's own writes.
+ *
+ * So the bound is enforced here, once, and the **tail** is what
+ * survives: the case name discriminates, the prefix repeats.
+ */
+const STORE_NAME_MAX = 64;
+
 export async function fgaCreateStore(name: string): Promise<string> {
   const client = createClient();
-  const response = await client.createStore({ name });
+  const response = await client.createStore({
+    name: name.length > STORE_NAME_MAX ? name.slice(-STORE_NAME_MAX) : name,
+  });
   return response.id;
 }
 
@@ -84,10 +100,33 @@ export async function fgaWriteModel(
  * come back from a check or a tuple write, and treating it as a
  * refusal there would report a mis-addressed request as a
  * behavioural agreement.
+ *
+ * The four below are the same refusal reached earlier. A malformed
+ * type or relation *name* fails the API's protobuf pattern before
+ * the typesystem runs, so it never reaches
+ * `invalid_authorization_model` — it is still the model refusing
+ * the model, and a helper that re-raised it would report an
+ * assertable refusal as a transport failure.
+ *
+ * Measured against the v1.18.2 container rather than taken from
+ * the finder's list, which named `relation_invalid_pattern` and
+ * `relation_invalid_length`: neither exists in the SDK's
+ * `ErrorCode` enum, and neither is what comes back. A relation
+ * name is reported as **`relations_invalid_pattern`** (plural),
+ * against `^[^:#@\s]{1,50}$`, and a type name as
+ * `type_invalid_pattern`. The pattern carries the length bound, so
+ * an over-long name of either kind is refused as a pattern
+ * mismatch and the two `*_length` codes were not observed; they
+ * are listed because they are the same family and the enum
+ * defines them.
  */
 const MODEL_WRITE_REFUSAL_CODES: ReadonlySet<string> = new Set([
   ErrorCode.InvalidAuthorizationModel,
   ErrorCode.ValidationError,
+  ErrorCode.TypeInvalidPattern,
+  ErrorCode.TypeInvalidLength,
+  ErrorCode.RelationsInvalidPattern,
+  ErrorCode.RelationsTooLong,
 ]);
 
 /**
@@ -165,8 +204,22 @@ function resolveRef(ref: string, uuidMap?: Map<string, string>): string {
 
   const type = base.slice(0, colonIdx);
   const name = base.slice(colonIdx + 1);
+
+  // The typed wildcard is a subject shape, not an id, so it is
+  // never a map key. It is the only ref that legitimately passes
+  // through — 40 rows across 17 files spell it, and throwing on
+  // it reds every one of them.
+  if (name === "*") return ref;
+
   const uuid = uuidMap.get(name);
-  if (!uuid) return ref;
+  if (uuid === undefined) {
+    // Passing an unmapped ref through leaves the OpenFGA store
+    // half-migrated: it holds a grant on a slug while tsfga holds
+    // one on a UUID, so each engine answers `false` about the
+    // object the other one has, the two agree, and every
+    // assertion over that object goes quietly vacuous.
+    throw new Error(`resolveRef: no UUID mapped for "${name}" in "${ref}"`);
+  }
 
   return `${type}:${uuid}${suffix}`;
 }
@@ -175,6 +228,42 @@ export interface FgaContextualTuple {
   user: string;
   relation: string;
   object: string;
+  /**
+   * Carried for the same reason `writeOneTuple` carries it: a
+   * contextual tuple is admitted by the type restriction that
+   * names its condition, and then evaluated. Dropping it asks
+   * OpenFGA about a *different* tuple.
+   *
+   * Both directions are wrong, and the second is the dangerous
+   * one. On `[user with cond]` the stripped tuple is not admitted
+   * at all, so upstream refuses a request it would have answered
+   * and the suite reports a divergence the engines do not have.
+   * But on a relation admitting `[user, user with cond]` the
+   * stripped tuple *is* admitted, unconditionally -- upstream
+   * answers `true` without ever evaluating the condition and
+   * agrees with tsfga for the wrong reason, passing an assertion
+   * that tested nothing.
+   */
+  condition?: { name: string; context?: Record<string, unknown> };
+}
+
+/**
+ * The subject as OpenFGA's `user` field spells it.
+ *
+ * A subject relation makes it a userset — `group:eng#member` —
+ * which is one of the two forms `TupleKey.user` takes. Dropping it
+ * would ask OpenFGA about the bare `group:eng`, a *different*
+ * subject that the same model answers differently, so the
+ * assertion would compare two questions rather than two engines.
+ */
+function fgaUser(subject: {
+  subjectType: string;
+  subjectId: string;
+  subjectRelation?: string | null;
+}): string {
+  return subject.subjectRelation
+    ? `${subject.subjectType}:${subject.subjectId}#${subject.subjectRelation}`
+    : `${subject.subjectType}:${subject.subjectId}`;
 }
 
 export interface FgaCheckParams {
@@ -183,6 +272,7 @@ export interface FgaCheckParams {
   relation: string;
   subjectType: string;
   subjectId: string;
+  subjectRelation?: string | null;
   context?: Record<string, unknown>;
   contextualTuples?: FgaContextualTuple[];
 }
@@ -196,7 +286,7 @@ export async function fgaCheck(
   try {
     const response = await client.check(
       {
-        user: `${params.subjectType}:${params.subjectId}`,
+        user: fgaUser(params),
         relation: params.relation,
         object: `${params.objectType}:${params.objectId}`,
         context: params.context,
@@ -217,6 +307,7 @@ export interface FgaListObjectsParams {
   relation: string;
   subjectType: string;
   subjectId: string;
+  subjectRelation?: string | null;
   context?: Record<string, unknown>;
   contextualTuples?: FgaContextualTuple[];
 }
@@ -243,7 +334,7 @@ export async function fgaListObjects(
   const client = createClient(storeId);
   const response = await client.listObjects(
     {
-      user: `${params.subjectType}:${params.subjectId}`,
+      user: fgaUser(params),
       relation: params.relation,
       type: params.objectType,
       context: params.context,
@@ -360,4 +451,69 @@ export async function fgaWriteTuplesRaw(
 ): Promise<void> {
   const client = createClient(storeId);
   await client.writeTuples(tuples, { authorizationModelId });
+}
+
+/**
+ * Delete one tuple, and report whether OpenFGA took the request
+ * at all.
+ *
+ * Two outcomes rather than three, and the distinction is the
+ * point: `"refused"` is a `validation_error` on the request's own
+ * shape, and `"missing"` is
+ * `write_failed_due_to_invalid_input` — the request was
+ * well-formed and the row was not there. Upstream reaches them
+ * from different places (protovalidate and `IsValidUser` at the
+ * boundary, the missing-row check inside `Execute` afterwards),
+ * and a delete that is both malformed *and* nonexistent must
+ * report the first.
+ */
+export async function fgaDeleteOutcome(
+  storeId: string,
+  authorizationModelId: string,
+  tuple: FgaWriteTuple,
+): Promise<"accepted" | "refused" | "missing"> {
+  const client = createClient(storeId);
+  // `!== null` rather than truthiness, unlike `writeOneTuple`
+  // above: an **empty** subject relation is one of the shapes
+  // under test, and it is a different wire string from an absent
+  // one. `user:alice#` fails `IsValidUser`; `user:alice` does not.
+  const user =
+    tuple.subjectRelation === null || tuple.subjectRelation === undefined
+      ? `${tuple.subjectType}:${tuple.subjectId}`
+      : `${tuple.subjectType}:${tuple.subjectId}#${tuple.subjectRelation}`;
+  try {
+    await client.deleteTuples(
+      [
+        {
+          user,
+          relation: tuple.relation,
+          object: `${tuple.objectType}:${tuple.objectId}`,
+        },
+      ],
+      { authorizationModelId },
+    );
+    return "accepted";
+  } catch (error) {
+    const refusal = refusalOf(error);
+    if (!refusal) throw error;
+    return refusal.code === "write_failed_due_to_invalid_input"
+      ? "missing"
+      : "refused";
+  }
+}
+
+/**
+ * Write a model given as JSON and return its id.
+ *
+ * `fgaWriteModel` reads a DSL file; this takes the request
+ * directly, for a suite whose models are shapes the DSL cannot
+ * express or whose point is the model changing under a fixture.
+ */
+export async function fgaWriteModelJson(
+  storeId: string,
+  model: WriteAuthorizationModelRequest,
+): Promise<string> {
+  const client = createClient(storeId);
+  const response = await client.writeAuthorizationModel(model);
+  return response.authorization_model_id;
 }

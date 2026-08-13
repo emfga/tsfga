@@ -1,0 +1,278 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { TypeName } from "@openfga/sdk";
+import { createTsfga, type TsfgaClient, TsfgaError } from "@tsfga/core";
+import type { DB } from "@tsfga/kysely";
+import { KyselyTupleStore } from "@tsfga/kysely";
+import type { Kysely } from "kysely";
+import {
+  expectConfigsMatchModel,
+  expectConformance,
+  type FixtureRecord,
+  recordFixture,
+} from "./helpers/conformance.ts";
+import {
+  beginTransaction,
+  destroyDb,
+  getDb,
+  rollbackTransaction,
+} from "./helpers/db.ts";
+import {
+  fgaCreateStore,
+  fgaWriteModel,
+  fgaWriteModelOutcome,
+  fgaWriteTuplesRaw,
+} from "./helpers/openfga.ts";
+
+/**
+ * The AST-rewrite layer in `conditions.ts`, attacked at its seam.
+ *
+ * `matches` is rewritten onto tsfga's RE2-faithful implementation
+ * by splicing the *source text*: `collectSplices` locates the
+ * method name by searching forward from the receiver node's end
+ * and requires everything between to be `\s*\.\s*`. A receiver
+ * that is parenthesised ends its range **inside** the closing
+ * paren, so the gap is `).` and the splice is skipped — leaving
+ * the call bound to cel-js's own JavaScript `RegExp` semantics,
+ * which is exactly what issue 020 exists to remove.
+ *
+ * Every case is stated twice, once parenthesised and once not, so
+ * the parenthesis is provably the whole difference.
+ */
+
+const uuidMap = new Map<string, string>([
+  ["alice", "00000000-0000-4000-d4a0-000000000001"],
+  ["doc1", "00000000-0000-4000-d4a0-000000000002"],
+]);
+
+function uuid(name: string): string {
+  const id = uuidMap.get(name);
+  if (!id) throw new Error(`No UUID for ${name}`);
+  return id;
+}
+
+const CONDITIONS: Array<{ relation: string; condition: string; expr: string }> =
+  [
+    {
+      relation: "bare_posix",
+      condition: "bare_posix_b3",
+      expr: 's.matches("[[:alpha:]]+")',
+    },
+    {
+      relation: "paren_posix",
+      condition: "paren_posix_b3",
+      expr: '(s).matches("[[:alpha:]]+")',
+    },
+    {
+      relation: "bare_flags",
+      condition: "bare_flags_b3",
+      expr: 's.matches("(?i)ABC")',
+    },
+    {
+      relation: "paren_flags",
+      condition: "paren_flags_b3",
+      expr: '(s).matches("(?i)ABC")',
+    },
+    {
+      relation: "concat_posix",
+      condition: "concat_posix_b3",
+      expr: '(s + "").matches("[[:alpha:]]+")',
+    },
+    {
+      relation: "index_posix",
+      condition: "index_posix_b3",
+      expr: '[s][0].matches("[[:alpha:]]+")',
+    },
+    {
+      relation: "ternary_posix",
+      condition: "ternary_posix_b3",
+      expr: '(s == "" ? "zzz" : s).matches("[[:alpha:]]+")',
+    },
+  ];
+
+describe("CEL Rewrite Splice Conformance", () => {
+  let db: Kysely<DB>;
+  let storeId: string;
+  let authorizationModelId: string;
+  let tsfgaClient: TsfgaClient;
+  let fixture: FixtureRecord;
+
+  beforeAll(async () => {
+    db = getDb();
+    await beginTransaction(db);
+
+    const store = new KyselyTupleStore(db);
+    tsfgaClient = createTsfga(store);
+    fixture = recordFixture(tsfgaClient);
+
+    for (const { condition, expr } of CONDITIONS) {
+      await tsfgaClient.writeConditionDefinition({
+        name: condition,
+        expression: expr,
+        parameters: { s: "string" },
+      });
+    }
+
+    for (const { relation, condition } of CONDITIONS) {
+      await tsfgaClient.writeRelationConfig({
+        objectType: "doc_b3c",
+        relation,
+        directlyAssignable: [{ type: "user_b3c", condition }],
+        impliedBy: null,
+        computedUserset: null,
+        tupleToUserset: null,
+        excludedBy: null,
+        intersection: null,
+      });
+      await tsfgaClient.addTuple({
+        objectType: "doc_b3c",
+        objectId: uuid("doc1"),
+        relation,
+        subjectType: "user_b3c",
+        subjectId: uuid("alice"),
+        conditionName: condition,
+      });
+    }
+
+    storeId = await fgaCreateStore("cel-splice-conformance");
+    authorizationModelId = await fgaWriteModel(
+      storeId,
+      "./cel-splice/model.dsl",
+    );
+    await fgaWriteTuplesRaw(
+      storeId,
+      authorizationModelId,
+      CONDITIONS.map(({ relation, condition }) => ({
+        user: `user_b3c:${uuid("alice")}`,
+        relation,
+        object: `doc_b3c:${uuid("doc1")}`,
+        condition: { name: condition },
+      })),
+    );
+  });
+
+  afterAll(async () => {
+    await rollbackTransaction(db);
+    await destroyDb();
+  });
+
+  async function expectCheck(
+    relation: string,
+    s: string,
+    expected: boolean | "refused",
+  ): Promise<void> {
+    await expectConformance(
+      storeId,
+      authorizationModelId,
+      tsfgaClient,
+      {
+        objectType: "doc_b3c",
+        objectId: uuid("doc1"),
+        relation,
+        subjectType: "user_b3c",
+        subjectId: uuid("alice"),
+        context: { s },
+      },
+      expected,
+    );
+  }
+
+  // --- the spliced forms, which are already correct -------------
+
+  test("a POSIX class on a bare receiver is RE2", async () => {
+    await expectCheck("bare_posix", "abc", true);
+  });
+
+  test("a POSIX class on a bare receiver still denies a non-match", async () => {
+    await expectCheck("bare_posix", "123", false);
+  });
+
+  test("an RE2 inline flag on a bare receiver is honoured", async () => {
+    await expectCheck("bare_flags", "abc", true);
+  });
+
+  test("an index receiver is spliced", async () => {
+    await expectCheck("index_posix", "abc", true);
+  });
+
+  // --- the parenthesised forms, which are not --------------------
+
+  test("GAP-240: a parenthesised receiver loses RE2 POSIX classes", async () => {
+    // RE2 reads `[[:alpha:]]+` as "one or more letters" and matches
+    // `abc`. JavaScript reads it as the class `[[:alph]` followed
+    // by `a`, `:`, `]`, `+` and does not.
+    await expectCheck("paren_posix", "abc", true);
+  });
+
+  test("GAP-240: a parenthesised receiver loses RE2 inline flags", async () => {
+    // `(?i)` is RE2's case-insensitive flag and a syntax error to
+    // `RegExp`, so the unspliced call cannot even compile and the
+    // check refuses where upstream grants.
+    await expectCheck("paren_flags", "abc", true);
+  });
+
+  test("GAP-240: a concatenation receiver loses the rewrite", async () => {
+    await expectCheck("concat_posix", "abc", true);
+  });
+
+  test("GAP-240: a ternary receiver loses the rewrite", async () => {
+    await expectCheck("ternary_posix", "abc", true);
+  });
+
+  // --- the model gate --------------------------------------------
+
+  test("GAP-241: a pattern RE2 cannot compile is stored", async () => {
+    // OpenFGA compiles every constant `matches` pattern while it
+    // validates the model, so a lookahead never reaches a check:
+    // `WriteAuthorizationModel` refuses with
+    // `invalid_authorization_model`. tsfga's
+    // `writeConditionDefinition` parses the CEL and stores the
+    // condition, deferring the refusal to every check that reads
+    // it — a model that cannot be used, accepted as if it could.
+    const outcome = await fgaWriteModelOutcome(storeId, {
+      schema_version: "1.1",
+      type_definitions: [
+        { type: "user_b3c", relations: {}, metadata: undefined },
+        {
+          type: "gate_b3c",
+          relations: { viewer: { this: {} } },
+          metadata: {
+            relations: {
+              viewer: {
+                directly_related_user_types: [
+                  { type: "user_b3c", condition: "lookahead_b3" },
+                ],
+              },
+            },
+          },
+        },
+      ],
+      conditions: {
+        lookahead_b3: {
+          name: "lookahead_b3",
+          expression: 's.matches("a(?=b)")',
+          parameters: { s: { type_name: TypeName.String } },
+        },
+      },
+    });
+    expect(outcome).not.toBe("accepted");
+
+    const tsfgaOutcome = await tsfgaClient
+      .writeConditionDefinition({
+        name: "lookahead_b3",
+        expression: 's.matches("a(?=b)")',
+        parameters: { s: "string" },
+      })
+      .then(() => "accepted" as const)
+      .catch((error: unknown) => {
+        if (error instanceof TsfgaError) return "refused" as const;
+        throw error;
+      });
+    expect(tsfgaOutcome).toBe("refused");
+  });
+
+  test("configs match the model", () => {
+    expectConfigsMatchModel("./cel-splice/model.dsl", fixture, {
+      coverage: "complete",
+    });
+  });
+});

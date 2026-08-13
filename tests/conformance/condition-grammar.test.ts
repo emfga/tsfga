@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, test } from "bun:test";
 import {
+  type ConditionParamTypeRef,
+  TypeName,
+  type WriteAuthorizationModelRequest,
+} from "@openfga/sdk";
+import {
   type ConditionParameterType,
   createTsfga,
   type TsfgaClient,
@@ -11,6 +16,9 @@ import {
   type CheckOutcome,
   expectConfigsMatchModel,
   expectConformance,
+  expectModelWriteConformance,
+  expectPinnedDivergence,
+  expectPinnedModelWriteDivergence,
   type FixtureRecord,
   recordFixture,
 } from "./helpers/conformance.ts";
@@ -101,6 +109,57 @@ const CELLS: ReadonlyArray<readonly [string, ConditionParameterType, string]> =
     ["ok_timestamp", "timestamp", "n > timestamp('2026-01-01T00:00:00Z')"],
     ["ok_list", "list<string>", "'a' in n"],
   ];
+
+/**
+ * `duration + timestamp` compared against a timestamp — the one
+ * expression whose declared type cel-js and cel-go disagree about.
+ * Spelled once so the container cell and its scalar control cannot
+ * drift into testing two different sums.
+ */
+const TEMPORAL_SUM = "ds[0] + ts[0] > ts[0]";
+
+/** `list<T>`, as the SDK spells a parameter's declared type. */
+function listOf(element: TypeName): ConditionParamTypeRef {
+  return { type_name: TypeName.List, generic_types: [{ type_name: element }] };
+}
+
+/**
+ * A model whose only condition sums a duration and a timestamp,
+ * with the parameters declared as given. The container cell uses
+ * `TEMPORAL_SUM`; the scalar control indexes nothing, so it passes
+ * its own expression.
+ */
+function temporalModel(
+  parameters: Record<string, ConditionParamTypeRef>,
+): WriteAuthorizationModelRequest {
+  const scalar = parameters.ds?.type_name === TypeName.Duration;
+  return {
+    schema_version: "1.1",
+    type_definitions: [
+      { type: "user", relations: {}, metadata: { relations: {} } },
+      {
+        type: "doc",
+        relations: { viewer: { this: {} } },
+        metadata: {
+          relations: {
+            viewer: {
+              directly_related_user_types: [
+                { type: "user", condition: "temporal" },
+              ],
+            },
+          },
+        },
+      },
+    ],
+    conditions: {
+      temporal: {
+        name: "temporal",
+        expression: scalar ? "ds + ts > ts" : TEMPORAL_SUM,
+        parameters,
+      },
+    },
+  };
+}
 
 describe("Condition Grammar Conformance", () => {
   let db: Kysely<DB>;
@@ -251,6 +310,74 @@ describe("Condition Grammar Conformance", () => {
       });
     }
 
+    /**
+     * The half-ulp band, where the two ports part company.
+     *
+     * Upstream reads every numeric string with
+     * `big.ParseFloat(s, 10, 64, 0)` — 64 significand bits,
+     * round-to-nearest — and only then asks whether the *result*
+     * is integral or float64-exact. tsfga's `toDyadic` never
+     * rounds: it refuses any decimal that is not a finite dyadic
+     * rational, at unbounded precision. Above the half-ulp of the
+     * 64-bit format the two agree, because rounding moves the
+     * value and upstream refuses too — that is the control pair
+     * above. Below it they cannot: upstream rounds the excess
+     * away and answers, and tsfga still sees a decimal with no
+     * finite binary form.
+     *
+     * `1.0000000000000000000000001` is 1e-25 from 1.0, and the
+     * half-ulp near 1.0 is 2^-64 ≈ 5.4e-20, so upstream reads it
+     * as exactly 1.0 for all three numeric types.
+     *
+     * Pinned rather than fixed, by owner decision. This is
+     * **tsfga's own coercion code and not a cel-js gap** — cel-js
+     * never sees the string — so the CEL carve-out does not cover
+     * it; it is deferred on release-risk grounds, because it sits
+     * on the numeric path every `int`, `uint` and `double`
+     * context value crosses and the fix moves that path in the
+     * accepting direction. The direction here is *refusing*, so
+     * the residue is an outage and not a grant.
+     */
+    /**
+     * The three cells reuse relations declared above rather than
+     * adding their own: OpenFGA caps a model at 25 conditions and
+     * this fixture holds 24. `openfga` is therefore the answer the
+     * *borrowed* condition gives once the value has been read as
+     * 1 — `dbl_prec` is `n == 1.0`, so the exclusion fires and the
+     * check is `false`; `int_point` is `n == 4` and `uint_sat` is
+     * `n == <int64 max>`, so neither fires and the check is `true`.
+     * What is pinned either way is that upstream *read* the value
+     * and tsfga would not.
+     */
+    for (const [relation, type, upstream] of [
+      ["dbl_prec", "a double", false],
+      ["int_point", "an int", true],
+      ["uint_sat", "a uint", true],
+    ] as const) {
+      test(`${type} below the half-ulp is read upstream only`, async () => {
+        await expectPinnedDivergence(
+          storeId,
+          modelId,
+          tsfgaClient,
+          {
+            objectType: "doc",
+            objectId: uuid("doc"),
+            relation,
+            subjectType: "user",
+            subjectId: uuid("alice"),
+            context: { n: "1.0000000000000000000000001" },
+          },
+          { openfga: upstream, tsfga: "refused" },
+        );
+      });
+
+      test(`${type} above the half-ulp is refused by both`, async () => {
+        // The control. Without it the pin above would pass against
+        // a tsfga that refused every long decimal for any reason.
+        await check(relation, "1.0000000000000000001", "refused");
+      });
+    }
+
     test("a double reads Inf", async () => {
       await check("dbl_inf", "Inf", false);
     });
@@ -287,6 +414,43 @@ describe("Condition Grammar Conformance", () => {
       await check("ts_lower_zone", "2026-01-01T00:00:00z", "refused");
     });
 
+    /**
+     * RFC 3339 writes the fractional separator as a period, and
+     * so does §5.6 of the grammar OpenFGA cites — but Go's
+     * `time.Parse` falls back to a hand-written parser whose
+     * `commaOrPeriod` takes either, so upstream reads a comma.
+     * `conditions.ts`'s pattern requires `\.`.
+     *
+     * Pinned rather than fixed. Like the half-ulp band above this
+     * is **tsfga's own coercion regex and not a cel-js gap**;
+     * unlike it the fix is one character, and it is deferred only
+     * because it arrives in a release already carrying two
+     * granting-direction fixes. The direction is refusing, so
+     * nothing is granted on it.
+     */
+    test("a fractional comma is read upstream only", async () => {
+      await expectPinnedDivergence(
+        storeId,
+        modelId,
+        tsfgaClient,
+        {
+          objectType: "doc",
+          objectId: uuid("doc"),
+          relation: "ts_frac",
+          subjectType: "user",
+          subjectId: uuid("alice"),
+          context: { n: "2026-01-01T00:00:01,5Z" },
+        },
+        { openfga: false, tsfga: "refused" },
+      );
+    });
+
+    test("a fractional period is read by both", async () => {
+      // The agreeing control: the same instant, the separator RFC
+      // 3339 actually writes.
+      await check("ts_frac", "2026-01-01T00:00:01.5Z", false);
+    });
+
     test("twelve fractional digits are read", async () => {
       // cel-js's own `timestamp()` refuses any spelling past 30
       // characters, which ten digits reaches. Upstream keeps
@@ -321,6 +485,74 @@ describe("Condition Grammar Conformance", () => {
 
     test("a list<int> parses its numeric strings", async () => {
       await check("list_int", ["1"], false);
+    });
+
+    /**
+     * The element type is enforced on the *value* side, above, and
+     * ignored on the write gate's temporal side, here.
+     *
+     * cel-js declares `duration + timestamp` as a Duration where
+     * cel-go declares it a Timestamp, so a comparison against a
+     * timestamp finds no overload in cel-js and one in cel-go.
+     * `conditions.ts` accommodates that with a second checking
+     * pass that re-declares every temporal parameter as `dyn` and
+     * accepts an expression the disagreement was the only thing
+     * standing in front of — and the pass tests the *declared*
+     * type, `list<duration>`, rather than its element, so a
+     * container-typed temporal parameter never reaches the
+     * degraded declaration and the second pass is byte-identical
+     * to the first.
+     *
+     * **Not fixed, by owner ruling, and this one is cel-js's gap
+     * rather than tsfga's.** The degrade pass exists only because
+     * cel-js's declaration disagrees; widening it to containers
+     * widens the accommodation, which "tsfga supports what cel-js
+     * supports" puts out of scope. Closing it wants a cel-js that
+     * declares the overload as cel-go does — not a wider
+     * accommodation here. The direction is refusing: upstream
+     * stores the model and tsfga will not.
+     */
+    test("a container's temporal element is not degraded", async () => {
+      await expectPinnedModelWriteDivergence(
+        storeId,
+        temporalModel({
+          ds: listOf(TypeName.Duration),
+          ts: listOf(TypeName.Timestamp),
+        }),
+        () =>
+          tsfgaClient.writeConditionDefinition({
+            name: "temporal_list_c",
+            expression: TEMPORAL_SUM,
+            parameters: { ds: "list<duration>", ts: "list<timestamp>" },
+          }),
+        { openfga: "accepted", tsfga: "refused" },
+        {
+          tsfgaCause:
+            "no such overload: google.protobuf.Duration > " +
+            "google.protobuf.Timestamp",
+        },
+      );
+    });
+
+    test("the same expression on scalars is stored by both", async () => {
+      // The agreeing control, and the whole evidence that the cell
+      // above is about the container and not about the sum: on
+      // bare `duration` and `timestamp` the degrade pass fires and
+      // both engines store the definition.
+      await expectModelWriteConformance(
+        storeId,
+        temporalModel({
+          ds: { type_name: TypeName.Duration },
+          ts: { type_name: TypeName.Timestamp },
+        }),
+        () =>
+          tsfgaClient.writeConditionDefinition({
+            name: "temporal_scalar_c",
+            expression: "ds + ts > ts",
+            parameters: { ds: "duration", ts: "timestamp" },
+          }),
+        "accepted",
+      );
     });
   });
 

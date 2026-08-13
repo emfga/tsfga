@@ -1,0 +1,85 @@
+# SCIM-provisioned identity groups
+- user: user_a6s:*
+  relation: member
+  object: idp_group_a6s:g_all
+- user: user_a6s:alice
+  relation: member
+  object: idp_group_a6s:g_staff
+- user: user_a6s:bob
+  relation: member
+  object: idp_group_a6s:g_staff
+- user: user_a6s:carol
+  relation: member
+  object: idp_group_a6s:g_contractors
+
+# t_acme subscribes staff outright and contractors until a date
+- user: idp_group_a6s:g_staff#member
+  relation: subscriber
+  object: tenant_a6s:t_acme
+- user: idp_group_a6s:g_contractors#member
+  relation: subscriber
+  object: tenant_a6s:t_acme
+  condition:
+    name: within_window_a6s
+    context:
+      expires_at: "2027-01-01T00:00:00Z"
+- user: user_a6s:alice
+  relation: admin
+  object: tenant_a6s:t_acme
+
+# t_lapsed still grants everything; its workspace link is what dies
+- user: idp_group_a6s:g_all#member
+  relation: subscriber
+  object: tenant_a6s:t_lapsed
+
+# t_susp is past its grace period once the request says so
+- user: idp_group_a6s:g_staff#member
+  relation: subscriber
+  object: tenant_a6s:t_susp
+- user: user_a6s:*
+  relation: suspended
+  object: tenant_a6s:t_susp
+  condition:
+    name: past_grace_a6s
+
+# Workspaces. The tenant link itself is condition-gated.
+- user: tenant_a6s:t_acme
+  relation: tenant
+  object: workspace_a6s:w_main
+  condition:
+    name: subscription_active_a6s
+    context:
+      subscription_active: true
+- user: user_a6s:dave
+  relation: direct_member
+  object: workspace_a6s:w_main
+
+- user: tenant_a6s:t_lapsed
+  relation: tenant
+  object: workspace_a6s:w_lapsed
+  condition:
+    name: subscription_active_a6s
+    context:
+      subscription_active: false
+- user: user_a6s:erin
+  relation: direct_member
+  object: workspace_a6s:w_lapsed
+
+- user: tenant_a6s:t_acme
+  relation: tenant
+  object: workspace_a6s:w_hold
+  condition:
+    name: subscription_active_a6s
+    context:
+      subscription_active: true
+- user: user_a6s:*
+  relation: legal_hold
+  object: workspace_a6s:w_hold
+
+- user: tenant_a6s:t_susp
+  relation: tenant
+  object: workspace_a6s:w_susp
+  condition:
+    name: subscription_active_a6s
+    context:
+      subscription_active: true

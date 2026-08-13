@@ -69,11 +69,11 @@ const allowed = await fga.check({
 
 | Method | Description |
 |---|---|
-| `check(request)` | Check if a subject has a relation on an object |
+| `check(request)` | Check if a subject has a relation on an object; the subject may be a userset via `subjectRelation` |
 | `checkMany(requests)` | Check several requests in one shared resolution scope; outcomes in request order |
-| `addTuple(request)` | Insert or update a relationship tuple |
-| `removeTuple(request)` | Delete a relationship tuple |
-| `listObjects(request)` | List object IDs the subject can access, in candidate order; the request takes `context` and `contextualTuples` |
+| `addTuple(request)` | Insert a relationship tuple; a tuple that already exists throws `DuplicateTupleError` |
+| `removeTuple(request)` | Delete a relationship tuple; throws when it is not there |
+| `listObjects(request)` | List object IDs the subject can access, in candidate order; the request takes `subjectRelation`, `context` and `contextualTuples` |
 | `listSubjects(objectType, objectId, relation)` | List direct subjects for an object + relation (no expansion) |
 | `writeRelationConfig(config)` | Insert or update a relation configuration |
 | `deleteRelationConfig(objectType, relation)` | Delete a relation configuration |
@@ -116,6 +116,13 @@ it is deferred to its own round. Both rows — the offset and its
 absence on a weight-2 leaf — are pinned two-sided in
 `tests/conformance/depth-boundary.test.ts`, so this goes red if
 the gap widens or closes.
+
+The same offset is visible through `listObjects`, where it costs
+one *object* rather than one answer: on a 25-hop chain upstream
+returns all 26 objects and tsfga returns 25, missing only the one
+whose distance from the grant is the whole chain. A 24-hop chain
+agrees exactly on both engines. See the section below for what
+happens when the chain is much longer than the budget.
 
 **Only hops to another object spend the budget.** Userset
 expansion and tuple-to-userset expansion each cost one depth;
@@ -206,18 +213,272 @@ node plus `maxDepth - 1` dispatches.
   **int64**'s, because upstream converts every numeric string
   through the same `Int64()` and only then rejects a negative.
 
-  A `double` carries one rule more: upstream parses at 64-bit
-  precision and refuses the value if converting it to a `float64`
-  loses anything. A decimal fraction with no finite binary form is
-  therefore an error rather than the nearest double — `"0.1"` as a
-  **string** is refused, while `0.1` as a **number** is accepted,
-  since a number is already a `float64` and is asserted rather
-  than parsed.
+  A `double` carries one rule more: a decimal with no finite
+  binary form is an error rather than the nearest double. `"0.1"`
+  as a **string** is refused, while `0.1` as a **number** is
+  accepted, since a number is already a `float64` and is asserted
+  rather than parsed.
+
+  The two engines ask that question at different precisions, and
+  the difference is a measured divergence rather than a rounding
+  detail. Upstream rounds the decimal to 64 significand bits and
+  *then* asks whether the result converts to a `float64` — or, for
+  `int` and `uint`, whether it is integral. tsfga asks it of the
+  decimal exactly as written, at unbounded precision. They agree
+  wherever the rounding moves the value, so `"0.1"` and
+  `"1.0000000000000000001"` are errors on both sides; they part
+  company below the half-ulp, where
+  `"1.0000000000000000000000001"` rounds to `1.0` upstream and is
+  read, and is refused here. See "Where tsfga and OpenFGA
+  disagree" below.
 
   A `duration` takes Go's unit grammar plus the one unitless form
   its parser special-cases, a bare `"0"`. A `timestamp` takes RFC
   3339 with **uppercase** `T` and `Z` and any number of fractional
   digits.
+
+### Known divergence: `listObjects` past the depth budget
+
+`listObjects` checks each candidate forward, so a candidate
+further from the grant than `maxDepth` allows is **absent from the
+answer**. Upstream reports it. On a 40-hop parent chain upstream
+returns all 41 objects; tsfga returns the 25 nearest the grant.
+
+The cause is the one named in the depth-boundary section above —
+upstream does not resolve `ListObjects` through `Check` at all. It
+reverse-expands from the subject over a job queue
+(`reverse_expand_weighted.go`), so a long chain costs it no
+resolution depth. Closing the gap needs that reverse walk, which
+is the same missing machinery as the depth boundary itself.
+
+What tsfga does **not** do is lose the rest of the answer with it.
+A candidate whose resolution exhausts the budget is dropped,
+exactly as a candidate answering `false` is, and the call still
+answers with the objects that qualify — up to
+`listObjectsMaxResults`, below. Upstream's stated policy is
+the opposite — a depth-exceeded candidate fails the whole
+ListObjects (`ErrAuthorizationModelResolutionTooComplex`) — but
+its boundary sits far enough out that it almost never reaches its
+own abort, so dropping the candidate is closer to upstream on
+every shape upstream can answer, and further from it only where
+upstream genuinely aborts.
+
+The policy is local to `listObjects`. `check` still raises
+`DepthExceededError`, in every set position.
+
+`DepthExceededError` is not the only class `listObjects` drops.
+A `ConditionEvaluationError` raised on a read that does **not**
+name the request subject is dropped the same way — the candidate
+counts as `false` and the call answers. An error on a read that
+*does* name the subject still aborts, because upstream's reverse
+expansion always issues that read and would refuse too. Everything
+else aborts the call in candidate order. Both drops run in the
+under-reporting direction: nothing is granted that a full `check`
+does not grant.
+
+Pinned two-sided by `list-objects-depth-budget.test.ts` and
+`list-objects-depth.test.ts`.
+
+## A relation the subject's type cannot reach is denied
+
+Before resolving a node's rewrite, tsfga asks whether a subject of
+this *type* could hold `objectType#relation` at all — at any
+depth, for any data. When it could not, the node answers `false`
+without reading a tuple. This is upstream's
+`typesys.PathExists(user, relation, objectType)` check, which
+`LocalChecker.ResolveCheck` performs at every node.
+
+The answer is computed from the relation configs alone, walking
+*backwards* from the node: the subject refs a relation admits,
+then the refs that reach those, and so on. It is memoized for the
+life of a resolution scope, so a `listObjects` or `checkMany` call
+pays for it once; a model changed between requests is picked up by
+the next scope.
+
+The prune never manufactures a denial the model did not prove. A
+relation the model does not define still raises
+`RelationConfigNotFoundError`, and any part of the walk that could
+not be read — an undefined relation reached by a rewrite, a store
+error — leaves the node unpruned rather than denied. A subject
+type is reachable if either it or its typed wildcard (`user:*`)
+reaches the node, matching upstream's retry.
+
+Three shapes used to answer wrongly, all with one cause: tsfga
+narrowed only at the node it was standing on.
+
+| shape | before | now (and upstream) |
+|---|---|---|
+| a userset chain, unreachable, whose row carries a condition the request cannot evaluate | refused | `false` |
+| the same chain longer than the depth budget | `DepthExceededError` | `false` |
+| an unreachable cyclic subtree on the subtract side of a `but not` | `false` | `true` |
+
+The third is the one that mattered: a cycle-truncated `false`
+*denies* on the subtract side, so the prune returns a plain,
+unflagged `false` — never a cycle. Nothing about the depth budget
+or the cycle rules changed.
+
+The prune reads relation configs the resolution would not
+otherwise have asked for. They go through the same request-scoped
+cache as every other config read, so each `objectType#relation`
+costs at most one round trip per scope; see
+[`@tsfga/kysely`](../kysely/README.md)'s pool-sizing section for
+what that measures at on a large model.
+
+### Each `tuple-to-userset` arm is its own union branch
+
+A relation may have several tuple-to-userset paths
+(`viewer from parent or viewer from owner`). Each is its own
+branch of the relation's union, as upstream makes each `checkTTU`
+its own child. One arm whose tupleset rows carry a condition the
+request cannot evaluate raises only for that arm: a sibling arm
+that grants still wins, and the error propagates only when nothing
+granted. The per-read error rule is unchanged — an arm's condition
+errors are still weighed against that arm's own rows, never
+against another arm's.
+
+## A userset can be the subject of a check
+
+`CheckRequest` and `ListObjectsRequest` carry an optional
+`subjectRelation`, which makes the subject a **userset** —
+upstream's `object#relation` form of `TupleKey.user`:
+
+```ts
+await fga.check({
+  objectType: "document",
+  objectId: "550e8400-e29b-41d4-a716-446655440000",
+  relation: "viewer",
+  subjectType: "team",
+  subjectId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  subjectRelation: "member",   // team:…#member
+});
+```
+
+The question is a **comparison, not an expansion**. The userset
+holds `viewer` iff a row grants that exact userset, or a rewrite
+of `viewer` reaches one. It is not a check for each member of the
+team, and a member holding `viewer` by some other route does not
+make the userset hold it.
+
+Three consequences, each measured against v1.18.2:
+
+| shape | answer |
+|---|---|
+| a relation admitting `[team#member]`, asked about the bare `team:eng` | `false` |
+| a relation admitting `[team]`, asked about `team:eng#member` | `false` |
+| a `team:*` row, asked about `team:eng#member` | `false` |
+
+The third is not an oversight: a userset can never be a wildcard,
+so upstream skips the public-assignability probe
+(`shouldCheckPublicAssignable`) and the wildcard retry in
+`PathExists` outright when the subject is a userset. tsfga does
+both.
+
+A userset holds its own relation on its own object by definition —
+`team:eng#member` is a `member` of `team:eng` — ahead of the
+model, and even where the relation admits no userset at all.
+Upstream answers this in `IsSelfDefining`, between the cycle guard
+and the relation lookup.
+
+`listObjects` takes the same field and reaches the objects the
+whole userset reaches.
+
+### Some request shapes are refused rather than denied
+
+The subject of a check is validated before any of it is resolved,
+as upstream validates the `user` field at the command layer:
+
+- a `subjectRelation` the subject's type does not define raises
+  `RelationConfigNotFoundError` — upstream answers `relation
+  'group#nonexistent' not found` rather than `false`;
+- a `subjectType` the model defines no type for raises
+  `InvalidSubjectTypeError` with
+  `cause: "undefined subject type"`, **not**
+  `RelationConfigNotFoundError`. The two are separate refusals
+  because upstream's `ValidateUser` reports them separately and in
+  that order: the `user` field's type is checked first, and only a
+  subject that survives it has its userset relation resolved. So a
+  userset subject naming an undefined type is refused for its
+  type, and the relation is never looked up;
+- a `subjectId` containing `:` or `#`, a `subjectRelation` that is
+  empty, and a `subjectId` of `*` carrying a subject relation, all
+  raise `InvalidSubjectTypeError` with
+  `cause: "malformed subject"`. Upstream's `userIDRegex` is
+  `^[^:#\s\x00\p{Cc}]+$`, so none of them is a subject there
+  either.
+
+`SubjectDefect` — what `InvalidSubjectTypeError.cause` carries —
+therefore has two members, `"malformed subject"` and `"undefined
+subject type"`, and a third state: `undefined`, which is the
+ordinary "this relation does not admit that subject" refusal and
+is deliberately causeless.
+
+The second group closes a silent failure. Passing an
+OpenFGA-shaped `user` string through `subjectId` — `subjectId:
+"eng#member"` — used to resolve quietly to `false`, which a caller
+cannot tell from a real denial. It now raises. **The ordering
+differs between the two commands, and both orders are
+upstream's:** `check` validates the subject first, then the
+contextual tuples; `listObjects` validates contextual tuples, then
+the target relation, then the subject.
+
+The **write** path applies the same id rule. `addTuple` used to
+accept a `subjectId` containing `:` or `#`, so such a row was
+writable and — once the check gate landed — uncheckable. Both
+gates now run the same predicate.
+
+### Known divergence: the store's id domain
+
+OpenFGA accepts any non-empty id with no control character and no
+`#`, `:` or space. `café`, `alice` and a 300-character id are
+ordinary ids there. A store may hold fewer of them than that, and
+`@tsfga/kysely` on PostgreSQL does: its `object_id` and
+`subject_id` are `uuid` columns.
+
+So `TupleStore` declares an `idDomain`, and core refuses an id
+outside it with `IdDomainError` — at the request boundary, before
+any store read, on `check`, `checkMany`, `listObjects`,
+`listSubjects`, `addTuple`, `removeTuple` and contextual tuples.
+
+**The domain `@tsfga/kysely` declares is deliberately narrower
+than the `uuid` column's own input grammar.** PostgreSQL accepts a
+UUID uppercased, hyphenless, braced, or hyphenated oddly, and
+stores all of them as one value — while OpenFGA treats each
+spelling as a distinct id. Admitting more than the canonical
+spelling would let a grant written for one answer `true` for
+another. Only lower-case, hyphenated, 8-4-4-4-12 is admitted.
+Nothing about the version or variant digits is checked: the nil
+UUID is an ordinary id here, and that is the point — the typed
+wildcard lives in a column of its own, so **no id value is
+reserved**.
+
+**Every refusal is in the refusing direction and none is in the
+granting one.** A refused request is one no grant was computed
+for. The read paths raise rather than answering `false`, which is
+upstream's own shape: measured on v1.18.2, `Check` returns HTTP
+400 for every id it cannot represent and never answers `false`. A
+silent deny is indistinguishable from a real one, and the day an
+identity provider changes its id format a fleet would lose access
+with nothing reporting it.
+
+The refused set is a class, not a list: **every id upstream admits
+that is not a canonical UUID**.
+`tests/conformance/id-domain.test.ts` pins representatives of
+it, and `capability-refusals.json` carries the inventory entry
+under `ID-DOMAIN-OUT-OF-DOMAIN`.
+
+**Precedence: upstream's rules first.** An id can be malformed by
+upstream's rules *and* outside the store's domain — every
+malformed id is, since none of them is a canonical UUID — so a
+request carrying both reports the upstream rule. `doc:*` reports
+the typed wildcard; a subject holding `#` reports the malformed
+subject; a well-formed `user:alice` is what is left over. The
+domain gate also runs *before* the first question about the
+model, because it is a rule about a string and upstream settles
+every string question before it consults a type restriction.
+
+This is a permanent, declared limitation of the store, not a bug
+awaiting a fix. A store whose ids are opaque strings declares
+`OPAQUE_IDS` and none of it applies.
 
 ## Cycles and indeterminacy
 
@@ -235,68 +496,6 @@ The last row is the one that matters. Implementing "a cycle is
 just `false`" makes `base:true but not subtract:cycle` grant,
 because the truncated exclusion reads as "not excluded". OpenFGA
 denies, and so does tsfga.
-
-### Known divergence: `uint`
-
-A `uint` parameter reaches CEL as a `bigint`, which is CEL's
-`int`, so two cells differ from upstream:
-
-| expression | OpenFGA | tsfga |
-|---|---|---|
-| `type(n) == uint` | `true` | `false` |
-| `n + 1u == 8u` | `true` | error, no overload |
-
-Both are pinned two-sided, so they cannot change unnoticed.
-`uint(n) + 1u == 8u`, `string(n)`, `int(n)`, `n * 2u == 14u` and
-`n in [1u, 7u, 9u]` all agree, as does `type(n) == int`.
-
-**This is a representation trade, not a missing capability.**
-cel-js does have a `uint` carrier — `UnsignedInt`, from its
-`./evaluator` subpath export — and using it makes both rows above
-agree. It is not used because cel-js has no `int(uint)` overload
-at all (even `int(7u)` fails), so adopting it would fix these two
-cells and break `int(n) == 7`, which OpenFGA answers `true`.
-Two exotic expressions for one ordinary one is not obviously the
-right direction, so the current representation stands until
-somebody decides deliberately.
-
-Note that a mixed-type comparison such as `n >= 7`, `n == 7` or
-`n in [1, 7, 9]` on a `uint` parameter is **refused by OpenFGA at
-model-write time**, so those cells are unreachable in a valid
-model and do not bear on the trade.
-
-Every other integer cell agrees, including the arithmetic
-operators, exact comparison past 2^53, saturation at the int64
-bounds, and overflow past them.
-
-### Known divergence: sub-millisecond timestamps
-
-Go's `time.Time` is nanosecond-resolution; cel-js maps a CEL
-timestamp onto a JS `Date`, which is millisecond. Anything finer
-is discarded silently — from the context value and from the
-`timestamp('…')` literal alike — and both engines still answer,
-so the booleans differ:
-
-| expression | context `n` | OpenFGA | tsfga |
-|---|---|---|---|
-| `n == timestamp('…T00:00:00Z')` | `…00.000000001Z` | `false` | `true` |
-| `n == timestamp('…T00:00:00Z')` | `…00.000001Z` | `false` | `true` |
-| `n > timestamp('…T00:00:00Z')` | `…00.0005Z` | `true` | `false` |
-| `n > timestamp('…00.000000000Z')` | `…00.000000500Z` | `true` | `false` |
-
-The first two rows are the granting direction. Everything at
-millisecond resolution or coarser agrees, so a condition that
-compares whole seconds, minutes or dates — which is what an
-expiry or a business-hours window is — is unaffected. All four
-cells and both boundary controls are pinned two-sided in the
-conformance suite.
-
-Unlike the `uint` divergence, this one was found unreachable
-rather than judged too costly. `@marcbachmann/cel-js` 8.0.0
-declines to displace its own `timestamp(string)` overload, and
-its standard library cannot be turned off, so the literal side of
-the comparison truncates whatever a custom carrier held. It will
-close if cel-js changes its timestamp representation.
 
 ### Known divergence: recursive relations
 
@@ -474,12 +673,58 @@ The returned array is in candidate order, not completion order.
 That is a tsfga determinism choice rather than parity; upstream
 streams objects in whatever order its pool finishes them.
 
-An error in any candidate fails the whole call, `check`'s errors
-included — `DepthExceededError` in one object does not silently
-drop that object from the list, matching upstream. Which error
-surfaces is deterministic: it is the first failing candidate in
-*candidate* order, not the first to fail in wall-clock order. No
-candidate after a failure is started.
+The target relation is gated **before** the candidate pool is
+read: a relation the model does not define raises
+`RelationConfigNotFoundError`, the same error `check`, `checkMany`,
+`listSubjects` and `addTuple` raise, rather than depending on
+whether any row happens to name an object of that type. Contextual
+tuples are validated first, because upstream orders the two gates
+that way and the order is observable.
+
+An error in any candidate otherwise fails the whole call. Which
+error surfaces is deterministic: it is the first failing candidate
+in *candidate* order, not the first to fail in wall-clock order.
+No candidate after a failure is started. There are exactly two
+exceptions, and both drop the candidate and keep the rest of the
+answer:
+
+- `DepthExceededError` — see "Known divergence: `listObjects` past
+  the depth budget" above for why.
+- a `ConditionEvaluationError` raised on a read that does **not**
+  name the request subject. The reads that *do* name it — the
+  direct row and the `subjectType:*` wildcard row — are the ones
+  upstream's reverse expansion always issues, so an error there
+  refuses on both engines and still aborts here. Every other read
+  sits behind at least one hop, and upstream materialises it only
+  if some path from the subject leads there; tsfga checks each
+  candidate forward and cannot know, so it drops it. The residue
+  is that where upstream's expansion does reach such a row it
+  refuses the whole call and tsfga returns the partial list —
+  under-reporting, never granting.
+
+### `listObjects` truncates, silently
+
+At most `listObjectsMaxResults` objects come back. It defaults to
+**1000**, matching `OPENFGA_LIST_OBJECTS_MAX_RESULTS`, and
+`Infinity` opts out. Upstream truncates silently — `ListObjects`
+has no cursor and no field saying the answer was cut — and so does
+this: a full answer and a truncated one are indistinguishable to
+the caller. Two consequences, both shared with upstream:
+
+- **Which** objects come back above the cap differs between the
+  engines. Upstream keeps whatever its worker pool completed
+  first; tsfga keeps the first `listObjectsMaxResults` granting
+  candidates *in candidate order*. Compare counts, never
+  membership.
+- Reaching the cap **stops the producers**. Nothing further is
+  launched, so a candidate past the cap is never resolved and can
+  never raise. A call that answers is therefore not evidence that
+  every object of the type is resolvable — only that the ones
+  reported are.
+
+The cap bounds the answer and never the gates: a relation with no
+config is still refused, and a cap of `1` does not turn a refusal
+into a one-element list.
 
 ## Relation configs gate the reads
 
@@ -669,18 +914,76 @@ the reason on `.cause`:
 
 | cause | meaning |
 |---|---|
+| `malformed type name` | the object type's own name fails upstream's proto pattern `^[^:#@\s]{1,254}$` — one cause for both `type_invalid_pattern` and `type_invalid_length`, because upstream's split is between two constraints on one field |
+| `malformed relation name` | the same pattern on the relation field, under a bound of 50 |
+| `malformed condition name` | the same pattern and bound again, on `writeConditionDefinition`'s `name` |
+| `malformed condition parameter name` | the same, on every key of `parameters` — a separate loop, so the detail names the offending key |
+| `reserved keyword` | the type's or the relation's name is `self` or `this`; upstream's `validateNames`, which looks at those two names and nothing else — a *condition* named `self` is stored |
 | `intersection has fewer than two operands` | a set operation with one child or none; upstream: "as intersection has less than 2 children" |
 | `undefined condition` | a type restriction names a condition the store has not got |
 | `tupleset relation admits a userset` | the relation a tuple-to-userset reads is assignable to `type#relation` |
 | `tupleset relation admits a wildcard` | that relation is assignable to `type:*` |
+| `tupleset relation is not a direct relation` | the relation named as `tupleset` rewrites at all; upstream requires its rewrite to be exactly `This` |
+| `type restrictions on a non-assignable relation` | `directlyAssignable` is non-empty on a relation whose `intersection` has no `direct` operand |
+| `relation admits nothing and rewrites nothing` | the relation can never grant |
+| `relation has no entrypoint` | the closed self-cycle form; see below |
+| `rewrite cycle` | the rewrites lead back to a relation already on the path; upstream: "an authorization model cannot contain a cycle" |
 
-The first two were fail-open: a single-operand intersection
-resolved to whatever that operand said, and a tupleset relation
-admitting a userset had its subject relation discarded on
-dispatch, landing on a different relation of the linked object and
-granting.
+Four of those read as stronger than they are without a
+qualifier:
 
-**The last two have a stated gap.** They are properties of a
+- **`relation admits nothing and rewrites nothing` is not
+  "`directlyAssignable: []` is refused".** An empty list beside a
+  rewrite is how a purely computed relation is spelled. The defect
+  is an empty list with *no* rewrite either.
+- **`type restrictions on a non-assignable relation` fires only
+  against an `intersection` with no `direct` operand.** The
+  converse is ordinary: `directlyAssignable` beside `impliedBy`,
+  `computedUserset`, `tupleToUserset` or `excludedBy` is
+  upstream's `union(This, …)` and `difference(This, …)`, both
+  valid.
+- **`rewrite cycle` follows rewrites on the same object type
+  only.** Every `impliedBy` arm, the `computedUserset`, the
+  `excludedBy` and every `computedUserset` intersection operand.
+  Direct assignment and `tupleToUserset` are not followed, because
+  upstream's own walk stops at both: `viewer: viewer from parent`
+  names this relation on *another* object and is the commonest
+  shape a model has. A target whose config has not been written
+  yet is skipped, for the write-order reason below — so the rule
+  is weaker than upstream's in the accepting direction, never the
+  refusing one. The depth-1 case, `viewer: viewer`, is reported as
+  `rewrite names its own relation` instead, which is the cause
+  upstream reports for it.
+- **`relation has no entrypoint` is the closed case only.** An
+  entrypoint is a whole-model property, and upstream decides it
+  over one document. A single config decides only the relation
+  whose *sole* arm is a tuple-to-userset onto **itself**, over a
+  tupleset admitting its own object type and nothing else
+  (`define viewer: viewer from parent`, `parent: [doc]`). Any
+  second arm is an entrypoint, and a tupleset admitting some other
+  type is not a cycle — that type's relation may have one. The
+  general rule stays open.
+
+The table is the set of causes a config or condition write raises
+today, not the whole of `RelationConfigDefect`. The union also
+declares `rewrite names its own relation`, described below with
+`rewrite cycle`, and two more that **nothing raises yet** —
+`computed relation undefined on every tupleset type` and
+`undefined relation` — for the reason in the gap below. They are
+declared so the union does not change shape when a whole-model
+validator arrives. `errors.ts` is the source of truth for the
+union; read it before matching on `.cause` exhaustively.
+
+Two of them close fail-open shapes. `intersection has fewer than
+two operands`: a single-operand intersection resolved to whatever
+that operand said. `tupleset relation admits a userset`: such a
+row had its subject relation discarded on dispatch, landing on a
+different relation of the linked object and granting.
+
+**The three tupleset rules have a stated gap** — `tupleset
+relation admits a userset`, `tupleset relation admits a wildcard`
+and `tupleset relation is not a direct relation`. They are
+properties of a
 *different* relation than the one being written — the one named as
 `tupleset` — so they can only be checked when that relation's
 config already exists. A tuple-to-userset declared **before** its
@@ -693,6 +996,74 @@ nothing documents. Conditions have no such gap — define them
 before the configs that name them, which is the order upstream's
 atomic model write imposes anyway.
 
+**Two further rules are open for a harder version of the same
+reason.** Upstream also refuses a rewrite naming a relation the
+object type does not define, and a tuple-to-userset whose computed
+relation **no** tupleset type defines. Neither can be decided from
+one config: for a forward reference the premise is *always*
+absent, so the "skip when the premise is not yet written" rule
+above degenerates into never checking, while checking strictly
+refuses correct models. Both rules were implemented warn-only and
+run over the whole conformance corpus: they fire on 43 config
+writes that are not defects, every one an ordinary model whose
+relations are written in definition order rather than dependency
+order (`viewer: a but not banned` before `banned`; `blocked:
+nblocked from parent` before `nblocked`). Both belong to a
+validator that sees the whole model at once — a batch config write
+— and until there is one, the mistake is reported at check time
+instead, where it raises `RelationConfigNotFoundError` and blames
+the request rather than the model.
+
+### Which refusals are accounted for
+
+The rules above are one half of a gate, and the question a
+consumer actually has is the other half: *which refusals does
+OpenFGA make that tsfga does not?*
+
+`packages/core/write-gate-causes.json` answers it. It enumerates
+every refusal OpenFGA v1.18.2 constructs in the seven Go files
+carrying its write- and model-write refusal vocabulary, and
+disposes of each one: implemented by a named rule, implemented
+partly with the gap written out, pinned as a divergence with the
+test that pins it, open with the reason it is open, or
+inapplicable with the reason. The enumeration is mechanical, and
+its recall over those files is enforced on every CI run — each of
+the 107 error-construction sites in them is attributed to a cause
+or listed as an exclusion with a reason, and an unattributed one
+fails the build.
+
+**What it does not claim.** It does not audit whether a rule's
+body is a correct port of the cause it claims; those dispositions
+are decided once, by hand, and reviewed. It does not cover the
+protobuf field constraints, which live in a Go module the
+enumeration cannot read — those are entered by measurement
+against the running container, and their completeness is not
+claimed. What it does do is go red when the pinned container
+moves, when upstream adds, removes or renames a refusal, and when
+a reference in it stops resolving.
+
+**Every rule has a name, and the error carries it.**
+`TsfgaError.ruleId` is the id of the rule that refused —
+`"TUPLE-SUBJECT-MALFORMED"`, `"CONFIG-REWRITE-NAMES-ITSELF"` — or
+`null` when the error is not a write refusal. `UPSTREAM_RULE_IDS`
+and `CAPABILITY_RULE_IDS` are exported, so a consumer can switch
+on a refusal without matching message prose, and can tell a
+parity refusal from one of tsfga's own.
+
+The ids are names, not an order. The rules stay where they are in
+the source and their precedence is the order of the statements
+that raise them; what an id buys is that a test can assert *which*
+of two competing refusals won, which is the only way precedence is
+observable at all.
+
+**Refusals in the other direction get their own list.**
+`packages/core/capability-refusals.json` records refusals tsfga
+makes that OpenFGA does not. They are divergences rather than
+parity, and each carries a test that fails if the divergence ever
+disappears. Two lists rather than one list with an exception:
+inside a single bijection, any future rule could opt out of the
+completeness argument by declaring itself special.
+
 `addTuple` throws `ImplicitTupleError` for a tuple that says only
 what the model already says — `doc:1#blocked@doc:1#blocked`.
 Upstream refuses it: "cannot write a tuple that is implicit".
@@ -702,44 +1073,82 @@ Upstream refuses it: "cannot write a tuple that is implicit".
 gate is deliberately not in the validation `addTuple` and
 contextual tuples share. Both halves are pinned two-sided.
 
-## Write-time condition validation
+## Duplicate writes
 
-`writeConditionDefinition` compiles the expression and throws
-`ConditionCompileError` when it does not parse. OpenFGA compiles
-every condition while validating the model write that carries it,
-so an expression that cannot be parsed never reaches a check
-there; without this it was accepted three times over — the
-definition write, every tuple write beneath it, and every check
-until someone ran one.
+`addTuple` throws `DuplicateTupleError` when the tuple is already
+stored — upstream's `on_duplicate` default of `"error"`. It used
+to upsert.
 
-Compilation is parse-only. OpenFGA also type-checks the
-expression against its declared parameters and refuses, for
-example, `not_a_function(x)`; cel-js parses that and fails only
-when it is evaluated, so tsfga accepts the definition and raises
-a `ConditionEvaluationError` at check time. Pinned two-sided in
-`tests/conformance/condition-compile.test.ts`.
+The natural key is upstream's `TupleKeyWithoutCondition`: object
+type, object id, relation, subject type, subject id, subject
+relation. **The condition is not part of it.** Re-granting a live
+edge under a different condition is therefore a duplicate, not a
+second row, and the way to change a grant's condition is
+`removeTuple` then `addTuple`, in that order — which is what
+OpenFGA requires. The upsert was silent and widened as readily as
+it narrowed: dropping a condition turned a time-boxed grant
+permanent.
 
-`addTuple` refuses a tuple whose condition the model cannot
-accept, with the cause on `InvalidConditionalTupleError.cause`:
+Upstream's `on_duplicate: "ignore"` opt-in is not offered. A
+caller that wants the old absorb-the-duplicate behaviour catches
+`DuplicateTupleError` and ignores it.
 
-| cause | meaning |
-|---|---|
-| `condition is missing` | no condition, and every matching restriction has one |
-| `invalid condition for type restriction` | a defined condition this relation does not name |
-| `undefined condition` | no such condition in the store |
-| `parameter type error` | a context value not readable as its declared type |
-| `invalid context parameter` | a context key the condition does not declare |
+## Deleting a tuple that is not there
 
-Only the context keys actually **present** are validated. A
-conditioned tuple with no context, or a partial one, is accepted:
-the rest can arrive with the check request.
+`removeTuple` throws `MissingTupleError` when no such row exists,
+and returns `Promise<void>`. Upstream's `on_missing` defaults to
+`error`, so a delete of an absent row is
+`write_failed_due_to_invalid_input` rather than a quiet no-op —
+tsfga answered `false`, which encoded an outcome OpenFGA has no
+word for.
 
-A conditioned write costs one extra round-trip — the
-condition-definition lookup — so 3 rather than 2. Unconditioned
-writes are unchanged. That is deliberate and uncached: a
-client-lifetime cache on a *validation* gate goes stale across
-processes, and would keep accepting tuples after another instance
-narrowed the model.
+A caller that wants the old behaviour catches it:
+
+```ts
+try {
+  await fga.removeTuple(key);
+} catch (error) {
+  if (!(error instanceof MissingTupleError)) throw error;
+}
+```
+
+**A malformed delete throws first.** `removeTuple` applies
+upstream's *syntactic* delete validation — `IsValidUser` on the
+rendered subject, the 512-byte subject bound, the
+`^[^\s]{2,256}$` object bound, and the
+`^[^:#@\s]{1,50}$` relation pattern on a non-empty relation. That
+is the whole of it.
+
+**It applies no model validation at all, deliberately.** Upstream
+does not either: `WriteCommand`'s delete loop is one `IsValidUser`
+call and a `TODO`. So an undefined relation, an undefined type,
+and a subject type the relation does not admit all reach the row
+and report `MissingTupleError` if it is absent. That is what makes
+a bad model change recoverable — a row written under a model that
+defined `editor` is still deletable under one that does not. A
+delete gate built out of the write validators would strand those
+rows permanently.
+
+The subject predicate is genuinely a different one, not the write
+path's narrowed: `IsValidUser` is a union over the bare wildcard,
+a user id, an object and a userset, so `user:a#b` is a legal
+delete key and an illegal write key.
+
+### Malformed subjects
+
+A subject ref that is not well formed at all — `team:*#member`, a
+wildcard id carrying a subject relation — raises
+`InvalidSubjectTypeError` with `cause: "malformed subject"`,
+**before** the type gate, because upstream refuses it in
+`ValidateUser` before any type restriction or condition is
+consulted and the order is observable. It presented as the userset
+`team#member` before, so a relation admitting `team#member`
+accepted it and stored a row no model can describe. When the cause
+is set the message takes a different form — `Invalid subject for
+<type>.<relation>: malformed subject` — because rendering the
+shape would print `team#member` and name a userset the caller did
+not write. For every other refusal the cause is `undefined` and
+the message is unchanged.
 
 ## TupleStore interface
 
@@ -773,6 +1182,82 @@ admit, or filing a row under the wrong slot, loses that row. An
 adapter bug cannot widen what the model admits, only lose grants
 it should have found.
 
+On the write side, `insertTuple` **inserts and reports**: it
+returns `true` when a row was written and `false` when the natural
+key already existed, and on `false` nothing may be written — the
+stored row keeps the condition and the context it already had. It
+used to mean upsert, and a store that can only upsert cannot
+implement upstream's default; `TsfgaClient.addTuple` turns the
+`false` into `DuplicateTupleError`.
+
+### A store declares which ids it can hold
+
+`TupleStore` has a required `idDomain`. OpenFGA admits any
+non-empty id with no control character and no `#`, `:` or space; a
+store may hold fewer than that, and a store keeping its ids in a
+`uuid` column holds very many fewer.
+
+```ts
+import { OPAQUE_IDS, type TupleStore } from "@tsfga/core";
+
+class MyStore implements TupleStore {
+  readonly idDomain = OPAQUE_IDS;
+  // ...
+}
+```
+
+`OPAQUE_IDS` admits everything and is the right answer for a store
+whose ids are strings — it is one line, and it is what every
+existing adapter needs. `CANONICAL_UUID_IDS` is the other one
+shipped: exactly 8-4-4-4-12 lower-case hexadecimal digits.
+
+There is no default and no absent-means-opaque third state.
+Absence would compile silently for exactly the population that
+most needs to be told, and a store that never says what it can
+hold reports its refusals as a driver error from three layers
+down.
+
+**A declared domain can only narrow, never widen — so there is no
+clamp here, and the absence is deliberate.** Elsewhere a store's
+reply is a hint that core re-applies the model to. This is the one
+place a store says something core takes at its word, and it is
+safe to, because both mistakes fail in the refusing direction: a
+store declaring `OPAQUE_IDS` over narrow columns gets its own
+driver errors back, exactly as it does today, and one declaring
+narrower than its columns refuses requests it could have served.
+Neither grants.
+
+### The two write methods take a branded argument
+
+`insertTuple` takes a `GatedTuple` and `upsertRelationConfig` a
+`GatedRelationConfig`. Both are `AddTupleRequest` and
+`RelationConfig` with a phantom property no value carries, minted
+inside this package only after the corresponding validator has
+run. An adapter declares the branded types on its own methods —
+both are exported — and is otherwise unaffected: the brand erases
+at emit, so nothing changes at runtime.
+
+The point is the *caller*. `KyselyTupleStore` is exported with a
+public `insertTuple`, so a seeding script or a backfill could
+write a row `addTuple` refuses. That is not hypothetical: two such
+rows produce `check → true` for a permission no OpenFGA store can
+represent, and it compiled against the published package.
+
+This is the read-side rule pointed the other way. A store's reply
+is a hint and `clampToQuery` re-applies the model to it; a store's
+*input* is likewise not where the model is decided, and the
+compiler is what says so, because there is nothing to check at the
+sink — the value's shape is fine, and what makes it legal is that
+it went through the validator.
+
+**Two limits, both real.** TypeScript's method parameters are
+bivariant, so a third-party store declaring the unbranded
+parameter still satisfies `TupleStore`; the compiler will never
+demand the brand of an adapter author. And a brand is not a lock:
+it erases at emit, so plain JavaScript is unaffected and anyone
+writing `as` gets what they asked for. What closes is the
+accidental path, which is the one that was measured.
+
 Slots are exact. `direct` is the tuple for this subject with no
 subject relation, `wildcard` the one for `subjectType:*` likewise,
 and every row in `usersets` has a subject relation. A minimal
@@ -788,22 +1273,370 @@ PostgreSQL adapter.
 
 ## Conditions
 
-CEL condition evaluation is supported via
-[`@marcbachmann/cel-js`](https://github.com/nicholasgasior/cel-js).
-Tuples can reference named condition definitions, and the
-check algorithm evaluates them automatically.
+A condition is a CEL expression, stored by name, evaluated on
+every tuple that carries one. This is the one section about CEL:
+what is unsupported, what is validated at write, what agrees, and
+every measured place the two engines part company.
 
-Context merge rule: tuple context properties take precedence
-over request context properties (matching OpenFGA behavior).
+### `matches()` is not supported
 
-Compiled CEL expressions are cached by expression source text
-(content-keyed). Redefining a condition via
-`writeConditionDefinition` therefore takes effect on the next
-evaluation — there is no per-name cache to go stale — and
+**tsfga has no regular-expression support.** A condition whose
+expression calls `matches()` is refused when you write it:
+
+```
+ConditionCompileError: undeclared reference to 'matches'
+```
+
+OpenFGA supports it. This is the largest deliberate difference
+between the two, it is permanent, and it is first here because it
+is the one most likely to affect you — if you are porting a model
+from OpenFGA and any condition uses `matches`, that model will not
+load.
+
+**What to use instead.** Most real patterns are a prefix, a
+suffix, a substring or a membership test, and all of those are
+supported and behave identically on both engines:
+
+| instead of | write |
+|---|---|
+| `s.matches("^ward-[0-9]+$")` | `s.startsWith("ward-")` |
+| `s.matches("^https://hooks[.]acme[.]io/")` | `s.startsWith("https://hooks.acme.io/")` |
+| `s.matches("@eu[.]example$")` | `s.endsWith("@eu.example")` |
+| `s.matches("^sev-[1-3]$")` | `s in ["sev-1", "sev-2", "sev-3"]` |
+| `s.matches("^dev-[0-9a-f]{8}$")` | `s.startsWith("dev-") && size(s) == 12` |
+
+These are narrower than the patterns they replace. That is the
+trade, and it is deliberate: a condition is a narrowing device,
+and a predicate you can read at a glance is worth more in an
+authorization rule than one you cannot.
+
+If your rule genuinely needs a regular expression — validating a
+user-supplied format, say — do it in your application before the
+check, and pass the result to the condition as a boolean.
+
+**Why.** tsfga evaluates CEL with
+[`@marcbachmann/cel-js`](https://github.com/nicholasgasior/cel-js);
+OpenFGA evaluates it with cel-go, whose `matches()` is RE2.
+cel-js's is a JavaScript `RegExp`. The two are different languages
+that share a syntax, and the differences do not fail loudly:
+
+- `[[:alnum:]]` is a character class in RE2 and, in JavaScript,
+  the seven literal characters `[ : a l n u m` — so an email
+  allow-list silently stops matching and access disappears with no
+  error anywhere.
+- `[^]` is a syntax error in RE2 and matches **any character
+  including newline** in JavaScript — so a pattern written as a
+  whitelist admits everything.
+- `^(a+)+$` is linear in RE2 and exponential in JavaScript:
+  measured on V8, 5.2 seconds for a 30-character input, 20.9
+  seconds at 32, and longer inputs did not finish.
+
+An earlier release papered over this with a pattern translator. It
+was a second regular-expression implementation owned by this
+project, in the path of every authorization decision. Rather than
+keep it, or replace it with a validator that would have caught
+some of these and not others, the feature was removed. The full
+analysis, including the measured backtracking curves on three
+runtimes and the complete RE2-versus-cel-js gap table, is checked
+in under [`docs/cel-js/`](../../docs/cel-js/).
+
+### How a condition is handled
+
+`writeConditionDefinition` stores the expression, **compiles** it,
+and **type-checks** it against its declared parameters — which is
+what OpenFGA's model write does, with
+`cel.EagerlyValidateDeclarations(true)`. An expression that cannot
+be parsed, that names a function cel-go does not declare, or that
+does not type-check never reaches a check. Without this it was
+accepted three times over: the definition write, every tuple write
+beneath it, and every check until someone ran one.
+
+At check time, context arrives from the tuple and from the request
+with **tuple context taking precedence**, values are read as their
+declared parameter types using OpenFGA's own conversion grammar,
+and a row whose condition is false is not a grant.
+
+Compiled expressions are cached by expression source text
+(content-keyed). Redefining a condition therefore takes effect on
+the next evaluation — there is no per-name cache to go stale — and
 identical expressions share one compiled entry. The cache holds a
-thousand entries and evicts the least recently used, so a caller
-that keeps rewriting condition definitions does not grow it
-without limit.
+thousand entries and evicts the least recently used. The type
+check is **not** cached with the expression: it belongs to the
+definition, so two conditions sharing an expression and declaring
+different parameters are each checked.
+
+Besides `matches()`, tsfga **refuses** in three places, and only
+three: a condition naming a function OpenFGA does not declare is
+rejected at write, as OpenFGA rejects the model; an expression
+that does not type-check against its declared parameters is
+rejected at write; and an evaluation past
+`maxConditionEvaluationCost` is refused at check. Refusing is not
+emulation — it is how tsfga avoids answering `true` where OpenFGA
+would not answer at all.
+
+`addTuple` refuses a tuple whose condition the model cannot
+accept, with the cause on `InvalidConditionalTupleError.cause`:
+
+| cause | meaning |
+|---|---|
+| `condition is missing` | no condition, and every matching restriction has one |
+| `invalid condition for type restriction` | a defined condition this relation does not name |
+| `undefined condition` | no such condition in the store |
+| `parameter type error` | a context value not readable as its declared type |
+| `invalid context parameter` | a context key the condition does not declare |
+| `context contains forbidden characters` | a Unicode control character in a context key, in a string value at any depth, or in the condition name |
+| `context size limit exceeded` | a condition context over `writeContextByteLimit` |
+
+Only the context keys actually **present** are validated. A
+conditioned tuple with no context, or a partial one, is accepted:
+the rest can arrive with the check request.
+
+A tab is a control character and is refused — worth stating,
+since it is the one a caller might send without meaning anything
+by it. The name is scanned before the definition is looked up, so
+a dirty condition name reports the characters rather than
+"undefined condition", which is upstream's order.
+
+The size rule has two qualifications. **It is upstream's rule but
+not upstream's measure:** upstream sizes a serialised protobuf
+`Struct` against `DefaultWriteContextByteLimit` (32 KiB); tsfga
+sizes the UTF-8 bytes of the context's JSON, which cannot be made
+exact, so the two agree except within a narrow band of the
+boundary. The limit is `writeContextByteLimit` on `CheckOptions`,
+defaulting to the exported `DEFAULT_WRITE_CONTEXT_BYTE_LIMIT`.
+**And it applies to `addTuple` only:** upstream enforces it in the
+Write command and nowhere else, so a check request whose
+contextual tuple carries a large context is answered, not refused.
+
+A conditioned write costs one extra round-trip — the
+condition-definition lookup — so 3 rather than 2. Unconditioned
+writes are unchanged. That is deliberate and uncached: a
+client-lifetime cache on a *validation* gate goes stale across
+processes, and would keep accepting tuples after another instance
+narrowed the model.
+
+### What agrees
+
+The core of the language does. Booleans and logical operators,
+`int` / `uint` / `double` / `string` / `bool` comparison and
+arithmetic within range, list and map membership (`in`), field
+access, `size()`, `has()`, the ternary, the comprehension macros
+(`all`, `exists`, `exists_one`, `filter`, `map`), the string
+members `contains` / `startsWith` / `endsWith`, timestamp and
+duration construction, comparison and arithmetic at millisecond
+resolution or coarser with the whole accessor family, and the
+parameter-type coercion of every value reaching a condition from a
+tuple or a request.
+
+A `uint` parameter is carried as CEL's `uint` — cel-js's
+`UnsignedInt` — so `type(n) == uint`, a bare `u`-suffixed literal,
+and arithmetic bounded by **uint64** rather than int64 all agree
+with upstream. Saturation is worth stating: a `uint` context value
+saturates at **int64**'s ceiling, not uint64's, because upstream
+converts every numeric string through the same `Int64()` and only
+then rejects a negative. A mixed-type comparison such as `n >= 7`
+on a `uint` parameter is refused by OpenFGA at model-write time,
+so those cells are unreachable in a valid model.
+
+That covers what conditions are normally for: an expiry, a
+business-hours window, an IP or tenant allow-list expressed as a
+list membership, a numeric threshold, a flag.
+
+### Where tsfga and OpenFGA disagree
+
+Read the **direction** first; it decides whether a divergence is
+an inconvenience or a security problem.
+
+| Direction | What happens | How bad |
+|---|---|---|
+| **Refusing** | OpenFGA answers, tsfga raises | Access is lost, loudly. Your caller sees an error. |
+| **Different boolean** | Both answer, the answers differ | Quiet. Usually denies. |
+| **Granting** | OpenFGA refuses the model or declines to answer, tsfga returns `true` | **The one to read twice.** tsfga grants where upstream would not. |
+
+The table is short, and it is short because `matches()` was
+removed rather than repaired — most of what used to be here was
+regex. The row that matters most is not in it at all, because it
+is not a subtle disagreement: **a condition using `matches()` is
+refused outright.**
+
+*Measured against `@marcbachmann/cel-js` 8.0.0 and OpenFGA
+v1.18.2. If you have overridden or forked either, this table does
+not describe your build.* Every cell is pinned two-sided in the
+conformance suite, so if either engine changes a test says so
+rather than this table quietly going stale. The table names the
+families that have been measured; it is **not a proof of
+completeness**, because the divergence set is "wherever cel-js
+differs from cel-go" and nobody has enumerated that.
+
+**Granting.** cel-go range-checks every arithmetic and conversion
+overload; cel-js checks binary `+`, `-` and `*` on ints and `-` on
+uints, and nothing else.
+
+| expression | context | OpenFGA | tsfga |
+|---|---|---|---|
+| `int(x) > 0` | `x = 1e19` | refused | `true` |
+| `int(x) < 0` | `x = -1e19` | refused | `true` |
+| `double(s) > 0.0` | `s = "1e400"` | refused | `true` |
+| `double(s) < 0.0` | `s = "-1e400"` | refused | `true` |
+| `-n > 0` | `n = int64min` | refused | `true` |
+| `n / -1 > 0` | `n = int64min` | refused | `true` |
+| `d + duration('2400000h') > d` | `d = 2400000h` | refused | `true` |
+| `duration('-2400000h') - d < d` | `d = 2400000h` | refused | `true` |
+| `s < '\u{1F600}'` | `s = U+1F600` | `false` | `true` |
+| `n == timestamp('…T00:00:00Z')` | `n = …00.000000001Z` | `false` | `true` |
+| `n == timestamp('…T00:00:00Z')` | `n = …00.000001Z` | `false` | `true` |
+
+And three at the **write** moment, where the model is what
+diverges rather than the answer:
+
+| expression | declared | OpenFGA | tsfga |
+|---|---|---|---|
+| `int(b) > 0` | `b: bool` | model refused | definition stored |
+| `duration(i) > duration('1s')` | `i: int` | model refused | definition stored |
+| `b.size() > 0` | `b: bool` | model refused | definition stored |
+
+Each names a call **both** engines declare with an argument type
+**neither** overloads. cel-js reports that the same way it reports
+the five overloads cel-go has and it does not, and tsfga cannot
+tell the two apart without transcribing cel-go's declaration table
+— which is the second-CEL-implementation shape this project does
+not build. The check that reads such a definition refuses on both
+sides, so nothing can be granted on one.
+
+**Refusing.** Five overloads cel-go declares and cel-js does not.
+The definition is stored — refusing the write would refuse a model
+upstream accepts — and every check that reads it raises.
+
+| expression | declared | OpenFGA | tsfga |
+|---|---|---|---|
+| `int(n)` | `n: uint` | answers | refused |
+| `int(d)` | `d: duration` | answers | refused |
+| `int(t)` | `t: timestamp` | answers | refused |
+| `string(d)` | `d: duration` | answers | refused |
+| `string(t)` | `t: timestamp` | answers | refused |
+| `ip.in_cidr(cidr)` / `ipaddress(s)` | — | answers | refused |
+
+These are **per-branch**: cel-js short-circuits, so
+`int(d) > 3600 || role == 'admin'` still answers `true`.
+
+**Four more refusals, none of them a missing overload.** They are
+grouped here because the direction is the same — upstream answers
+and tsfga does not — but the *cause* differs in each, and the
+cause is what tells you whether it will ever be closed.
+
+| expression | context | OpenFGA | tsfga |
+|---|---|---|---|
+| `l.exists_one(x, x == 'zz')` | `l` = 25 non-matching strings | `false` | refused on cost |
+| `n == 1.0` | `n = "1.0000000000000000000000001"` | answers | refused |
+| `n > timestamp('…')` | `n = "2026-01-01T00:00:01,5Z"` | answers | refused |
+| `ds[0] + ts[0] > ts[0]` | `ds: list<duration>`, `ts: list<timestamp>` | model stored | **write** refused |
+
+- **`exists_one` costs more here than upstream charges it.**
+  Upstream answers to 48 elements and refuses from 49;
+  tsfga refuses from 25. This is
+  `maxConditionEvaluationCost` over-charging, and over-charging is
+  the direction that limit is required to fail in. cel-go's
+  desugaring counts matches — `body ? __result__ + 1 : __result__`
+  — so the step costs 2 only on the iterations whose predicate
+  holds. tsfga's estimate runs *before* evaluation, by design, so
+  it cannot know which those are and charges the branch it cannot
+  rule out on every element. With an all-*true* predicate the two
+  boundaries coincide, which is how the constant is known not to
+  be an over-estimate of the step itself. Pinned in
+  `cel-cost.test.ts`. Every other comprehension — `all`, `exists`,
+  `map`, `filter` — refuses at exactly upstream's element count.
+- **A decimal string below the half-ulp is read upstream and
+  refused here**, for `double`, `int` and `uint` alike. Upstream
+  rounds the decimal to 64 significand bits and *then* asks
+  whether the result is representable, so
+  `"1.0000000000000000000000001"` becomes exactly `1.0` and is
+  read; tsfga asks the question of the decimal as written, at
+  whatever precision it is written to, and refuses it as the
+  non-dyadic value it is. `"1.0000000000000000001"` sits above the
+  half-ulp and is refused by both. **This is tsfga's own coercion
+  code, not a cel-js limitation** — cel-js never sees the string.
+  It is deferred by an explicit decision on release risk, not
+  because the CEL carve-out covers it: the fix moves the numeric
+  path every `int`, `uint` and `double` context value crosses, in
+  the accepting direction. Closing it means rounding to 64
+  significand bits before the exactness test.
+- **An RFC 3339 fractional separator must be a period here.** Go's
+  `time.Parse` falls back to a parser that takes a comma as well,
+  so `"…T00:00:01,5Z"` is a timestamp upstream and is not one
+  here. **Again tsfga's own coercion, not a cel-js gap** — this
+  time a regular expression in `conditions.ts`. Refusing, so it is
+  safe; the fix is one character and is post-release work.
+- **A temporal parameter declared inside a container is never
+  temporal-degraded**, so `duration + timestamp` on a
+  `list<duration>` and a `list<timestamp>` is refused at the
+  condition *write*, where the equivalent scalar declaration is
+  stored by both. **This one is cel-js's gap**: the degrade pass
+  exists only because cel-js declares `duration + timestamp` as a
+  Duration where cel-go declares a Timestamp, and it tests the
+  declared type rather than the container's element type. Closing
+  it needs a cel-js that declares the overload as cel-go does —
+  not a wider accommodation here, which would grow the very layer
+  this project removed.
+
+The first is pinned in `cel-cost.test.ts`; the other three in
+`condition-grammar.test.ts`, the last of them by
+`expectPinnedModelWriteDivergence` because what diverges is the
+write and not the answer. All four carry a row in
+`docs/cel-js/cases.jsonl` with both version strings.
+
+**Different boolean.** Go's `time.Time` is nanosecond-resolution;
+cel-js maps a CEL timestamp onto a JS `Date`, which is
+millisecond, and anything finer is discarded silently — from the
+context value and from the `timestamp('…')` literal alike.
+
+| expression | context `n` | OpenFGA | tsfga |
+|---|---|---|---|
+| `n > timestamp('…T00:00:00Z')` | `…00.0005Z` | `true` | `false` |
+| `n > timestamp('…00.000000000Z')` | `…00.000000500Z` | `true` | `false` |
+
+Everything at millisecond resolution or coarser agrees, so a
+condition comparing whole seconds, minutes or dates — which is
+what an expiry or a business-hours window is — is unaffected.
+
+Every unclosed row above has the same cause and the same fix:
+cel-js declines to replace a built-in overload, and its standard
+library cannot be turned off, so there is no way to reach one from
+outside the library. They close in `@marcbachmann/cel-js`, not
+here.
+
+### What this means for a condition you write
+
+- **A condition is a narrowing device.** Write it so the engines
+  disagreeing costs you a denial, not a grant. Prefer comparisons
+  over parameters your application controls to pattern matching
+  over strings an attacker controls.
+- **`matches()` is unavailable**, as the top of this section says.
+  There is no pattern syntax to get right, no portability rule to
+  apply, and no regular expression anywhere in an authorization
+  decision.
+- **Stay away from the magnitudes.** Arithmetic near the int64 or
+  uint64 bounds, `int()` and `double()` of an out-of-range operand
+  in either direction, durations past a few thousand hours, and
+  timestamps near year 1 or year 9999 are where the engines part
+  company — often in the granting direction, because cel-go
+  range-checks and cel-js does not.
+- **Whole milliseconds, not nanoseconds.** A CEL timestamp is a JS
+  `Date` here. Finer precision is silently dropped from literals
+  and from context alike.
+- **If you also run OpenFGA**, treat the two as sharing a model but
+  not a dialect. An expression tsfga stores may be one OpenFGA
+  refuses to store at all.
+- **`ipaddress()` and `in_cidr()` are unavailable.** cel-js does
+  not implement them. A condition naming either is stored — it is
+  a model upstream accepts — and every check that reads it is
+  refused. Express CIDR membership outside the condition, or as an
+  explicit list.
+
+If any of the above is load-bearing for your authorization
+decisions, the shortest honest advice is: write the check you
+depend on as a test against tsfga itself. That is what the
+conformance suite in this repository does, and it is the only
+thing that stays true across a dependency upgrade.
 
 ## License
 

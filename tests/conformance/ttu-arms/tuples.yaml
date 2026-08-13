@@ -1,0 +1,55 @@
+# d1: the `parent` arm is broken (a conditioned tupleset row with
+# no stored context, so a context-free check cannot evaluate it),
+# while the `owner` arm grants. Upstream evaluates the two TTU
+# arms as separate union children, so the granting arm wins.
+- user: folder_a1:f1
+  relation: parent
+  object: doc_a1:d1
+  condition:
+    name: valid_ip_a1
+- user: org_a1:o1
+  relation: owner
+  object: doc_a1:d1
+- user: user_a1:alice
+  relation: viewer
+  object: org_a1:o1
+
+# d2: same shape, but the granting arm denies too — both engines
+# must refuse, because nothing held.
+- user: folder_a1:f1
+  relation: parent
+  object: doc_a1:d2
+  condition:
+    name: valid_ip_a1
+- user: org_a1:o2
+  relation: owner
+  object: doc_a1:d2
+
+# d3: the broken tupleset row sits beside a direct grant on the
+# same relation. The direct row is its own union branch on both
+# engines, so this one already agrees.
+- user: folder_a1:f1
+  relation: parent
+  object: doc_a1:d3
+  condition:
+    name: valid_ip_a1
+- user: user_a1:alice
+  relation: arm_and_direct
+  object: doc_a1:d3
+
+# d4: both arms evaluable, only the owner arm grants.
+- user: folder_a1:f2
+  relation: parent
+  object: doc_a1:d4
+  condition:
+    name: valid_ip_a1
+    context:
+      user_ip: 192.168.0.1
+- user: org_a1:o1
+  relation: owner
+  object: doc_a1:d4
+
+# f2 grants nobody; f1 would grant alice if its link were live.
+- user: user_a1:alice
+  relation: viewer
+  object: folder_a1:f1

@@ -1,0 +1,307 @@
+# Ported from openfga/openfga v1.18.2
+# tests/check/complexity_three.go and tests/check/check_complexity4.go.
+#
+# One store holds every stage, exactly as upstream's
+# `or_compute_complex3` stage already does: each stage names its
+# objects with its own prefix, so the union of the stages' tuples
+# leaves every stage's answers unchanged.
+
+# ---------------------------------------------------------------
+# Stage A — ttu_userset_ttu (and compute_/or_compute_ over it)
+# complexity3 -userset_parent-> usersets_user
+#   -ttu_direct_userset-> ttus#direct_pa_direct_ch
+#   -mult_parent_types-> directs_user -direct-> user
+# ---------------------------------------------------------------
+- user: usersets_user_b2:a1
+  relation: userset_parent
+  object: complexity3_b2:a1
+- user: ttus_b2:a1#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:a1
+- user: directs_user_b2:a1
+  relation: mult_parent_types
+  object: ttus_b2:a1
+- user: user_b2:a1
+  relation: direct
+  object: directs_user_b2:a1
+
+# aud: only the leaf edge exists.
+- user: user_b2:aud
+  relation: direct
+  object: directs_user_b2:aud
+
+# aut: leaf + ttus, nothing above.
+- user: user_b2:aut
+  relation: direct
+  object: directs_user_b2:aut
+- user: directs_user_b2:aut
+  relation: mult_parent_types
+  object: ttus_b2:aut
+
+# auu: leaf + ttus + usersets, no complexity3 edge.
+- user: user_b2:auu
+  relation: direct
+  object: directs_user_b2:auu
+- user: directs_user_b2:auu
+  relation: mult_parent_types
+  object: ttus_b2:auu
+- user: ttus_b2:auu#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:auu
+
+# acu: the complexity3 edge alone.
+- user: usersets_user_b2:acu
+  relation: userset_parent
+  object: complexity3_b2:acu
+
+# act: complexity3 + usersets.
+- user: usersets_user_b2:act
+  relation: userset_parent
+  object: complexity3_b2:act
+- user: ttus_b2:act#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:act
+
+# acd: everything but the leaf.
+- user: usersets_user_b2:acd
+  relation: userset_parent
+  object: complexity3_b2:acd
+- user: ttus_b2:acd#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:acd
+- user: directs_user_b2:acd
+  relation: mult_parent_types
+  object: ttus_b2:acd
+
+# acd2: a complete chain, but to a different user.
+- user: usersets_user_b2:acd2
+  relation: userset_parent
+  object: complexity3_b2:acd2
+- user: ttus_b2:acd2#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:acd2
+- user: directs_user_b2:acd2
+  relation: mult_parent_types
+  object: ttus_b2:acd2
+- user: user_b2:acd2
+  relation: direct
+  object: directs_user_b2:acd2
+
+# ---------------------------------------------------------------
+# Stage B — ttu_ttu_userset
+# complexity3 -ttu_parent-> ttus -userset_parent-> usersets_user
+#   -userset-> directs_user#direct -> user
+# ---------------------------------------------------------------
+- user: ttus_b2:b1
+  relation: ttu_parent
+  object: complexity3_b2:b1
+- user: usersets_user_b2:b1
+  relation: userset_parent
+  object: ttus_b2:b1
+- user: directs_user_b2:b1#direct
+  relation: userset
+  object: usersets_user_b2:b1
+- user: user_b2:b1
+  relation: direct
+  object: directs_user_b2:b1
+
+- user: user_b2:bud
+  relation: direct
+  object: directs_user_b2:bud
+
+- user: directs_user_b2:buu#direct
+  relation: userset
+  object: usersets_user_b2:buu
+- user: user_b2:buu
+  relation: direct
+  object: directs_user_b2:buu
+
+- user: usersets_user_b2:but
+  relation: userset_parent
+  object: ttus_b2:but
+- user: directs_user_b2:but#direct
+  relation: userset
+  object: usersets_user_b2:but
+- user: user_b2:but
+  relation: direct
+  object: directs_user_b2:but
+
+- user: ttus_b2:bct
+  relation: ttu_parent
+  object: complexity3_b2:bct
+
+- user: ttus_b2:bcu
+  relation: ttu_parent
+  object: complexity3_b2:bcu
+- user: usersets_user_b2:bcu
+  relation: userset_parent
+  object: ttus_b2:bcu
+
+- user: ttus_b2:bcd
+  relation: ttu_parent
+  object: complexity3_b2:bcd
+- user: usersets_user_b2:bcd
+  relation: userset_parent
+  object: ttus_b2:bcd
+- user: directs_user_b2:bcd#direct
+  relation: userset
+  object: usersets_user_b2:bcd
+
+- user: ttus_b2:bcd2
+  relation: ttu_parent
+  object: complexity3_b2:bcd2
+- user: usersets_user_b2:bcd2
+  relation: userset_parent
+  object: ttus_b2:bcd2
+- user: directs_user_b2:bcd2#direct
+  relation: userset
+  object: usersets_user_b2:bcd2
+- user: user_b2:bcd2
+  relation: direct
+  object: directs_user_b2:bcd2
+
+# ---------------------------------------------------------------
+# Stage C — userset_ttu_userset (and compute_/or_compute_ over it)
+# complexity3 -[ttus#userset_pa_userset_ch]-> ttus
+#   -userset_parent-> usersets_user -userset-> directs_user#direct
+# ---------------------------------------------------------------
+- user: ttus_b2:c1#userset_pa_userset_ch
+  relation: userset_ttu_userset
+  object: complexity3_b2:c1
+- user: usersets_user_b2:c1
+  relation: userset_parent
+  object: ttus_b2:c1
+- user: directs_user_b2:c1#direct
+  relation: userset
+  object: usersets_user_b2:c1
+- user: user_b2:c1
+  relation: direct
+  object: directs_user_b2:c1
+
+- user: user_b2:cud
+  relation: direct
+  object: directs_user_b2:cud
+
+- user: directs_user_b2:cuu#direct
+  relation: userset
+  object: usersets_user_b2:cuu
+- user: user_b2:cuu
+  relation: direct
+  object: directs_user_b2:cuu
+
+- user: usersets_user_b2:cut
+  relation: userset_parent
+  object: ttus_b2:cut
+- user: directs_user_b2:cut#direct
+  relation: userset
+  object: usersets_user_b2:cut
+- user: user_b2:cut
+  relation: direct
+  object: directs_user_b2:cut
+
+- user: ttus_b2:cct#userset_pa_userset_ch
+  relation: userset_ttu_userset
+  object: complexity3_b2:cct
+
+- user: ttus_b2:ccu#userset_pa_userset_ch
+  relation: userset_ttu_userset
+  object: complexity3_b2:ccu
+- user: usersets_user_b2:ccu
+  relation: userset_parent
+  object: ttus_b2:ccu
+
+- user: ttus_b2:ccd#userset_pa_userset_ch
+  relation: userset_ttu_userset
+  object: complexity3_b2:ccd
+- user: usersets_user_b2:ccd
+  relation: userset_parent
+  object: ttus_b2:ccd
+- user: directs_user_b2:ccd#direct
+  relation: userset
+  object: usersets_user_b2:ccd
+
+- user: ttus_b2:ccd2#userset_pa_userset_ch
+  relation: userset_ttu_userset
+  object: complexity3_b2:ccd2
+- user: usersets_user_b2:ccd2
+  relation: userset_parent
+  object: ttus_b2:ccd2
+- user: directs_user_b2:ccd2#direct
+  relation: userset
+  object: usersets_user_b2:ccd2
+- user: user_b2:ccd2
+  relation: direct
+  object: directs_user_b2:ccd2
+
+# ---------------------------------------------------------------
+# Stage D — userset_userset_ttu
+# complexity3 -[usersets_user#ttu_direct_userset]-> usersets_user
+#   -ttu_direct_userset-> ttus#direct_pa_direct_ch -> directs_user
+# ---------------------------------------------------------------
+- user: usersets_user_b2:d1#ttu_direct_userset
+  relation: userset_userset_ttu
+  object: complexity3_b2:d1
+- user: ttus_b2:d1#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:d1
+- user: directs_user_b2:d1
+  relation: mult_parent_types
+  object: ttus_b2:d1
+- user: user_b2:d1
+  relation: direct
+  object: directs_user_b2:d1
+
+- user: user_b2:dud
+  relation: direct
+  object: directs_user_b2:dud
+
+- user: directs_user_b2:dut
+  relation: mult_parent_types
+  object: ttus_b2:dut
+- user: user_b2:dut
+  relation: direct
+  object: directs_user_b2:dut
+
+- user: ttus_b2:duu#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:duu
+- user: directs_user_b2:duu
+  relation: mult_parent_types
+  object: ttus_b2:duu
+- user: user_b2:duu
+  relation: direct
+  object: directs_user_b2:duu
+
+- user: usersets_user_b2:dcu#ttu_direct_userset
+  relation: userset_userset_ttu
+  object: complexity3_b2:dcu
+
+- user: usersets_user_b2:dct#ttu_direct_userset
+  relation: userset_userset_ttu
+  object: complexity3_b2:dct
+- user: ttus_b2:dct#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:dct
+
+- user: usersets_user_b2:dcd#ttu_direct_userset
+  relation: userset_userset_ttu
+  object: complexity3_b2:dcd
+- user: ttus_b2:dcd#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:dcd
+- user: directs_user_b2:dcd
+  relation: mult_parent_types
+  object: ttus_b2:dcd
+
+- user: usersets_user_b2:dcd2#ttu_direct_userset
+  relation: userset_userset_ttu
+  object: complexity3_b2:dcd2
+- user: ttus_b2:dcd2#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:dcd2
+- user: directs_user_b2:dcd2
+  relation: mult_parent_types
+  object: ttus_b2:dcd2
+- user: user_b2:dcd2
+  relation: direct
+  object: directs_user_b2:dcd2

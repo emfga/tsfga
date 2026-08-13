@@ -118,7 +118,7 @@ following methods:
 | `check(request)` | Check if a subject has a relation on an object |
 | `checkMany(requests)` | Check several requests in one shared resolution scope |
 | `addTuple(request)` | Insert or update a relationship tuple |
-| `removeTuple(request)` | Delete a relationship tuple |
+| `removeTuple(request)` | Delete a relationship tuple; throws when it is not there |
 | `listObjects(request)` | List object IDs the subject can access |
 | `listSubjects(objectType, objectId, relation)` | List direct subjects for an object + relation |
 | `writeRelationConfig(config)` | Insert or update a relation configuration |

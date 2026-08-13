@@ -24,6 +24,7 @@ import {
   fgaWriteModel,
   fgaWriteTuplesRaw,
 } from "./helpers/openfga.ts";
+import { ungatedTuple } from "./helpers/ungated.ts";
 
 /**
  * The condition is part of the type restriction, and OpenFGA
@@ -159,29 +160,35 @@ describe("Condition Type Restrictions Conformance", () => {
         conditionName: "weekday_only",
       },
     ]) {
-      await store.insertTuple({
-        objectType: "document",
-        relation: "viewer",
-        subjectType: "user",
-        ...tuple,
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "document",
+          relation: "viewer",
+          subjectType: "user",
+          ...tuple,
+        }),
+      );
     }
-    await store.insertTuple({
-      objectType: "document",
-      objectId: uuid("ucond"),
-      relation: "viewer",
-      subjectType: "team",
-      subjectId: uuid("eng"),
-      subjectRelation: "member",
-      conditionName: "weekday_only",
-    });
-    await store.insertTuple({
-      objectType: "team",
-      objectId: uuid("eng"),
-      relation: "member",
-      subjectType: "user",
-      subjectId: uuid("alice"),
-    });
+    await store.insertTuple(
+      ungatedTuple({
+        objectType: "document",
+        objectId: uuid("ucond"),
+        relation: "viewer",
+        subjectType: "team",
+        subjectId: uuid("eng"),
+        subjectRelation: "member",
+        conditionName: "weekday_only",
+      }),
+    );
+    await store.insertTuple(
+      ungatedTuple({
+        objectType: "team",
+        objectId: uuid("eng"),
+        relation: "member",
+        subjectType: "user",
+        subjectId: uuid("alice"),
+      }),
+    );
 
     storeId = await fgaCreateStore("condition-restrictions-conformance");
     const wide = await fgaWriteModel(

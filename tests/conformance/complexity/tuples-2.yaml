@@ -1,0 +1,172 @@
+
+# ---------------------------------------------------------------
+# Stage E — and_nested_complex3
+# [ttus#and_ttu] and compute_ttu_userset_ttu
+# ---------------------------------------------------------------
+- user: usersets_user_b2:e1
+  relation: userset_parent
+  object: complexity3_b2:e1
+- user: ttus_b2:e1#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:e1
+- user: directs_user_b2:e1
+  relation: mult_parent_types
+  object: ttus_b2:e1
+- user: user_b2:e1
+  relation: direct
+  object: directs_user_b2:e1
+- user: ttus_b2:e1#and_ttu
+  relation: and_nested_complex3
+  object: complexity3_b2:e1
+- user: directs_user_b2:e1
+  relation: direct_parent
+  object: ttus_b2:e1
+
+# emf: the second operand holds, the direct assignment is missing.
+- user: usersets_user_b2:emf
+  relation: userset_parent
+  object: complexity3_b2:emf
+- user: ttus_b2:emf#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:emf
+- user: directs_user_b2:emf
+  relation: mult_parent_types
+  object: ttus_b2:emf
+- user: user_b2:emf
+  relation: direct
+  object: directs_user_b2:emf
+
+# emft: the direct assignment is there, but ttus#and_ttu's own
+# intersection cannot hold — no direct_parent row.
+- user: usersets_user_b2:emft
+  relation: userset_parent
+  object: complexity3_b2:emft
+- user: ttus_b2:emft#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:emft
+- user: directs_user_b2:emft
+  relation: mult_parent_types
+  object: ttus_b2:emft
+- user: user_b2:emft
+  relation: direct
+  object: directs_user_b2:emft
+- user: ttus_b2:emft#and_ttu
+  relation: and_nested_complex3
+  object: complexity3_b2:emft
+
+# ems: the first operand holds, the computed side has no
+# userset_parent row to walk.
+- user: ttus_b2:ems#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:ems
+- user: directs_user_b2:ems
+  relation: mult_parent_types
+  object: ttus_b2:ems
+- user: user_b2:ems
+  relation: direct
+  object: directs_user_b2:ems
+- user: ttus_b2:ems#and_ttu
+  relation: and_nested_complex3
+  object: complexity3_b2:ems
+- user: directs_user_b2:ems
+  relation: direct_parent
+  object: ttus_b2:ems
+
+# ---------------------------------------------------------------
+# Stage F — cycle_nested
+# complexity3 -[ttus#tuple_cycle3]-> ttus -tuple_cycle3 from
+#   userset_parent-> usersets_user -[directs_user#
+#   compute_tuple_cycle3]-> directs_user, which points back at
+#   complexity3#cycle_nested.
+# ---------------------------------------------------------------
+- user: ttus_b2:fnc#tuple_cycle3
+  relation: cycle_nested
+  object: complexity3_b2:fnc
+- user: usersets_user_b2:fnc
+  relation: userset_parent
+  object: ttus_b2:fnc
+- user: directs_user_b2:fnc#compute_tuple_cycle3
+  relation: tuple_cycle3
+  object: usersets_user_b2:fnc
+- user: complexity3_b2:fnc#cycle_nested
+  relation: tuple_cycle3
+  object: directs_user_b2:fnc
+- user: user_b2:fnc
+  relation: tuple_cycle3
+  object: directs_user_b2:fnc
+
+# fcy: the same shape with the user edge removed, so the only
+# path left is the cycle.
+- user: ttus_b2:fcy#tuple_cycle3
+  relation: cycle_nested
+  object: complexity3_b2:fcy
+- user: usersets_user_b2:fcy
+  relation: userset_parent
+  object: ttus_b2:fcy
+- user: directs_user_b2:fcy#compute_tuple_cycle3
+  relation: tuple_cycle3
+  object: usersets_user_b2:fcy
+- user: complexity3_b2:fcy#cycle_nested
+  relation: tuple_cycle3
+  object: directs_user_b2:fcy
+
+- user: ttus_b2:fud#tuple_cycle3
+  relation: cycle_nested
+  object: complexity3_b2:fud
+- user: usersets_user_b2:fud
+  relation: userset_parent
+  object: ttus_b2:fud
+- user: directs_user_b2:fud#compute_tuple_cycle3
+  relation: tuple_cycle3
+  object: usersets_user_b2:fud
+
+# ---------------------------------------------------------------
+# Stage G — or_userset_mix_public_complex3
+# or_userset_mix_public from userset_parent, where the child
+# relation mixes a userset, a typed wildcard of a non-user type,
+# a direct user and a user wildcard.
+# ---------------------------------------------------------------
+- user: directs_user_b2:g1#direct
+  relation: userset_mix_public
+  object: usersets_user_b2:g1
+- user: user_b2:g1
+  relation: direct
+  object: directs_user_b2:g1
+- user: usersets_user_b2:g1
+  relation: userset_parent
+  object: complexity3_b2:g1
+
+- user: user_b2:*
+  relation: userset_mix_public
+  object: usersets_user_b2:gpub
+- user: usersets_user_b2:gpub
+  relation: userset_parent
+  object: complexity3_b2:gpub
+
+- user: user_b2:gspec
+  relation: userset_mix_public
+  object: usersets_user_b2:gspec
+- user: usersets_user_b2:gspec
+  relation: userset_parent
+  object: complexity3_b2:gspec
+
+- user: user_b2:*
+  relation: or_userset_mix_public
+  object: usersets_user_b2:g2
+- user: usersets_user_b2:g2
+  relation: userset_parent
+  object: complexity3_b2:g2
+
+- user: user_b2:g3
+  relation: or_userset_mix_public
+  object: usersets_user_b2:g3
+- user: usersets_user_b2:g3
+  relation: userset_parent
+  object: complexity3_b2:g3
+
+- user: directs_user_b2:*
+  relation: userset_mix_public
+  object: usersets_user_b2:gdpub
+- user: usersets_user_b2:gdpub
+  relation: userset_parent
+  object: complexity3_b2:gdpub

@@ -1,0 +1,80 @@
+# Groups: platform is nested inside engineering
+- user: user_c3f:bob
+  relation: member
+  object: group_c3f:platform
+- user: group_c3f:platform#member
+  relation: member
+  object: group_c3f:engineering
+- user: user_c3f:carol
+  relation: member
+  object: group_c3f:engineering
+- user: user_c3f:dave
+  relation: member
+  object: group_c3f:contractors
+
+# Spaces
+- user: user_c3f:alice
+  relation: admin
+  object: space_c3f:eng
+- user: group_c3f:engineering#member
+  relation: member
+  object: space_c3f:eng
+
+- user: user_c3f:*
+  relation: anonymous
+  object: space_c3f:public-docs
+- user: user_c3f:alice
+  relation: admin
+  object: space_c3f:public-docs
+
+# Page tree in space eng: home -> guide -> runbook -> appendix
+- user: space_c3f:eng
+  relation: space
+  object: page_c3f:home
+- user: user_c3f:alice
+  relation: owner
+  object: page_c3f:home
+
+- user: page_c3f:home
+  relation: parent
+  object: page_c3f:guide
+- user: space_c3f:eng
+  relation: space
+  object: page_c3f:guide
+
+- user: page_c3f:guide
+  relation: parent
+  object: page_c3f:runbook
+# runbook is locked to everyone but its restricted viewers
+- user: space_c3f:eng
+  relation: space
+  object: page_c3f:runbook
+- user: user_c3f:*
+  relation: locked
+  object: page_c3f:runbook
+- user: user_c3f:carol
+  relation: restricted_viewer
+  object: page_c3f:runbook
+
+- user: page_c3f:runbook
+  relation: parent
+  object: page_c3f:appendix
+
+# A page locked only for contractors
+- user: page_c3f:home
+  relation: parent
+  object: page_c3f:salary-bands
+- user: group_c3f:contractors#member
+  relation: locked
+  object: page_c3f:salary-bands
+- user: user_c3f:dave
+  relation: member
+  object: space_c3f:eng
+
+# Public page in the anonymous space, comments turned off
+- user: space_c3f:public-docs
+  relation: space
+  object: page_c3f:changelog
+- user: user_c3f:*
+  relation: comments_disabled
+  object: page_c3f:changelog

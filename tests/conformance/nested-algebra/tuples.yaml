@@ -1,0 +1,86 @@
+# doc1: the a/b/c truth table, one user per subset
+- user: user_a7:ua
+  relation: a
+  object: doc_a7:doc1
+- user: user_a7:uab
+  relation: a
+  object: doc_a7:doc1
+- user: user_a7:uac
+  relation: a
+  object: doc_a7:doc1
+- user: user_a7:uabc
+  relation: a
+  object: doc_a7:doc1
+
+- user: user_a7:ub
+  relation: b
+  object: doc_a7:doc1
+- user: user_a7:uab
+  relation: b
+  object: doc_a7:doc1
+- user: user_a7:ubc
+  relation: b
+  object: doc_a7:doc1
+- user: user_a7:uabc
+  relation: b
+  object: doc_a7:doc1
+
+- user: user_a7:uc
+  relation: c
+  object: doc_a7:doc1
+- user: user_a7:uac
+  relation: c
+  object: doc_a7:doc1
+- user: user_a7:ubc
+  relation: c
+  object: doc_a7:doc1
+- user: user_a7:uabc
+  relation: c
+  object: doc_a7:doc1
+
+# the parent link and the folder side of every TTU arm
+- user: folder_a7:folder1
+  relation: parent
+  object: doc_a7:doc1
+- user: user_a7:ufv
+  relation: viewer
+  object: folder_a7:folder1
+- user: user_a7:ufe
+  relation: editor
+  object: folder_a7:folder1
+
+# direct assignment combined with each operator
+- user: user_a7:ud
+  relation: direct_or
+  object: doc_a7:doc1
+- user: user_a7:ud
+  relation: direct_and
+  object: doc_a7:doc1
+- user: user_a7:ufv
+  relation: direct_and
+  object: doc_a7:doc1
+- user: user_a7:ud
+  relation: direct_not
+  object: doc_a7:doc1
+- user: user_a7:ub
+  relation: direct_not
+  object: doc_a7:doc1
+
+# every restriction shape on one relation
+- user: user_a7:ugm
+  relation: member
+  object: group_a7:group1
+- user: user_a7:ud
+  relation: all_refs
+  object: doc_a7:doc2
+- user: group_a7:group1#member
+  relation: all_refs
+  object: doc_a7:doc2
+- user: user_a7:uw
+  relation: all_refs
+  object: doc_a7:doc2
+  condition:
+    name: weekday_only_a7
+- user: user_a7:*
+  relation: all_refs
+  object: doc_a7:doc3

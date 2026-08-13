@@ -3,6 +3,7 @@ import { CachingTupleStore } from "../src/caching-store.ts";
 import { check } from "../src/check.ts";
 import type { RelationConfig, Tuple } from "../src/types.ts";
 import { MockTupleStore } from "./helpers/mock-store.ts";
+import { ungatedConfig } from "./helpers/ungated.ts";
 
 function makeTuple(overrides: Partial<Tuple> = {}): Tuple {
   return {
@@ -201,11 +202,13 @@ describe("CachingTupleStore", () => {
     expect(before?.impliedBy).toBeNull();
 
     await caching.upsertRelationConfig(
-      makeConfig({
-        objectType: "doc",
-        relation: "viewer",
-        impliedBy: ["owner"],
-      }),
+      ungatedConfig(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          impliedBy: ["owner"],
+        }),
+      ),
     );
     const after = await caching.findRelationConfig("doc", "viewer");
     expect(after?.impliedBy).toEqual(["owner"]);

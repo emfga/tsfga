@@ -120,13 +120,24 @@ export interface CheckTuplesQuery {
  * algorithm treats "the model forbids it" and "nothing is stored"
  * identically, so nothing downstream has to tell them apart.
  *
- * `usersets` is `readonly` because the check algorithm aliases a
- * shared empty array for the excluded case rather than allocating
- * one per node.
+ * `usersets` and `wildcard` are `readonly` because the check
+ * algorithm aliases a shared empty array for the excluded case
+ * rather than allocating one per node.
+ *
+ * **`direct` is one row; `wildcard` is a list.** The direct probe
+ * is an exact-subject lookup, and a contextual tuple on that key
+ * *replaces* the stored row — upstream's `ReadUserTuple`. Every
+ * other read is a scan, and contextual rows are *concatenated*
+ * with the stored ones, no dedup — upstream's `Read`
+ * (`pkg/storage/storagewrappers/combinedtuplereader.go:63-103`).
+ * One slot cannot hold both a stored `user:*` row and a
+ * contextual one carrying a different condition context, and both
+ * have to be evaluated: a caller must not be able to cancel a
+ * stored grant, or a stored denial, by shadowing its key.
  */
 export interface CheckTuples {
   direct: Tuple | null;
-  wildcard: Tuple | null;
+  wildcard: readonly Tuple[];
   usersets: readonly Tuple[];
 }
 
@@ -204,13 +215,47 @@ export type ConditionParameterType =
   | `list<${ConditionParameterScalarType}>`
   | `map<${ConditionParameterScalarType}>`;
 
+/**
+ * The subject a check or a list-objects request asks about.
+ *
+ * `subjectRelation` makes it a **userset** — `team:eng#member`,
+ * upstream's `object#relation` form of `TupleKey.user`. The
+ * question is then whether that whole userset holds the relation,
+ * and it is answered by comparing the ref: `team:eng#member` holds
+ * `viewer` iff a row grants that exact userset, or a rewrite of
+ * `viewer` reaches one. It does **not** expand — a check for
+ * `team:eng#member` is not a check for each member of the team.
+ *
+ * Three consequences, all measured against v1.18.2:
+ *
+ * - `team#member` and `team` are distinct subjects. A relation
+ *   admitting `[team#member]` denies the bare `team:eng`, and one
+ *   admitting `[team]` denies `team:eng#member`.
+ * - A typed wildcard never grants a userset. `team:*` is a row
+ *   about concrete `team` subjects, and upstream skips both the
+ *   public-assignability probe and the wildcard retry in
+ *   `PathExists` when the subject is a userset.
+ * - `type:*#relation` is not a subject at all, and neither is a
+ *   subject id holding `:` or `#`. Both are refused rather than
+ *   answered.
+ */
+interface SubjectRequest {
+  subjectType: string;
+  subjectId: string;
+  /**
+   * Set to ask about the userset `subjectType:subjectId#relation`
+   * rather than about the concrete subject. The relation must be
+   * one the subject's type defines, or the request is refused with
+   * `RelationConfigNotFoundError`, as upstream refuses it.
+   */
+  subjectRelation?: string | null;
+}
+
 /** Parameters for a check request */
-export interface CheckRequest {
+export interface CheckRequest extends SubjectRequest {
   objectType: string;
   objectId: string;
   relation: string;
-  subjectType: string;
-  subjectId: string;
   context?: Record<string, unknown>;
   contextualTuples?: AddTupleRequest[];
 }
@@ -222,11 +267,9 @@ export interface CheckRequest {
  * upstream's `ListObjectsRequest` carries `contextual_tuples` and
  * the flat form had nowhere to put them.
  */
-export interface ListObjectsRequest {
+export interface ListObjectsRequest extends SubjectRequest {
   objectType: string;
   relation: string;
-  subjectType: string;
-  subjectId: string;
   /** Forwarded to every per-candidate check. */
   context?: Record<string, unknown>;
   /**
@@ -238,7 +281,26 @@ export interface ListObjectsRequest {
   contextualTuples?: AddTupleRequest[];
 }
 
-/** Options for the check algorithm */
+/**
+ * Options for the check algorithm.
+ *
+ * Every field is validated where the API that reads it lives,
+ * because `CheckOptions` is shared by six entry points and no
+ * single one of them sees them all:
+ *
+ * | Option | Validated in |
+ * |---|---|
+ * | `maxDepth` | `check.ts` (`createCheckScope`) |
+ * | `maxBreadth` | `check.ts` (`createCheckScope`) |
+ * | `maxConcurrentChecks` | `check-many.ts` |
+ * | `writeContextByteLimit` | `index.ts` (`createTsfga`) |
+ * | `listObjectsMaxResults` | `list-objects.ts` |
+ * | `maxConditionEvaluationCost` | `conditions.ts` |
+ *
+ * The predicate is the same in all six places — an integer within
+ * the field's domain, or `Infinity` — and it is written as a
+ * negated comparison so `NaN` is rejected rather than admitted.
+ */
 export interface CheckOptions {
   /** Maximum recursion depth (default: 25) */
   maxDepth?: number;
@@ -267,6 +329,83 @@ export interface CheckOptions {
    * integer >= 1, or Infinity.
    */
   maxConcurrentChecks?: number;
+  /**
+   * Largest condition context a written tuple may carry, in bytes
+   * (default: 32768, matching OpenFGA's
+   * `DefaultWriteContextByteLimit` /
+   * `OPENFGA_WRITE_CONTEXT_BYTE_LIMIT`).
+   *
+   * Applies to `addTuple` only. Upstream enforces it in the Write
+   * command and nowhere else, so a contextual tuple carrying a
+   * large context is still accepted — as it is upstream.
+   *
+   * The **rule** is upstream's; the **measure** is not. Upstream
+   * sizes a serialised protobuf `Struct`, which tsfga cannot
+   * reproduce, so tsfga sizes the UTF-8 bytes of the context's
+   * JSON. The two agree except within a narrow band of the
+   * boundary.
+   */
+  writeContextByteLimit?: number;
+  /**
+   * Largest number of objects `listObjects` returns (default:
+   * 1000, matching OpenFGA's `listObjectsMaxResults` /
+   * `OPENFGA_LIST_OBJECTS_MAX_RESULTS`). Must be an integer >= 1,
+   * or `Infinity` to opt out.
+   *
+   * Named for the API it bounds rather than `maxResults`, because
+   * `CheckOptions` is shared and a bare name would read as a bound
+   * on all of it. `check`, `checkMany` and `listSubjects` ignore
+   * it; `listSubjects` has no upstream counterpart and gets no cap
+   * of its own.
+   *
+   * Upstream **truncates silently** — no cursor, no error, no
+   * field saying the answer was cut — and so does tsfga. Two
+   * consequences follow and neither is an accident:
+   *
+   * - **Which** objects come back above the cap differs between
+   *   the two engines. Upstream stops its worker pool on
+   *   completion order; tsfga stops launching in candidate order.
+   *   A caller may compare counts at the cap, never membership.
+   * - Reaching the cap **stops the producers**, so a candidate
+   *   past it is never resolved and never raises. The cap can
+   *   therefore mask a refusal a smaller pool would have surfaced.
+   *   Upstream has the same property for the same reason.
+   *
+   * Upstream floors its own configured value for the check
+   * evaluation cost and does not floor this one. tsfga floors
+   * neither.
+   */
+  listObjectsMaxResults?: number;
+  /**
+   * Largest evaluation cost one condition may charge before it is
+   * refused (default: 100, matching OpenFGA's default check
+   * evaluation cost). Must be an integer >= 1, or `Infinity` to
+   * opt out.
+   *
+   * The expression is fixed at model time and the **request**
+   * decides what it costs: `groups.exists(g, g == role)` over a
+   * list from context, `x == y` over two strings from context,
+   * `needle in haystack` over a list from context. All three are
+   * unbounded work driven by whoever is asking, on the
+   * authorization path, and the comprehension is the shape that
+   * grows fastest — its body is charged once per element.
+   *
+   * **tsfga's cost model is an approximation of cel-go's and does
+   * not agree with it cell for cell.** cel-js has no runtime
+   * metering of any kind — its `limits` are structural bounds
+   * charged before any input is seen — so tsfga charges what it
+   * can derive from the AST and the coerced context. Where the two
+   * models disagree tsfga charges the larger figure, so the
+   * residue is in the **refusing** direction: a check upstream
+   * answers may be refused here, and one upstream refuses is never
+   * granted here on cost alone.
+   *
+   * A refusal is a `ConditionEvaluationError` whose `cause` begins
+   * `evaluation cost limit exceeded`. The error's own message
+   * carries the wrapper every condition failure carries,
+   * `Failed to evaluate condition '<name>': …`.
+   */
+  maxConditionEvaluationCost?: number;
 }
 
 /** Parameters for adding a tuple */

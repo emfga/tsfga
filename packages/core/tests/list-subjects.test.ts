@@ -74,6 +74,19 @@ describe("listSubjects applies the relation's type restrictions", () => {
       makeTuple(),
       makeTuple({ subjectType: "service", subjectId: "bot" }),
     ]);
+    // `service` has to be a type the model *defines* for the check
+    // below to measure the drop. An undefined subject type is
+    // refused before the relation's restrictions are consulted at
+    // all, which would make the assertion pass for the other gate's
+    // reason — so it is declared here, on a relation `doc.viewer`
+    // has nothing to do with.
+    store.relationConfigs.push(
+      makeConfig({
+        objectType: "fleet",
+        relation: "runs",
+        directlyAssignable: [{ type: "service" }],
+      }),
+    );
 
     const subjects = await createTsfga(store).listSubjects(
       "doc",

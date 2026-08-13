@@ -102,6 +102,16 @@ function expect(actual) {
     toBeTruthy() {
       assert.ok(actual);
     },
+    toBeUndefined() {
+      assert.strictEqual(actual, undefined);
+    },
+    /** @param {number} n */
+    toBeGreaterThan(n) {
+      assert.ok(
+        actual > n,
+        `Expected ${actual} to be greater than ${n}`,
+      );
+    },
     /** @param {Function} ctor */
     toBeInstanceOf(ctor) {
       assert.ok(

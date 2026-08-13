@@ -1,0 +1,82 @@
+# Groups: g_sre nests inside g_eng
+- user: user_d4g:alice
+  relation: member
+  object: group_d4g:g_sre
+- user: group_d4g:g_sre#member
+  relation: member
+  object: group_d4g:g_eng
+- user: user_d4g:bob
+  relation: member
+  object: group_d4g:g_eng
+
+# The organisation
+- user: group_d4g:g_eng#member
+  relation: viewer
+  object: org_d4g:acme
+- user: user_d4g:carol
+  relation: admin
+  object: org_d4g:acme
+
+# The folder tree: f_team inside f_prod inside acme
+- user: org_d4g:acme
+  relation: parent_org
+  object: folder_d4g:f_prod
+- user: folder_d4g:f_prod
+  relation: parent_folder
+  object: folder_d4g:f_team
+- user: user_d4g:bob
+  relation: denied
+  object: folder_d4g:f_prod
+- user: user_d4g:dan
+  relation: viewer
+  object: folder_d4g:f_team
+  condition:
+    name: tag_scope_d4g
+    context:
+      required_tag: "env:prod"
+
+# Projects
+- user: folder_d4g:f_team
+  relation: parent
+  object: project_d4g:p_web
+- user: folder_d4g:f_prod
+  relation: parent
+  object: project_d4g:p_data
+- user: user_d4g:erin
+  relation: owner
+  object: project_d4g:p_web
+
+# Buckets
+- user: project_d4g:p_web
+  relation: project
+  object: bucket_d4g:b_logs
+- user: project_d4g:p_data
+  relation: project
+  object: bucket_d4g:b_raw
+- user: group_d4g:g_sre#member
+  relation: reader
+  object: bucket_d4g:b_logs
+- user: user_d4g:svc
+  relation: reader
+  object: bucket_d4g:b_logs
+  condition:
+    name: svc_account_d4g
+- user: user_d4g:frank
+  relation: writer
+  object: bucket_d4g:b_logs
+  condition:
+    name: in_window_d4g
+    context:
+      not_before: "2026-01-01T00:00:00Z"
+      not_after: "2026-12-31T00:00:00Z"
+- user: user_d4g:erin
+  relation: writer
+  object: bucket_d4g:b_logs
+  condition:
+    name: in_window_d4g
+    context:
+      not_before: "2026-01-01T00:00:00Z"
+      not_after: "2026-12-31T00:00:00Z"
+- user: user_d4g:*
+  relation: quarantined
+  object: bucket_d4g:b_raw

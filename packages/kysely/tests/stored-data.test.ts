@@ -280,6 +280,7 @@ describe("Invalid stored data", () => {
           relation: "viewer",
           subject_type: "user",
           subject_id: uuid2,
+          subject_wildcard: false,
           subject_relation: null,
           condition_name: "in_region",
           condition_context: JSON.stringify([1, 2]),

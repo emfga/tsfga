@@ -1,0 +1,199 @@
+
+# ---------------------------------------------------------------
+# Stage H — complexity4 userset_ttu_userset_ttu
+# ---------------------------------------------------------------
+- user: complexity3_b2:hy#ttu_userset_ttu
+  relation: userset_ttu_userset_ttu
+  object: complexity4_b2:hx
+- user: usersets_user_b2:hz
+  relation: userset_parent
+  object: complexity3_b2:hy
+- user: ttus_b2:ha#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:hz
+- user: directs_employee_b2:hc
+  relation: mult_parent_types
+  object: ttus_b2:ha
+- user: directs_user_b2:hb
+  relation: mult_parent_types
+  object: ttus_b2:ha
+- user: user_b2:hvalid
+  relation: direct
+  object: directs_user_b2:hb
+- user: employee_b2:hevalid
+  relation: direct
+  object: directs_employee_b2:hc
+
+- user: complexity3_b2:h1#ttu_userset_ttu
+  relation: userset_ttu_userset_ttu
+  object: complexity4_b2:h1
+
+- user: complexity3_b2:h2#ttu_userset_ttu
+  relation: userset_ttu_userset_ttu
+  object: complexity4_b2:h2
+- user: usersets_user_b2:h2
+  relation: userset_parent
+  object: complexity3_b2:h2
+
+- user: complexity3_b2:h3#ttu_userset_ttu
+  relation: userset_ttu_userset_ttu
+  object: complexity4_b2:h3
+- user: usersets_user_b2:h3
+  relation: userset_parent
+  object: complexity3_b2:h3
+- user: ttus_b2:h3#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:h3
+
+- user: complexity3_b2:h4#ttu_userset_ttu
+  relation: userset_ttu_userset_ttu
+  object: complexity4_b2:h4
+- user: usersets_user_b2:h4
+  relation: userset_parent
+  object: complexity3_b2:h4
+- user: ttus_b2:h4#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:h4
+- user: directs_user_b2:h4
+  relation: mult_parent_types
+  object: ttus_b2:h4
+
+# ---------------------------------------------------------------
+# Stage I — complexity4 ttu_ttu_ttu_userset
+# ---------------------------------------------------------------
+- user: complexity3_b2:icarp
+  relation: parent
+  object: complexity4_b2:icar
+- user: ttus_b2:itruck
+  relation: ttu_parent
+  object: complexity3_b2:icarp
+- user: usersets_user_b2:ivan
+  relation: userset_parent
+  object: ttus_b2:itruck
+- user: directs_user_b2:ivanu#direct
+  relation: userset
+  object: usersets_user_b2:ivan
+- user: user_b2:ivalid
+  relation: direct
+  object: directs_user_b2:ivanu
+- user: directs_employee_b2:ivane#direct
+  relation: userset
+  object: usersets_user_b2:ivan
+- user: employee_b2:ievalid
+  relation: direct
+  object: directs_employee_b2:ivane
+
+- user: complexity3_b2:i1
+  relation: parent
+  object: complexity4_b2:i1
+
+- user: complexity3_b2:i2
+  relation: parent
+  object: complexity4_b2:i2
+- user: ttus_b2:i2
+  relation: ttu_parent
+  object: complexity3_b2:i2
+
+- user: complexity3_b2:i3
+  relation: parent
+  object: complexity4_b2:i3
+- user: ttus_b2:i3
+  relation: ttu_parent
+  object: complexity3_b2:i3
+- user: usersets_user_b2:i3
+  relation: userset_parent
+  object: ttus_b2:i3
+
+- user: complexity3_b2:i4
+  relation: parent
+  object: complexity4_b2:i4
+- user: ttus_b2:i4
+  relation: ttu_parent
+  object: complexity3_b2:i4
+- user: usersets_user_b2:i4
+  relation: userset_parent
+  object: ttus_b2:i4
+- user: directs_user_b2:i4#direct
+  relation: userset
+  object: usersets_user_b2:i4
+
+# ---------------------------------------------------------------
+# Stage J — complexity4 userset_or_compute_complex3
+# Both arms of the complexity3 union are populated, each with its
+# own user and employee.
+# ---------------------------------------------------------------
+- user: complexity3_b2:jps2#or_compute_complex3
+  relation: userset_or_compute_complex3
+  object: complexity4_b2:jps1
+- user: usersets_user_b2:jps2
+  relation: userset_parent
+  object: complexity3_b2:jps2
+- user: ttus_b2:jps3#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:jps2
+- user: directs_user_b2:jps4
+  relation: mult_parent_types
+  object: ttus_b2:jps3
+- user: user_b2:jvalid
+  relation: direct
+  object: directs_user_b2:jps4
+- user: directs_employee_b2:jps4
+  relation: mult_parent_types
+  object: ttus_b2:jps3
+- user: employee_b2:jevalid
+  relation: direct
+  object: directs_employee_b2:jps4
+- user: ttus_b2:jps3#userset_pa_userset_ch
+  relation: userset_ttu_userset
+  object: complexity3_b2:jps2
+- user: usersets_user_b2:jps2
+  relation: userset_parent
+  object: ttus_b2:jps3
+- user: directs_user_b2:jps4#direct
+  relation: userset
+  object: usersets_user_b2:jps2
+- user: user_b2:jvalid2
+  relation: direct
+  object: directs_user_b2:jps4
+- user: directs_employee_b2:jps4#direct
+  relation: userset
+  object: usersets_user_b2:jps2
+- user: employee_b2:jevalid2
+  relation: direct
+  object: directs_employee_b2:jps4
+
+# ---------------------------------------------------------------
+# Stage K — complexity4 ttu_and_nested_complex3 / or_complex4
+# ---------------------------------------------------------------
+- user: complexity3_b2:kpe2
+  relation: parent
+  object: complexity4_b2:kpe1
+- user: ttus_b2:kpe3#and_ttu
+  relation: and_nested_complex3
+  object: complexity3_b2:kpe2
+- user: user_b2:kvalid
+  relation: direct
+  object: directs_user_b2:kpe4
+- user: usersets_user_b2:kpe3
+  relation: userset_parent
+  object: complexity3_b2:kpe2
+- user: ttus_b2:kpe3#direct_pa_direct_ch
+  relation: ttu_direct_userset
+  object: usersets_user_b2:kpe3
+- user: directs_user_b2:kpe4
+  relation: mult_parent_types
+  object: ttus_b2:kpe3
+- user: directs_user_b2:kpe4
+  relation: direct_parent
+  object: ttus_b2:kpe3
+- user: user_b2:kvalidcond
+  relation: direct_cond
+  object: directs_user_b2:kpe4
+  condition:
+    name: xcond_b2
+- user: directs_employee_b2:kpe4
+  relation: mult_parent_types
+  object: ttus_b2:kpe3
+- user: employee_b2:keinvalid
+  relation: direct
+  object: directs_employee_b2:kpe4

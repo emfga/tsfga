@@ -1,0 +1,108 @@
+# Shapes where reachability is subtle: a type that reaches a node
+# only through one arm of a union, only through a typed wildcard,
+# only through one of several types a tupleset admits, and only
+# through the userset restriction of an intersection's direct
+# operand. Each is a place an over-eager prune would answer `false`
+# before resolving anything.
+
+# --- mutual recursion between two types; the user type enters the
+# --- component only at the far end.
+- user: beta_b2p:be1#rel
+  relation: rel
+  object: alpha_b2p:al1
+- user: user_b2p:pu1
+  relation: rel
+  object: beta_b2p:be1
+- user: alpha_b2p:al1#rel
+  relation: rel
+  object: beta_b2p:be3
+
+# al2/be2 close the loop with no user on it at all.
+- user: beta_b2p:be2#rel
+  relation: rel
+  object: alpha_b2p:al2
+- user: alpha_b2p:al2#rel
+  relation: rel
+  object: beta_b2p:be2
+
+# --- a four-deep userset chain, reached through a TTU onto a
+# --- union whose other arm is a typed wildcard.
+- user: grp_b2p:g2#member
+  relation: member
+  object: grp_b2p:g1
+- user: grp_b2p:g3#member
+  relation: member
+  object: grp_b2p:g2
+- user: grp_b2p:g4#member
+  relation: member
+  object: grp_b2p:g3
+- user: user_b2p:pu2
+  relation: member
+  object: grp_b2p:g4
+
+- user: user_b2p:*
+  relation: open_member
+  object: grp_b2p:gw
+
+- user: grp_b2p:g1
+  relation: parent
+  object: gate_b2p:ga1
+- user: grp_b2p:gw
+  relation: parent
+  object: gate_b2p:gaw
+
+# --- a tupleset admitting three types: the computed relation is
+# --- defined on two of them and only one carries the agent.
+- user: bin_b2p:bi1
+  relation: slot
+  object: box_b2p:bx1
+- user: shelf_b2p:sh1
+  relation: slot
+  object: box_b2p:bx1
+- user: crate_b2p:cr1
+  relation: slot
+  object: box_b2p:bx1
+- user: agent_b2p:pa1
+  relation: keeper
+  object: bin_b2p:bi1
+- user: user_b2p:pu3
+  relation: keeper
+  object: shelf_b2p:sh1
+- user: user_b2p:pu4
+  relation: holder
+  object: crate_b2p:cr1
+
+# bx2 has only the type whose config defines no `keeper`.
+- user: crate_b2p:cr1
+  relation: slot
+  object: box_b2p:bx2
+
+# --- an intersection over a deep operand, then two computed
+# --- rewrites stacked on top of it.
+- user: user_b2p:pu2
+  relation: assigned
+  object: gate_b2p:gb1
+- user: grp_b2p:g1
+  relation: parent
+  object: gate_b2p:gb1
+
+- user: user_b2p:pu5
+  relation: assigned
+  object: gate_b2p:gb2
+
+- user: grp_b2p:g1
+  relation: parent
+  object: gate_b2p:gb3
+- user: user_b2p:pu6
+  relation: assigned
+  object: gate_b2p:gb3
+
+# --- an intersection whose direct operand admits only a userset,
+# --- so the user type reaches the node only by descending into
+# --- that userset's own relation.
+- user: grp_b2p:g1#member
+  relation: narrow
+  object: gate_b2p:gn1
+- user: grp_b2p:g1
+  relation: parent
+  object: gate_b2p:gn1

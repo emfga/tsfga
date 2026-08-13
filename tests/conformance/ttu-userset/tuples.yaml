@@ -1,0 +1,80 @@
+# org:o1 grants everyone through a wildcard and blocks bob, so
+# `ok` is an exclusion reached through a userset.
+- user: user_a1:*
+  relation: base
+  object: org_a1:o1
+- user: user_a1:bob
+  relation: blocked
+  object: org_a1:o1
+- user: user_a1:alice
+  relation: admin
+  object: org_a1:o1
+
+# A userset of a userset: s1's crew is s2's crew, and alice is in
+# s2's crew.
+- user: squad_a1:s2#crew
+  relation: crew
+  object: squad_a1:s1
+- user: user_a1:alice
+  relation: crew
+  object: squad_a1:s2
+
+# fa inherits its viewers from fb; fc grants an editor only.
+- user: folder_a1:fb
+  relation: parent
+  object: folder_a1:fa
+- user: user_a1:alice
+  relation: viewer
+  object: folder_a1:fb
+- user: user_a1:bob
+  relation: editor
+  object: folder_a1:fc
+
+- user: user_a1:alice
+  relation: viewer
+  object: box_a1:b1
+- user: user_a1:alice
+  relation: holder
+  object: crate_a1:c1
+
+- user: org_a1:o1#ok
+  relation: via_excl
+  object: doc_a1:y1
+
+- user: org_a1:o1#super
+  relation: via_computed
+  object: doc_a1:y2
+
+# y3 sits under fa, whose own viewers come from fb — a TTU that
+# lands on a relation that is itself a TTU.
+- user: folder_a1:fa
+  relation: parent
+  object: doc_a1:y3
+
+# y4 sits under fc, which grants through the *other* TTU arm.
+- user: folder_a1:fc
+  relation: parent
+  object: doc_a1:y4
+
+- user: squad_a1:s1#crew
+  relation: via_crew
+  object: doc_a1:y5
+
+# y6 points at a squad that has no crew at all.
+- user: squad_a1:s9#crew
+  relation: via_crew
+  object: doc_a1:y6
+
+# y7's containers include a crate, whose type defines no `viewer`
+# at all. Upstream drops that row and keeps resolving the box.
+- user: box_a1:b1
+  relation: container
+  object: doc_a1:y7
+- user: crate_a1:c1
+  relation: container
+  object: doc_a1:y7
+
+# y8 has only the crate, so the TTU has nothing left to dispatch.
+- user: crate_a1:c1
+  relation: container
+  object: doc_a1:y8

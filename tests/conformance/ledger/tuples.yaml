@@ -1,0 +1,63 @@
+# Department
+- user: user_c3b:alice
+  relation: head
+  object: department_c3b:finance
+- user: user_c3b:bob
+  relation: member
+  object: department_c3b:finance
+- user: user_c3b:carol
+  relation: member
+  object: department_c3b:finance
+- user: user_c3b:dan
+  relation: member
+  object: department_c3b:finance
+
+# Account
+- user: department_c3b:finance
+  relation: department
+  object: account_c3b:ops
+- user: user_c3b:alice
+  relation: owner
+  object: account_c3b:ops
+- user: user_c3b:bob
+  relation: viewer
+  object: account_c3b:ops
+
+# t1: bob made it, the whole department may check it, dan audits
+- user: account_c3b:ops
+  relation: account
+  object: transfer_c3b:t1
+- user: user_c3b:bob
+  relation: maker
+  object: transfer_c3b:t1
+- user: department_c3b:finance#member
+  relation: designated_checker
+  object: transfer_c3b:t1
+- user: user_c3b:dan
+  relation: auditor
+  object: transfer_c3b:t1
+
+# t2: on compliance hold, so nobody approves it
+- user: account_c3b:ops
+  relation: account
+  object: transfer_c3b:t2
+- user: user_c3b:carol
+  relation: maker
+  object: transfer_c3b:t2
+- user: user_c3b:bob
+  relation: designated_checker
+  object: transfer_c3b:t2
+- user: user_c3b:*
+  relation: compliance_hold
+  object: transfer_c3b:t2
+
+# t3: dan made it and also audits it
+- user: account_c3b:ops
+  relation: account
+  object: transfer_c3b:t3
+- user: user_c3b:dan
+  relation: maker
+  object: transfer_c3b:t3
+- user: department_c3b:finance#member
+  relation: designated_checker
+  object: transfer_c3b:t3

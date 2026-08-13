@@ -90,6 +90,7 @@ tsfga/
 │       │       ├── 003-drop-unused-indexes.ts
 │       │       ├── 004-drop-metadata-columns.ts
 │       │       ├── 005-type-restrictions.ts
+│       │       ├── 006-wildcard-subject.ts
 │       │       └── index.ts         migrationProvider (subpath export)
 │       ├── tests/
 │       │   ├── kysely-adapter.test.ts
@@ -131,6 +132,16 @@ tsfga/
 │       ├── package.json
 │       ├── tsconfig.json
 │       └── bunfig.toml
+│
+├── docs/
+│   └── cel-js/                      checked-in gap catalogue
+│       ├── README.md                capability report + gap table
+│       ├── cases.jsonl              one measured cell per line
+│       ├── regex/                   why there is no regex support
+│       ├── gaps/                    GAP-001… the measured gap set
+│       ├── probes/                  reproducible probe scripts
+│       ├── retired/                 removed suites + the translator
+│       └── upstream/                drafted cel-js issue bodies
 │
 ├── package.json                     root workspace config
 ├── turbo.json                       Turborepo pipeline
@@ -303,8 +314,23 @@ filtered in core for the same reason.
 There is no `listDirectSubjects`: it was a strict subset of
 `findTuplesByRelation`, which `listSubjects` now reads through.
 
+**A store declares which ids it can hold**, and this is the one
+place core takes a store at its word. `idDomain` is required —
+`OPAQUE_IDS` for a store whose ids are strings,
+`CANONICAL_UUID_IDS` for one keeping them in a `uuid` column — and
+core refuses an id outside it with `IdDomainError` at the request
+boundary. There is no clamp because a declaration can only narrow:
+declaring too wide gets the driver's own error back, declaring too
+narrow refuses requests the store could have served, and neither
+grants.
+
 ```typescript
 export interface TupleStore {
+  /** Which ids this store can hold. Required: absent-means-opaque
+   *  would compile silently for the population that most needs to
+   *  be told. */
+  readonly idDomain: IdDomain;
+
   // === Read ===
 
   /**
@@ -513,8 +539,26 @@ decision is per read, not per node.
 ## Error Types (`packages/core/src/errors.ts`)
 
 Every error the library raises on the check and write paths
-extends `TsfgaError`. (The Kysely adapter still surfaces the
-driver's own error for a malformed id — a known, scoped gap.)
+extends `TsfgaError`, with no exception left: the malformed id
+that used to reach the Kysely driver is refused by
+`validateIdDomain` before any query.
+
+One of them is **not a parity claim**. `IdDomainError` refuses an
+id OpenFGA accepts, because the store said it cannot hold it, and
+it carries a rule id from `CAPABILITY_RULE_IDS` with an entry in
+`packages/core/capability-refusals.json` rather than a cause in
+the upstream inventory. It runs after every upstream rule about
+the request's own strings and before the first rule about the
+*subject's place in the* model, so a malformed id still reports
+the portable refusal rather than a local one.
+
+**Two call sites report a model rule first, and it is the
+relation's own existence.** `addTuple` and `listObjects` both need
+the relation config before anything else they do, so a bad id on
+a relation the model does not define reports
+`RelationConfigNotFoundError`, not `IdDomainError`. That is the
+config *lookup*, not a type restriction: no rule about what the
+relation admits ever runs ahead of the id gate.
 
 | Class | Raised when |
 |---|---|
@@ -527,8 +571,12 @@ driver's own error for a malformed id — a known, scoped gap.)
 | `ConditionNotFoundError` | a tuple names a condition the store does not define |
 | `ConditionCompileError` | `writeConditionDefinition` given an expression that does not parse |
 | `ConditionEvaluationError` | CEL evaluation fails |
+| `MissingTupleError` | `removeTuple` is given a row that does not exist -- upstream's `on_missing` default |
+| `DuplicateTupleError` | `addTuple` is given an edge already stored -- upstream's `on_duplicate` default |
+| `InvalidObjectError` | the object half of a request or a write is one no row may carry |
 | `DepthExceededError` | the recursion budget is exhausted |
-| `InvalidStoredDataError` | a JSON column holds a shape the adapter cannot read |
+| `InvalidStoredDataError` | a JSON column, or the `subject_id`/`subject_wildcard` pair, holds a shape the adapter cannot read |
+| `IdDomainError` | the id is one the store's declared `idDomain` cannot hold — the only **capability refusal** in this table |
 
 **`InvalidSubjectTypeError` does not name the allow-list.** The
 message names the offending subject and the relation, as OpenFGA
@@ -540,10 +588,10 @@ write, and the list describes the authorization model.
 **`InvalidConditionalTupleError.cause`** is one of `condition is
 missing`, `invalid condition for type restriction`, `undefined
 condition`, `parameter type error`, `invalid context parameter`.
-**`InvalidRelationConfigError.cause`** is one of `intersection
-has fewer than two operands`, `undefined condition`, `tupleset
-relation admits a userset`, `tupleset relation admits a
-wildcard`. Upstream raises one error per family and discriminates
+**`InvalidRelationConfigError.cause`** names which model rule
+refused; `rewrite cycle` is the one that closes upstream's
+`ErrCycle`, and the full list is in `errors.ts` and in
+`packages/core/README.md`. Upstream raises one error per family and discriminates
 by cause string, so tsfga does too.
 
 There is no `UsersetNotAllowedError`. A userset on a relation
@@ -564,6 +612,16 @@ removes the unreachable `metadata` column from `tsfga.tuples` and
 single `directly_assignable` (jsonb, NOT NULL) holding structured
 type restrictions. Uses Kysely's DDL schema builder API where
 possible; raw `sql` only for indexes the builder cannot express.
+
+`006-wildcard-subject` gives the typed wildcard a column of its
+own — `subject_wildcard boolean`, with `subject_id` NULL on those
+rows — so no id value is reserved, and recreates
+`idx_tuples_unique` with `NULLS NOT DISTINCT` (PostgreSQL 15
+floor). It carries **no type change**: the two migrations that
+widened the id columns to `text` were deleted rather than
+superseded, so `001`'s `uuid NOT NULL` is what a database has.
+Its `down` refuses rather than merging a nil-UUID subject back
+into the wildcard's slot.
 
 `005` is destructive and deliberately not data-preserving: no
 honest conversion exists, and a guessed one would invent a model
@@ -656,10 +714,25 @@ A `Transaction<DB>` is a subtype of `Kysely<DB>`, so a store — and
 a whole client — can be scoped to a transaction with no extra API.
 `withoutPlugins()` preserves that.
 
-**UUID mapping:** The DB stores `object_id` and `subject_id` as `uuid`. The
-`TupleStore` interface uses `string`. The adapter handles conversion in both
-directions. Callers pass UUID-formatted strings
-(e.g., `"550e8400-e29b-41d4-a716-446655440000"`).
+**UUID mapping:** The DB stores `object_id` and `subject_id` as
+`uuid`, so `KyselyTupleStore` declares `CANONICAL_UUID_IDS` and
+core refuses every other id at the request boundary. The domain is
+**narrower than PostgreSQL's own `uuid` input grammar**, which is
+many-to-one: five spellings of one value store as one row and are
+five distinct ids upstream, so admitting more than the canonical
+lower-case hyphenated spelling would let a grant written for one
+answer `true` for another. Syntax only — no version or variant
+nibble — because the nil UUID must stay an ordinary id.
+
+`user:alice` is an ordinary subject upstream and this adapter
+refuses it, permanently. That is a documented design limit, pinned
+in `tests/conformance/id-domain.test.ts` and `non-uuid-object-ids.test.ts`.
+
+**The typed wildcard is not an id.** `subject_wildcard boolean`
+carries the shape and `subject_id` is NULL on those rows, so no id
+value is reserved. `@tsfga/core` still spells it `subjectId: "*"`;
+the adapter maps it in both directions and validates the pair on
+read.
 
 **DML pattern:** Always use Kysely's type-safe query builder for adapter
 methods. Use `onConflict().expression(sql`...`)` (without outer parens) for
@@ -678,7 +751,8 @@ export interface TsfgaClient {
    *  failing check reports its error in its own outcome. */
   checkMany(requests: readonly CheckRequest[]): Promise<CheckOutcome[]>;
   addTuple(request: AddTupleRequest): Promise<void>;
-  removeTuple(request: RemoveTupleRequest): Promise<boolean>;
+  /** Throws MissingTupleError when the row is not there. */
+  removeTuple(request: RemoveTupleRequest): Promise<void>;
   listObjects(request: ListObjectsRequest): Promise<string[]>;
   /** Direct subjects only, filtered by the relation's
    *  `directlyAssignable` — condition included. */
@@ -705,8 +779,29 @@ and errors, the `TupleStore` interface, `check`, `checkMany`,
 and the validation helpers a store author needs —
 `admitsSubjectRef`, `admitsSubjectShape`, `directSubjectRef`,
 `subjectShape`, `formatRestriction`, `isSelfDefining`,
-`validateTupleWrite` and `validateRelationConfigWrite`.
-`KyselyTupleStore` is exported from `@tsfga/kysely`.
+`validateTupleWrite` and `validateRelationConfigWrite`. It also
+re-exports the two write-rule namespaces — `UPSTREAM_RULE_IDS`,
+`CAPABILITY_RULE_IDS` and the `WriteRuleId`, `UpstreamRuleId` and
+`CapabilityRuleId` types — which name what `TsfgaError.ruleId`
+carries — and the two write brands, `GatedTuple` and
+`GatedRelationConfig`. The **mints** are deliberately not
+exported: an exported mint would let any consumer spell
+`store.insertTuple(parseTupleWrite(raw))` and be back where they
+started. `KyselyTupleStore` is exported from `@tsfga/kysely`.
+
+**Every write rule names itself, and the ids are not an order.**
+`packages/core/src/write-rules.ts` holds two id namespaces:
+`UPSTREAM_RULE_IDS`, in total bijection with
+`packages/core/write-gate-causes.json`, and `CAPABILITY_RULE_IDS`,
+for refusals tsfga makes that OpenFGA does not. The rules
+themselves stay where they are in `tuple-validation.ts`,
+`config-validation.ts` and `index.ts`; an id is a trailing
+argument at the raise site. **Do not lift them into an ordered
+table.** A rule's array index would become its precedence, no
+per-rule diff can see an index, and the reordering that results is
+invisible to the suite — measured: splitting one restriction loop
+into two passes changed which cause a malformed config reported,
+and every test still passed.
 
 ## API Stability Policy (pre-v1)
 
@@ -729,8 +824,183 @@ not until v1.**
 - When you break a tsfga API, say so plainly in the commit body and
   update the affected package `README.md` and `CHANGELOG.md` in the
   same commit.
+- **One axis is carved out of "always respect OpenFGA", and only
+  one: CEL.** tsfga's condition dialect is bounded by
+  `@marcbachmann/cel-js`, and a cel-js/cel-go disagreement is a
+  documented divergence rather than a bug to fix. See **CEL is
+  bounded by cel-js** below before writing anything in
+  `packages/core/src/conditions.ts`.
 - This policy expires at v1. After the v1 release, tsfga's public API
   becomes a semver contract like any other.
+
+## CEL is bounded by cel-js
+
+**tsfga's CEL surface is exactly what `@marcbachmann/cel-js`
+supports unaided. Where cel-js and cel-go disagree, tsfga
+diverges from OpenFGA on purpose, documents the divergence, and
+does not repair it in tsfga source.**
+
+This overrides the parity mandate above — deliberately, and only
+here. It is written down because the mandate already produced the
+opposite once: a repair layer in `packages/core/src/conditions.ts`
+holding an RE2-to-`RegExp` pattern translator, an AST source-splice
+that renamed calls onto tsfga-owned overloads, and custom
+`string()` / `int()` / `double()` overloads. Every piece of it was
+a correct response to a real divergence. Together they were a
+second CEL implementation, owned by this project, in the path of
+every authorization decision. It has been removed. **Do not
+rebuild it, in whole or one function at a time.**
+
+**The line is emulation versus refusal.** An *emulation* makes
+cel-js compute what cel-go computes. A *refusal* computes nothing
+new — it declines to store or to answer an expression the two
+engines would read differently. Emulation is out of bounds.
+Refusal is how tsfga stays honest, and **exactly three** refusals
+exist:
+
+1. the cel-go declaration allow-list;
+2. the write-time type check built on cel-js's own `check()`;
+3. `maxConditionEvaluationCost`, a port of an OpenFGA server
+   limit and a sibling of `maxDepth` and `maxBreadth`.
+
+**`matches()` is not supported, and that is refusal 1 doing its
+job — not a fourth refusal.** `matches` is simply absent from the
+allow-list's table, so any condition naming it is refused at write
+with `undeclared reference to 'matches'`, exactly as `split` or
+`substring` is. **tsfga has no regular-expression support of any
+kind and no code that inspects a pattern.**
+
+**The refusal set is closed at those three.** A fourth —
+including a "small" one that declines a single input — is a scope
+change, not a validation fix. It needs an owner decision recorded
+by amending **this section**, and a measurement pass against the
+OpenFGA container, before it is written.
+
+### This section has been amended twice, and that is the point
+
+Both amendments are recorded here because the history is the
+argument. A clean final state presented as though it were obvious
+would teach a future contributor nothing.
+
+**First** the set was opened to add a fourth refusal: a write-time
+deny-list refusing `matches()` patterns RE2 rejects. It was
+authorised on the strength of one measured row — `^[^]*$`, a
+pattern its author wrote as a whitelist, which JavaScript reads as
+*every possible input* and which OpenFGA will not store. The row
+reached the owner because it was written down with an honest
+justification instead of a smoothed one.
+
+**Then the set was closed again at three, and `matches` was
+dropped entirely instead.** The deny-list would have closed some
+divergences and left others: constructs RE2 *accepts* and
+JavaScript reads more widely (`\A`, `\Q`, `\s`, `[[:alpha:]]`)
+were outside it, patterns arriving from context could not be
+checked at all, and catastrophic backtracking — measured on V8 at
+6 520 ms for a 30-character input, and unbounded above that — was
+untouched by it. Each measurement pass moved the count. Removing
+the feature removed the entire class.
+
+**Read the shape of that.** The second amendment **narrowed the
+code** — no deny-list, no pattern layer, ~120 lines never written
+— while **widening the refusal**, from "some patterns" to "all of
+them". That is the direction this project should move when a
+compatibility question keeps producing new measurements: not a
+more careful layer, a smaller surface.
+
+So, specifically, and because these are the shapes that have
+already been tried or proposed:
+
+- **Do not reintroduce a pattern layer "just for validation".** A
+  rule that reads a `matches()` pattern in order to accept or
+  reject it is the deny-list that was authorised, built nowhere,
+  and then deliberately abandoned. There is no `matches()` to
+  validate. If you are writing code that parses a regular
+  expression, you are rebuilding what two owner decisions removed.
+- **Do not re-declare `matches` in the allow-list**, with or
+  without a guard beside it. That single table entry is the whole
+  of regex support; adding it back restores every divergence in
+  `docs/cel-js/`, silently, with no other diff.
+- **A three-line change in the write gate that declines one more
+  input**, filed as "fix a validation gap", is a fourth refusal
+  with a small diff. Size is not the test. **Does the set still
+  have three members afterwards?** is the test.
+- **Restoring regex is a fork-shaped change, not a patch.** It
+  needs a cel-js that behaves like cel-go, which is the work
+  `docs/cel-js/` exists to feed. It does not need a clever wrapper
+  here.
+
+**Do not:**
+
+- translate, rewrite, splice, re-parse or otherwise transform a
+  CEL expression before handing it to cel-js;
+- parse, inspect, validate or deny a regular expression — there is
+  no supported call that takes one;
+- register a function or operator that replaces, shadows or stands
+  in for one cel-go declares, or that supplies one cel-js lacks —
+  **except** the two declaration stubs on the checking clone in
+  `typeVerdict`, which declare `ipaddress` / `in_cidr` so the
+  write gate does not refuse a model upstream stores, and which
+  are never evaluated;
+- transcribe cel-go's overload table, its type rules or its
+  evaluation semantics in order to reproduce them — **except**
+  `maxConditionEvaluationCost`'s cost model, which is a port of an
+  OpenFGA server limit and is exempt as refusal 3;
+- add a second CEL engine — a WASM cel-go build, a native regex
+  binding, or a hand-written checker or interpreter. **A
+  linear-time regex engine is a second engine**, however narrowly
+  it is scoped, and however good the argument for it.
+
+The two exceptions above are load-bearing, not hedges: without
+them this list bans, verbatim, two of the three refusals the
+paragraph above keeps, and a future reader would be licensed to
+delete them.
+
+**When you hit a gap** — an expression OpenFGA answers and tsfga
+refuses, or the two answer differently:
+
+1. Confirm it against the OpenFGA container, not the Go checkout.
+   A claim without a run is a hypothesis.
+2. Pin it two-sided in the conformance suite:
+   `expectPinnedDivergence` for a check,
+   `expectPinnedWriteDivergence` for a tuple write,
+   `expectPinnedModelWriteDivergence` for a model or condition
+   definition OpenFGA refuses to store. Each refuses to pass on
+   agreement. A divergence nothing asserts is indistinguishable
+   from one nobody has noticed.
+3. Name it in `packages/core/README.md`'s conditions section with
+   its direction — refusing, granting, or a different boolean. The
+   granting ones are the ones consumers must be able to find.
+4. Add the measured case to `docs/cel-js/cases.jsonl`, with both
+   version strings. A measurement without them is folklore.
+5. Stop. The fix is a cel-js fork, later. It is not a patch here.
+
+**What this is not.** Conditions are supported and first class.
+Definitions are stored, compiled and type-checked at write time,
+context is coerced by OpenFGA's own grammar, tuple context
+overrides request context, and every direct, userset and tupleset
+row is condition-evaluated. A bug in tsfga's own condition
+handling — coercion, the context merge, error scoping, the write
+gate, caching, the tuple/type restriction match — is an ordinary
+bug and is fixed ordinarily. Only the layer that repairs *cel-js*
+is out of bounds. If you cannot tell which side of the line you
+are on, ask three questions: **would this code exist if cel-js
+behaved exactly like cel-go?**; if no, **does it change what
+cel-js computes, or only what tsfga will store?**; and, if only
+what tsfga will store, **does the refusal set still have three
+members afterwards?** The first is forbidden outright. The third
+is the one that catches the rest: a new refusal is a fourth member
+however small its diff, and it needs this section amended before
+it is written, not after.
+
+The full analysis lives in `docs/cel-js/`: the measured capability
+report, the gap table, the reproducible probes, the retired test
+cases, and the drafted upstream cel-js issues. It is checked in,
+so a fresh clone has it.
+
+`@marcbachmann/cel-js` is pinned exactly in
+`packages/core/package.json` and stays exactly pinned. An upgrade
+is a deliberate change with its own measurement pass, because the
+divergence set moves with it.
 
 ## OpenFGA Source of Truth (`.openfga_repo`)
 
@@ -791,6 +1061,14 @@ Useful entry points inside the checkout:
 
 Conformance tests validate that tsfga produces identical results to a real
 OpenFGA service. This is the most important testing layer.
+
+**Build before measuring a single file.** `packages/core/package.json`
+exports only `./dist/index.js`, so `cd tests/conformance && bun test
+<file>` measures the **last built** core, not your working tree.
+`bun run turbo:test:*` builds first and is always sound; a per-file
+iteration run is not, unless you `bun run build` first. This is not a
+detail — a real bug in the CEL work survived a full round because a
+per-file run kept reporting a stale `dist/` as green.
 
 ### Docker Compose (`compose.yaml`)
 
@@ -1025,6 +1303,78 @@ scripts/bump.sh <package-dir> [patch|minor|major]  # Bump a version
 Publishing is not a local command — the Release workflow on
 `emfga/tsfga` is the only publish path. See `RELEASING.md`.
 
+### Running tests
+
+**Run the whole suite by committing and pushing to `origin`, and
+letting CI run it. That is how the full suite gets run — not a
+preference between two equal options.** Locally, run only the
+narrow slice you need while iterating.
+
+```bash
+git push origin <branch>
+gh workflow run ci.yml --repo lemuelroberto/tsfga --ref <branch>
+gh run list --repo lemuelroberto/tsfga --branch <branch> --limit 1
+gh run view <id> --repo lemuelroberto/tsfga --json jobs \
+  --jq '.jobs[] | "\(.conclusion)\t\(.name)"'
+```
+
+Push to `origin` only, never `upstream`. `test-bun` provisions
+**its own** Postgres and OpenFGA and runs the full `turbo:test`
+including conformance, plus `check:schema-drift`, so a green
+`test-bun` is the same evidence a local run gives — and better
+evidence than one taken while anything else touches the shared
+containers.
+
+**Why this is the default and not a preference.** There is one
+Postgres and one OpenFGA on this machine, shared by every
+worktree, every agent and every hook. Each conformance file holds
+an open transaction and OpenFGA store creation is global, so two
+concurrent runs block and corrupt each other. That produces
+spurious failures — and spurious *passes*, which are worse. This
+cost real time before the rule existed, and it is why
+`.claude/hooks/quality-checks.sh` deliberately does **not** run
+the suite.
+
+**What to run locally.** Only the narrowest thing that answers
+the question you have right now — iterating through CI would be
+absurd, and running the *whole* suite locally buys nothing CI
+does not give more reliably.
+
+- Core unit tests need no infrastructure at all and are safe to
+  run as often as you like: `bun run turbo:test:core`, or one
+  file with `cd packages/core && bun test <file>`.
+- One conformance file while iterating on it:
+  `cd tests/conformance && bun test <file>.test.ts`.
+- **`bun run build` first** for anything reaching core through
+  `dist/`. The conformance suite does. A per-file run without a
+  build measures a stale `dist/` and will happily confirm a bug
+  you just fixed, or hide one you just wrote.
+- **Only one agent touches the shared containers at a time.** If
+  several are working, the orchestrator says who has the token.
+- **If a failure will not reproduce, do not debug it.** Re-run it
+  first, and check whether something else was testing at the same
+  time.
+
+**Then commit, push, and let CI say whether it works.** A local
+green is a hypothesis; a CI green across the matrix — Node
+22/24/26, Deno, two Bun versions, typecheck, packaging — is the
+measurement. **If local and CI disagree, CI wins.** Type errors
+and packaging breakage that no local run can see are routinely
+caught there.
+
+- A CI failure in `setup-bun`, `setup-deno` or `docker compose
+  up` is **infrastructure, not code**. Re-run the failed jobs
+  (`gh run rerun <id> --failed`) before reading anything into it.
+- `commitlint` is skipped on `workflow_dispatch`, so it will not
+  check commit headers. Hold the 50-character rule yourself.
+- Commit freely on a feature branch to get a CI run; squash the
+  fixups before opening a PR, per "Commit Hygiene Before PR".
+
+The local database is disposable — it holds nothing but test
+fixtures. `bun run infra:down && bun run infra:setup` re-creates
+it and needs no permission; do it whenever the applied migration
+chain does not match the branch you are on.
+
 ### CI Workflow (`.github/workflows/ci.yml`)
 
 Triggers: `pull_request` (main), `workflow_dispatch`.
@@ -1173,8 +1523,23 @@ has native TypeScript support). Tests run via:
 
 The shims cover: `describe`, `test`, `beforeEach`, `afterEach`,
 `beforeAll`, `afterAll`, and `expect()` with matchers `toBe`, `toBeNull`,
-`toEqual`, `toHaveLength`, `toBeTruthy`, `toBeInstanceOf`, `not.toBeNull`,
-`not.toBe`, and `rejects.toBeInstanceOf`.
+`toEqual`, `toHaveLength`, `toBeTruthy`, `toBeUndefined`,
+`toBeGreaterThan`, `toBeInstanceOf`, `toContain`, `toThrow`,
+`not.toBeNull`, `not.toBe`, `not.toContain`, `not.toThrow`,
+`rejects.toBeInstanceOf`, `resolves.toBe`, `resolves.toEqual` and
+`resolves.toBeUndefined`.
+
+**The list is the contract, and Bun will not tell you when you leave
+it.** A matcher Bun has and the Node shim does not passes locally and
+fails only on `turbo:test:node` — in CI, on three Node versions at
+once. Adding one is a two-line change; reaching for one without adding
+it is a green local run that is not green.
+
+**`beforeAll` takes no timeout argument.** Bun accepts
+`beforeAll(fn, ms)` from 1.3 and the CI matrix still runs 1.2.23,
+where it is a hard error before any test executes. Set a slow
+package's budget in its `bunfig.toml` `[test] timeout` instead —
+`tests/conformance` already does.
 
 ### Workflow Commands
 
@@ -1283,7 +1648,14 @@ history when interactive rebase is not available.
   schema validation.
 - **No `as` type assertions in production code.** Use control-flow
   narrowing (guards, early returns, local const captures) instead.
-  The only acceptable `as` usage is `as const` for literal types.
+  The only acceptable `as` usage is `as const` for literal types,
+  and the **two mints in `packages/core/src/write-gate.ts`**.
+  Those two are the security boundary itself: a brand is a phantom
+  property no value carries, so minting one is an assertion by
+  construction — that is what makes it a boundary rather than a
+  shape. Two, and no more. A third means something other than the
+  two write validators is minting, and the gate has become a
+  convention.
 - **No loose equality (`==` / `!=`).** Always use strict equality
   (`===` / `!==`). For nullish checks, use explicit
   `=== null || === undefined` or `??` / `?.` operators.

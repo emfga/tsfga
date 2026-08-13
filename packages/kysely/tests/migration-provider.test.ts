@@ -51,6 +51,26 @@ describe("migrationProvider", () => {
     await admin.end();
   });
 
+  /** The declared type of one `tsfga.tuples` column. */
+  async function columnType(column: string): Promise<string | undefined> {
+    const columns = await db
+      .withTables<{
+        "information_schema.columns": {
+          table_schema: string;
+          table_name: string;
+          column_name: string;
+          data_type: string;
+        };
+      }>()
+      .selectFrom("information_schema.columns")
+      .select("data_type")
+      .where("table_schema", "=", "tsfga")
+      .where("table_name", "=", "tuples")
+      .where("column_name", "=", column)
+      .execute();
+    return columns[0]?.data_type;
+  }
+
   test("migrateToLatest provisions the tsfga schema", async () => {
     const migrator = new Migrator({ db, provider: migrationProvider });
     const { error, results } = await migrator.migrateToLatest();
@@ -86,6 +106,83 @@ describe("migrationProvider", () => {
 
     expect(error).toBe(undefined);
     expect(results).toHaveLength(0);
+  });
+
+  /**
+   * `006` gives the typed wildcard a column of its own, so a real
+   * subject whose id is the nil UUID becomes legal — and rolling
+   * back reinstates a shape where that value *is* the wildcard.
+   * Merging the two would grant a relation to every subject of the
+   * type on the strength of a row written for one, in the granting
+   * direction, with nothing to report it.
+   *
+   * So `down` counts those rows and refuses, naming them. It is
+   * the only contract of the migration nothing else exercises: the
+   * `up` direction is covered by every other suite in this
+   * package.
+   */
+  test("rolling back 006 refuses a nil-UUID subject", async () => {
+    const tuples = db.withTables<{
+      "tsfga.tuples": {
+        object_type: string;
+        object_id: string;
+        relation: string;
+        subject_type: string;
+        subject_id: string | null;
+        subject_wildcard: boolean;
+        created_at: Date;
+        updated_at: Date;
+      };
+    }>();
+    const now = new Date();
+    // The wildcard, which rolls back cleanly onto the nil UUID,
+    // and a real subject holding that same value, which does not.
+    await tuples
+      .insertInto("tsfga.tuples")
+      .values([
+        {
+          object_type: "document",
+          object_id: "00000000-0000-0000-0000-00000000000a",
+          relation: "viewer",
+          subject_type: "user",
+          subject_id: null,
+          subject_wildcard: true,
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          object_type: "document",
+          object_id: "00000000-0000-0000-0000-00000000000b",
+          relation: "viewer",
+          subject_type: "user",
+          subject_id: "00000000-0000-0000-0000-000000000000",
+          subject_wildcard: false,
+          created_at: now,
+          updated_at: now,
+        },
+      ])
+      .execute();
+
+    const blocked = await new Migrator({
+      db,
+      provider: migrationProvider,
+    }).migrateDown();
+    expect(blocked.error).not.toBe(undefined);
+
+    // The failed migration is transactional, so the column pair is
+    // untouched and the row is still there to be dealt with.
+    await tuples
+      .deleteFrom("tsfga.tuples")
+      .where("subject_id", "=", "00000000-0000-0000-0000-000000000000")
+      .execute();
+
+    const { error } = await new Migrator({
+      db,
+      provider: migrationProvider,
+    }).migrateDown();
+    expect(error).toBe(undefined);
+    expect(await columnType("subject_id")).toBe("uuid");
+    expect(await columnType("subject_wildcard")).toBe(undefined);
   });
 
   /**

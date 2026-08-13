@@ -36,6 +36,20 @@ jobs:
       # peer range still admits the core it was tested against.
       - run: bun run check:peer-range
 
+      # The write-gate cause inventory is checked against the
+      # OpenFGA source it was extracted from, at the SHA it names
+      # and the tag `compose.yaml` runs. Needs no database, so it
+      # belongs here rather than in the conformance job.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: openfga/openfga
+          ref: 560d5d3dd46b5adda9ecfb29efeb4f4f70c96327
+          path: .openfga
+
+      - run: bun run check:write-gate-causes
+        env:
+          OPENFGA_REPO: ${{ github.workspace }}/.openfga
+
   commitlint:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

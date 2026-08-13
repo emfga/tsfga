@@ -6,3 +6,6 @@
 dist
 node_modules
 tmp
+
+# The OpenFGA checkout CI clones for the write-gate cause gate.
+.openfga/

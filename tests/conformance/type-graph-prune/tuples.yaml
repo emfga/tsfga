@@ -1,0 +1,33 @@
+# The ring: one hop, whose condition has no stored context. A
+# context-free check that actually walks it raises.
+- user: ring_a1:r2#member
+  relation: member
+  object: ring_a1:r1
+  condition:
+    name: valid_ip_a1
+
+- user: ring_a1:r1#member
+  relation: via_ring
+  object: doc_a1:d1
+
+- user: user_a1:alice
+  relation: granted
+  object: doc_a1:d1
+
+# d2 carries the chain, and the same base grant d1 carries, so
+# `chain_excluded` has something to exclude *from*. The chain
+# itself is written raw by the test — it is 31 rows.
+- user: user_a1:alice
+  relation: granted
+  object: doc_a1:d2
+
+# The pair, and a document that reaches it.
+- user: pair_a1:p2#owner
+  relation: member
+  object: pair_a1:p1
+- user: pair_a1:p1#member
+  relation: owner
+  object: pair_a1:p2
+- user: pair_a1:p1#member
+  relation: via_pair
+  object: doc_a1:d1

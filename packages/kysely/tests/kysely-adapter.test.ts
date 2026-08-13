@@ -17,6 +17,7 @@ import {
   getDb,
   rollbackTransaction,
 } from "./helpers/db.ts";
+import { ungatedConfig, ungatedTuple } from "./helpers/ungated.ts";
 
 /** Row order is not part of the read contract; compare as sets. */
 function sortedBySubject(tuples: readonly Tuple[]): Tuple[] {
@@ -81,16 +82,18 @@ describe("KyselyTupleStore", () => {
 
   describe("Relation configs", () => {
     test("upsertRelationConfig and findRelationConfig", async () => {
-      await store.upsertRelationConfig({
-        objectType: "workspace",
-        relation: "member",
-        directlyAssignable: [{ type: "user" }],
-        impliedBy: ["channels_admin"],
-        computedUserset: null,
-        tupleToUserset: null,
-        excludedBy: null,
-        intersection: null,
-      });
+      await store.upsertRelationConfig(
+        ungatedConfig({
+          objectType: "workspace",
+          relation: "member",
+          directlyAssignable: [{ type: "user" }],
+          impliedBy: ["channels_admin"],
+          computedUserset: null,
+          tupleToUserset: null,
+          excludedBy: null,
+          intersection: null,
+        }),
+      );
 
       const config = await store.findRelationConfig("workspace", "member");
       expect(config).not.toBeNull();
@@ -105,31 +108,101 @@ describe("KyselyTupleStore", () => {
       expect(config).toBeNull();
     });
 
+    /**
+     * The subject gate's read. Both arms matter: a type with
+     * relations of its own is defined by its configs, and a type
+     * with none — the shape of nearly every subject type there is —
+     * only by the restrictions that admit it.
+     */
+    describe("hasTypeDefinition", () => {
+      beforeEach(async () => {
+        await store.upsertRelationConfig(
+          ungatedConfig({
+            objectType: "workspace",
+            relation: "member",
+            directlyAssignable: [
+              { type: "user" },
+              { type: "robot", wildcard: true },
+              { type: "team", relation: "member" },
+              { type: "vendor", condition: "weekday_only" },
+            ],
+            impliedBy: null,
+            computedUserset: null,
+            tupleToUserset: null,
+            excludedBy: null,
+            intersection: null,
+          }),
+        );
+      });
+
+      test("a type with a relation config of its own", async () => {
+        expect(await store.hasTypeDefinition("workspace")).toBe(true);
+      });
+
+      test("a type only a restriction names", async () => {
+        expect(await store.hasTypeDefinition("user")).toBe(true);
+      });
+
+      test("every restriction shape counts, not just the bare one", async () => {
+        // The containment probe is `[{"type": t}]`, which every
+        // restriction naming `t` contains — wildcard, userset and
+        // conditioned alike.
+        expect(await store.hasTypeDefinition("robot")).toBe(true);
+        expect(await store.hasTypeDefinition("team")).toBe(true);
+        expect(await store.hasTypeDefinition("vendor")).toBe(true);
+      });
+
+      test("a type nothing names", async () => {
+        expect(await store.hasTypeDefinition("no_such_type")).toBe(false);
+      });
+
+      test("a type only a stored tuple names", async () => {
+        // Rows say nothing about the model: one can outlive the
+        // config that admitted it, and a dropped type must not look
+        // defined for as long as its rows survive.
+        await store.insertTuple(
+          ungatedTuple({
+            objectType: "workspace",
+            objectId: uuid1,
+            relation: "member",
+            subjectType: "ghost",
+            subjectId: uuid2,
+          }),
+        );
+
+        expect(await store.hasTypeDefinition("ghost")).toBe(false);
+      });
+    });
+
     test("upsertRelationConfig updates existing", async () => {
-      await store.upsertRelationConfig({
-        objectType: "workspace",
-        relation: "member",
-        directlyAssignable: [{ type: "user" }],
-        impliedBy: null,
-        computedUserset: null,
-        tupleToUserset: null,
-        excludedBy: null,
-        intersection: null,
-      });
-      await store.upsertRelationConfig({
-        objectType: "workspace",
-        relation: "member",
-        directlyAssignable: [
-          { type: "user" },
-          { type: "team" },
-          { type: "workspace", relation: "member" },
-        ],
-        impliedBy: null,
-        computedUserset: null,
-        tupleToUserset: null,
-        excludedBy: null,
-        intersection: null,
-      });
+      await store.upsertRelationConfig(
+        ungatedConfig({
+          objectType: "workspace",
+          relation: "member",
+          directlyAssignable: [{ type: "user" }],
+          impliedBy: null,
+          computedUserset: null,
+          tupleToUserset: null,
+          excludedBy: null,
+          intersection: null,
+        }),
+      );
+      await store.upsertRelationConfig(
+        ungatedConfig({
+          objectType: "workspace",
+          relation: "member",
+          directlyAssignable: [
+            { type: "user" },
+            { type: "team" },
+            { type: "workspace", relation: "member" },
+          ],
+          impliedBy: null,
+          computedUserset: null,
+          tupleToUserset: null,
+          excludedBy: null,
+          intersection: null,
+        }),
+      );
 
       const config = await store.findRelationConfig("workspace", "member");
       expect(config?.directlyAssignable).toEqual([
@@ -140,21 +213,23 @@ describe("KyselyTupleStore", () => {
     });
 
     test("deleteRelationConfig", async () => {
-      await store.upsertRelationConfig({
-        objectType: "workspace",
-        relation: "member",
-        directlyAssignable: [
-          { type: "user" },
-          { type: "user", wildcard: true },
-          { type: "workspace" },
-          { type: "workspace", wildcard: true },
-        ],
-        impliedBy: null,
-        computedUserset: null,
-        tupleToUserset: null,
-        excludedBy: null,
-        intersection: null,
-      });
+      await store.upsertRelationConfig(
+        ungatedConfig({
+          objectType: "workspace",
+          relation: "member",
+          directlyAssignable: [
+            { type: "user" },
+            { type: "user", wildcard: true },
+            { type: "workspace" },
+            { type: "workspace", wildcard: true },
+          ],
+          impliedBy: null,
+          computedUserset: null,
+          tupleToUserset: null,
+          excludedBy: null,
+          intersection: null,
+        }),
+      );
       expect(await store.deleteRelationConfig("workspace", "member")).toBe(
         true,
       );
@@ -168,23 +243,25 @@ describe("KyselyTupleStore", () => {
     });
 
     test("upsertRelationConfig with tupleToUserset", async () => {
-      await store.upsertRelationConfig({
-        objectType: "repo",
-        relation: "reader",
-        directlyAssignable: [
-          { type: "user" },
-          { type: "user", wildcard: true },
-          { type: "workspace" },
-          { type: "workspace", wildcard: true },
-        ],
-        impliedBy: null,
-        computedUserset: null,
-        tupleToUserset: [
-          { tupleset: "organization", computedUserset: "member" },
-        ],
-        excludedBy: null,
-        intersection: null,
-      });
+      await store.upsertRelationConfig(
+        ungatedConfig({
+          objectType: "repo",
+          relation: "reader",
+          directlyAssignable: [
+            { type: "user" },
+            { type: "user", wildcard: true },
+            { type: "workspace" },
+            { type: "workspace", wildcard: true },
+          ],
+          impliedBy: null,
+          computedUserset: null,
+          tupleToUserset: [
+            { tupleset: "organization", computedUserset: "member" },
+          ],
+          excludedBy: null,
+          intersection: null,
+        }),
+      );
 
       const config = await store.findRelationConfig("repo", "reader");
       expect(config?.tupleToUserset).toEqual([
@@ -243,13 +320,15 @@ describe("KyselyTupleStore", () => {
 
   describe("Tuples", () => {
     test("insertTuple then read back the direct probe", async () => {
-      await store.insertTuple({
-        objectType: "workspace",
-        objectId: uuid1,
-        relation: "member",
-        subjectType: "user",
-        subjectId: uuid2,
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "workspace",
+          objectId: uuid1,
+          relation: "member",
+          subjectType: "user",
+          subjectId: uuid2,
+        }),
+      );
 
       const tuple = await readDirect(
         "workspace",
@@ -272,14 +351,16 @@ describe("KyselyTupleStore", () => {
     });
 
     test("the direct probe ignores tuples with subject_relation", async () => {
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "workspace",
-        subjectId: uuid2,
-        subjectRelation: "member",
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "workspace",
+          subjectId: uuid2,
+          subjectRelation: "member",
+        }),
+      );
 
       expect(
         await readDirect("channel", uuid1, "writer", "workspace", uuid2),
@@ -287,22 +368,26 @@ describe("KyselyTupleStore", () => {
     });
 
     test("the userset part returns only subject_relation rows", async () => {
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "workspace",
-        subjectId: uuid2,
-        subjectRelation: "member",
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "workspace",
+          subjectId: uuid2,
+          subjectRelation: "member",
+        }),
+      );
       // Direct tuple should not appear
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "user",
-        subjectId: uuid3,
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "user",
+          subjectId: uuid3,
+        }),
+      );
 
       const { direct, wildcard, usersets } = await store.findCheckTuples({
         objectType: "channel",
@@ -319,25 +404,29 @@ describe("KyselyTupleStore", () => {
       // The parts the query excluded stay empty even though rows
       // matching them exist.
       expect(direct).toBeNull();
-      expect(wildcard).toBeNull();
+      expect(wildcard).toHaveLength(0);
     });
 
     test("findTuplesByRelation returns all tuples", async () => {
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "user",
-        subjectId: uuid2,
-      });
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "workspace",
-        subjectId: uuid3,
-        subjectRelation: "member",
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "user",
+          subjectId: uuid2,
+        }),
+      );
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "workspace",
+          subjectId: uuid3,
+          subjectRelation: "member",
+        }),
+      );
 
       const tuples = await store.findTuplesByRelation(
         "channel",
@@ -347,23 +436,35 @@ describe("KyselyTupleStore", () => {
       expect(tuples).toHaveLength(2);
     });
 
-    test("insertTuple upserts on conflict", async () => {
-      await store.insertTuple({
-        objectType: "workspace",
-        objectId: uuid1,
-        relation: "member",
-        subjectType: "user",
-        subjectId: uuid2,
-        conditionName: "old_cond",
-      });
-      await store.insertTuple({
-        objectType: "workspace",
-        objectId: uuid1,
-        relation: "member",
-        subjectType: "user",
-        subjectId: uuid2,
-        conditionName: "new_cond",
-      });
+    test("insertTuple reports a conflict and writes nothing", async () => {
+      // The natural key excludes the condition, so this used to be
+      // an upsert that replaced `old_cond` with `new_cond` and said
+      // nothing about it. Upstream has no write that edits a row in
+      // place: the row stands, and `addTuple` turns the `false`
+      // into a `DuplicateTupleError`.
+      const first = await store.insertTuple(
+        ungatedTuple({
+          objectType: "workspace",
+          objectId: uuid1,
+          relation: "member",
+          subjectType: "user",
+          subjectId: uuid2,
+          conditionName: "old_cond",
+        }),
+      );
+      const second = await store.insertTuple(
+        ungatedTuple({
+          objectType: "workspace",
+          objectId: uuid1,
+          relation: "member",
+          subjectType: "user",
+          subjectId: uuid2,
+          conditionName: "new_cond",
+        }),
+      );
+
+      expect(first).toBe(true);
+      expect(second).toBe(false);
 
       const tuple = await readDirect(
         "workspace",
@@ -372,19 +473,21 @@ describe("KyselyTupleStore", () => {
         "user",
         uuid2,
       );
-      expect(tuple?.conditionName).toBe("new_cond");
+      expect(tuple?.conditionName).toBe("old_cond");
     });
 
     test("insertTuple with condition context", async () => {
-      await store.insertTuple({
-        objectType: "doc",
-        objectId: uuid1,
-        relation: "viewer",
-        subjectType: "user",
-        subjectId: uuid2,
-        conditionName: "in_region",
-        conditionContext: { region: "us" },
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: uuid2,
+          conditionName: "in_region",
+          conditionContext: { region: "us" },
+        }),
+      );
 
       const tuple = await readDirect("doc", uuid1, "viewer", "user", uuid2);
       expect(tuple?.conditionName).toBe("in_region");
@@ -392,13 +495,15 @@ describe("KyselyTupleStore", () => {
     });
 
     test("deleteTuple", async () => {
-      await store.insertTuple({
-        objectType: "workspace",
-        objectId: uuid1,
-        relation: "member",
-        subjectType: "user",
-        subjectId: uuid2,
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "workspace",
+          objectId: uuid1,
+          relation: "member",
+          subjectType: "user",
+          subjectId: uuid2,
+        }),
+      );
 
       expect(
         await store.deleteTuple({
@@ -416,14 +521,16 @@ describe("KyselyTupleStore", () => {
     });
 
     test("deleteTuple with subject_relation", async () => {
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "workspace",
-        subjectId: uuid2,
-        subjectRelation: "member",
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "workspace",
+          subjectId: uuid2,
+          subjectRelation: "member",
+        }),
+      );
 
       expect(
         await store.deleteTuple({
@@ -452,13 +559,15 @@ describe("KyselyTupleStore", () => {
 
   describe("Null round-trips", () => {
     test("tuple without optional fields returns null", async () => {
-      await store.insertTuple({
-        objectType: "workspace",
-        objectId: uuid1,
-        relation: "member",
-        subjectType: "user",
-        subjectId: uuid2,
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "workspace",
+          objectId: uuid1,
+          relation: "member",
+          subjectType: "user",
+          subjectId: uuid2,
+        }),
+      );
 
       const tuple = await readDirect(
         "workspace",
@@ -472,68 +581,80 @@ describe("KyselyTupleStore", () => {
       expect(tuple?.conditionContext).toBeNull();
     });
 
-    test("upsert clears conditionName with null", async () => {
-      await store.insertTuple({
+    test("a second write does not clear conditionName", async () => {
+      // This asserted the opposite while `insertTuple` was an
+      // upsert, and that is the widening direction: a conditioned
+      // grant became a permanent one because someone re-wrote the
+      // edge without its condition. The row stands.
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: uuid2,
+          conditionName: "in_region",
+        }),
+      );
+      const second = await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: uuid2,
+          conditionName: null,
+        }),
+      );
+
+      expect(second).toBe(false);
+      const tuple = await readDirect("doc", uuid1, "viewer", "user", uuid2);
+      expect(tuple?.conditionName).toBe("in_region");
+    });
+
+    test("deleting then writing clears the condition", async () => {
+      // The supported way to change a grant's condition, and the
+      // only one upstream has.
+      const key = {
         objectType: "doc",
         objectId: uuid1,
         relation: "viewer",
         subjectType: "user",
         subjectId: uuid2,
-        conditionName: "in_region",
-      });
-      await store.insertTuple({
-        objectType: "doc",
-        objectId: uuid1,
-        relation: "viewer",
-        subjectType: "user",
-        subjectId: uuid2,
-        conditionName: null,
-      });
+      };
+      await store.insertTuple(
+        ungatedTuple({
+          ...key,
+          conditionName: "in_region",
+          conditionContext: { region: "us" },
+        }),
+      );
+      expect(await store.deleteTuple(key)).toBe(true);
+      expect(await store.insertTuple(ungatedTuple(key))).toBe(true);
 
       const tuple = await readDirect("doc", uuid1, "viewer", "user", uuid2);
       expect(tuple?.conditionName).toBeNull();
-    });
-
-    test("upsert clears conditionContext with null", async () => {
-      await store.insertTuple({
-        objectType: "doc",
-        objectId: uuid1,
-        relation: "viewer",
-        subjectType: "user",
-        subjectId: uuid2,
-        conditionName: "in_region",
-        conditionContext: { region: "us" },
-      });
-      await store.insertTuple({
-        objectType: "doc",
-        objectId: uuid1,
-        relation: "viewer",
-        subjectType: "user",
-        subjectId: uuid2,
-        conditionName: "in_region",
-        conditionContext: null,
-      });
-
-      const tuple = await readDirect("doc", uuid1, "viewer", "user", uuid2);
       expect(tuple?.conditionContext).toBeNull();
     });
 
     test("relation config nullable fields return null", async () => {
-      await store.upsertRelationConfig({
-        objectType: "workspace",
-        relation: "member",
-        directlyAssignable: [
-          { type: "user" },
-          { type: "user", wildcard: true },
-          { type: "workspace" },
-          { type: "workspace", wildcard: true },
-        ],
-        impliedBy: null,
-        computedUserset: null,
-        tupleToUserset: null,
-        excludedBy: null,
-        intersection: null,
-      });
+      await store.upsertRelationConfig(
+        ungatedConfig({
+          objectType: "workspace",
+          relation: "member",
+          directlyAssignable: [
+            { type: "user" },
+            { type: "user", wildcard: true },
+            { type: "workspace" },
+            { type: "workspace", wildcard: true },
+          ],
+          impliedBy: null,
+          computedUserset: null,
+          tupleToUserset: null,
+          excludedBy: null,
+          intersection: null,
+        }),
+      );
 
       const config = await store.findRelationConfig("workspace", "member");
       expect(config?.directlyAssignable).toEqual([
@@ -548,26 +669,30 @@ describe("KyselyTupleStore", () => {
     });
 
     test("upsert clears relation config impliedBy with null", async () => {
-      await store.upsertRelationConfig({
-        objectType: "workspace",
-        relation: "member",
-        directlyAssignable: [{ type: "user" }],
-        impliedBy: ["channels_admin"],
-        computedUserset: null,
-        tupleToUserset: null,
-        excludedBy: null,
-        intersection: null,
-      });
-      await store.upsertRelationConfig({
-        objectType: "workspace",
-        relation: "member",
-        directlyAssignable: [{ type: "user" }],
-        impliedBy: null,
-        computedUserset: null,
-        tupleToUserset: null,
-        excludedBy: null,
-        intersection: null,
-      });
+      await store.upsertRelationConfig(
+        ungatedConfig({
+          objectType: "workspace",
+          relation: "member",
+          directlyAssignable: [{ type: "user" }],
+          impliedBy: ["channels_admin"],
+          computedUserset: null,
+          tupleToUserset: null,
+          excludedBy: null,
+          intersection: null,
+        }),
+      );
+      await store.upsertRelationConfig(
+        ungatedConfig({
+          objectType: "workspace",
+          relation: "member",
+          directlyAssignable: [{ type: "user" }],
+          impliedBy: null,
+          computedUserset: null,
+          tupleToUserset: null,
+          excludedBy: null,
+          intersection: null,
+        }),
+      );
 
       const config = await store.findRelationConfig("workspace", "member");
       expect(config?.impliedBy).toBeNull();
@@ -602,84 +727,178 @@ describe("KyselyTupleStore", () => {
   });
 
   describe("Wildcard subjects", () => {
-    const sentinel = "00000000-0000-0000-0000-000000000000";
+    /**
+     * An ordinary subject id that used to be the wildcard's
+     * storage encoding. Since `006` it is reserved by nothing.
+     */
+    const nilUuid = "00000000-0000-0000-0000-000000000000";
 
-    test("insertTuple stores the wildcard as the nil UUID", async () => {
-      await store.insertTuple({
-        objectType: "doc",
-        objectId: uuid1,
-        relation: "viewer",
-        subjectType: "user",
-        subjectId: "*",
-      });
+    test("insertTuple stores the wildcard out of the id namespace", async () => {
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "*",
+        }),
+      );
 
+      // The shape is a column of its own and the id is absent, so
+      // no id value is reserved and the nil UUID is free to be an
+      // ordinary subject -- which the two tests below assert.
       const row = await db
         .selectFrom("tsfga.tuples")
-        .select("subject_id")
+        .select(["subject_id", "subject_wildcard"])
         .where("object_type", "=", "doc")
         .where("object_id", "=", uuid1)
         .executeTakeFirst();
-      expect(row?.subject_id).toBe(sentinel);
+      expect(row?.subject_id).toBeNull();
+      expect(row?.subject_wildcard).toBe(true);
     });
 
-    test("the direct probe maps the sentinel back to *", async () => {
-      await store.insertTuple({
-        objectType: "doc",
-        objectId: uuid1,
-        relation: "viewer",
-        subjectType: "user",
-        subjectId: "*",
-      });
+    test("the direct probe reads the wildcard back as *", async () => {
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "*",
+        }),
+      );
 
       const tuple = await readDirect("doc", uuid1, "viewer", "user", "*");
       expect(tuple).not.toBeNull();
       expect(tuple?.subjectId).toBe("*");
     });
 
-    test("findTuplesByRelation maps the sentinel back to *", async () => {
-      await store.insertTuple({
-        objectType: "doc",
-        objectId: uuid1,
-        relation: "viewer",
-        subjectType: "user",
-        subjectId: "*",
-      });
+    test("findTuplesByRelation reads the wildcard back as *", async () => {
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "*",
+        }),
+      );
 
       const tuples = await store.findTuplesByRelation("doc", uuid1, "viewer");
       expect(tuples).toHaveLength(1);
       expect(tuples[0]?.subjectId).toBe("*");
     });
 
-    test("findTuplesByRelation maps the sentinel back to *", async () => {
-      await store.insertTuple({
-        objectType: "doc",
-        objectId: uuid1,
-        relation: "viewer",
-        subjectType: "user",
-        subjectId: "*",
-      });
-      await store.insertTuple({
+    test("a wildcard row and a concrete row stay distinct", async () => {
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "*",
+        }),
+      );
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: uuid2,
+        }),
+      );
+
+      const subjects = await store.findTuplesByRelation("doc", uuid1, "viewer");
+      expect(subjects).toHaveLength(2);
+      expect(subjects.find((t) => t.subjectId === "*")).toBeTruthy();
+      expect(subjects.find((t) => t.subjectId === uuid2)).toBeTruthy();
+    });
+
+    /**
+     * The nil UUID used to *be* the wildcard's storage
+     * encoding, so a grant written for it read back as `"*"` and
+     * granted every subject of the type, while the subject it was
+     * written for stopped matching. Both halves are asserted:
+     * the grant belongs to the subject it names, and it is not
+     * the wildcard row.
+     */
+    test("the nil UUID is an ordinary subject, not the wildcard", async () => {
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: nilUuid,
+        }),
+      );
+
+      const own = await readDirect("doc", uuid1, "viewer", "user", nilUuid);
+      expect(own?.subjectId).toBe(nilUuid);
+
+      const { wildcard } = await store.findCheckTuples({
         objectType: "doc",
         objectId: uuid1,
         relation: "viewer",
         subjectType: "user",
         subjectId: uuid2,
+        directRefs: [],
+        wildcardRefs: null,
+        usersetRefs: [],
       });
+      expect(wildcard).toHaveLength(0);
+    });
 
-      const subjects = await store.findTuplesByRelation("doc", uuid1, "viewer");
-      expect(subjects).toHaveLength(2);
-      expect(subjects.find((t) => t.subjectId === "*")).toBeTruthy();
-      expect(subjects.find((t) => t.subjectId === sentinel)).toBe(undefined);
+    test("a nil-UUID grant and a wildcard grant coexist", async () => {
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: nilUuid,
+        }),
+      );
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "*",
+        }),
+      );
+
+      const tuples = await store.findTuplesByRelation("doc", uuid1, "viewer");
+      expect(tuples).toHaveLength(2);
+
+      // Deleting one leaves the other: they are different rows,
+      // not two spellings of one.
+      expect(
+        await store.deleteTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: nilUuid,
+        }),
+      ).toBe(true);
+      const left = await store.findTuplesByRelation("doc", uuid1, "viewer");
+      expect(left).toHaveLength(1);
+      expect(left[0]?.subjectId).toBe("*");
     });
 
     test("deleteTuple removes a wildcard tuple by *", async () => {
-      await store.insertTuple({
-        objectType: "doc",
-        objectId: uuid1,
-        relation: "viewer",
-        subjectType: "user",
-        subjectId: "*",
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "*",
+        }),
+      );
 
       expect(
         await store.deleteTuple({
@@ -691,6 +910,94 @@ describe("KyselyTupleStore", () => {
         }),
       ).toBe(true);
       expect(await readDirect("doc", uuid1, "viewer", "user", "*")).toBeNull();
+    });
+  });
+
+  /**
+   * The `uuid` column's grammar, from the other end. `object_id` is
+   * a `uuid` column,
+   * and that column's input grammar is many-to-one: the uppercase,
+   * hyphenless, braced, braced-hyphenless and odd-hyphen spellings
+   * of one value all store as the same row, while OpenFGA holds
+   * them apart as distinct objects.
+   *
+   * That is the measurement `CANONICAL_UUID_IDS` exists for, and
+   * it is asserted here rather than argued: the store is where the
+   * folding happens, and core's gate is what stops a caller
+   * reaching it. These calls go straight to the store, so the gate
+   * is deliberately out of the way.
+   *
+   * The three tests this replaces asserted the opposite -- that
+   * the two spellings were two rows -- because migrations `006`
+   * and `007` had made both columns `text`. Both are deleted; that
+   * premise is retired, and with it the third test, which round-
+   * tripped `readme.md`.
+   */
+  describe("a uuid column folds the spellings OpenFGA holds apart", () => {
+    test("the uppercase spelling reads back the same row", async () => {
+      const lower = "00000000-0000-4000-a000-0000000000ff";
+      const upper = lower.toUpperCase();
+
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: upper,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: uuid2,
+        }),
+      );
+
+      // One row, reachable under either spelling and reported
+      // under the canonical one. Two objects upstream.
+      const written = await readDirect("doc", upper, "viewer", "user", uuid2);
+      expect(written?.objectId).toBe(lower);
+      const other = await readDirect("doc", lower, "viewer", "user", uuid2);
+      expect(other?.objectId).toBe(lower);
+      expect(
+        await store.findTuplesByRelation("doc", lower, "viewer"),
+      ).toHaveLength(1);
+    });
+
+    test("the hyphenless spelling reads back the same row", async () => {
+      const hyphenated = "00000000-0000-4000-a000-0000000000fe";
+      const bare = hyphenated.replaceAll("-", "");
+
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: bare,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: uuid2,
+        }),
+      );
+
+      expect(
+        (await readDirect("doc", bare, "viewer", "user", uuid2))?.objectId,
+      ).toBe(hyphenated);
+      expect(
+        (await readDirect("doc", hyphenated, "viewer", "user", uuid2))
+          ?.objectId,
+      ).toBe(hyphenated);
+    });
+
+    test("a subject id folds the same way", async () => {
+      const lower = "00000000-0000-4000-a000-0000000000fd";
+
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: lower.toUpperCase(),
+        }),
+      );
+
+      expect(
+        (await readDirect("doc", uuid1, "viewer", "user", lower))?.subjectId,
+      ).toBe(lower);
     });
   });
 
@@ -725,21 +1032,25 @@ describe("KyselyTupleStore", () => {
         { subjectType: "robot", subjectId: "*" },
       ];
       for (const row of rows) {
-        await store.insertTuple({
-          objectType: "doc",
-          objectId: uuid1,
-          relation: "viewer",
-          ...row,
-        });
+        await store.insertTuple(
+          ungatedTuple({
+            objectType: "doc",
+            objectId: uuid1,
+            relation: "viewer",
+            ...row,
+          }),
+        );
       }
       // Same object, different relation — out of scope entirely.
-      await store.insertTuple({
-        objectType: "doc",
-        objectId: uuid1,
-        relation: "editor",
-        subjectType: "user",
-        subjectId: uuid2,
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "doc",
+          objectId: uuid1,
+          relation: "editor",
+          subjectType: "user",
+          subjectId: uuid2,
+        }),
+      );
     }
 
     for (const includeDirect of parts) {
@@ -770,14 +1081,16 @@ describe("KyselyTupleStore", () => {
                       t.subjectRelation === null,
                   ) ?? null)
                 : null,
+              // A list since the wildcard slot became one; the
+              // unique index means it holds 0 or 1 rows here.
               wildcard: includeWildcard
-                ? (all.find(
+                ? all.filter(
                     (t) =>
                       t.subjectType === "user" &&
                       t.subjectId === "*" &&
                       t.subjectRelation === null,
-                  ) ?? null)
-                : null,
+                  )
+                : [],
               usersets: includeUsersets
                 ? all.filter((t) => t.subjectRelation !== null)
                 : [],
@@ -825,7 +1138,7 @@ describe("KyselyTupleStore", () => {
       });
 
       expect(result.direct?.subjectId).toBe("*");
-      expect(result.wildcard).toBeNull();
+      expect(result.wildcard).toHaveLength(0);
     });
   });
 
@@ -840,52 +1153,58 @@ describe("KyselyTupleStore", () => {
           computedUserset: "admin",
         },
       ];
-      await store.upsertRelationConfig({
-        objectType: "resource",
-        relation: "can_edit",
-        directlyAssignable: [{ type: "user" }],
-        impliedBy: null,
-        computedUserset: null,
-        tupleToUserset: null,
-        excludedBy: null,
-        intersection,
-      });
+      await store.upsertRelationConfig(
+        ungatedConfig({
+          objectType: "resource",
+          relation: "can_edit",
+          directlyAssignable: [{ type: "user" }],
+          impliedBy: null,
+          computedUserset: null,
+          tupleToUserset: null,
+          excludedBy: null,
+          intersection,
+        }),
+      );
 
       const config = await store.findRelationConfig("resource", "can_edit");
       expect(config?.intersection).toEqual(intersection);
     });
 
     test("upsert replaces an existing intersection", async () => {
-      await store.upsertRelationConfig({
-        objectType: "resource",
-        relation: "can_edit",
-        directlyAssignable: [
-          { type: "user" },
-          { type: "user", wildcard: true },
-          { type: "workspace" },
-          { type: "workspace", wildcard: true },
-        ],
-        impliedBy: null,
-        computedUserset: null,
-        tupleToUserset: null,
-        excludedBy: null,
-        intersection: [{ type: "direct" }],
-      });
-      await store.upsertRelationConfig({
-        objectType: "resource",
-        relation: "can_edit",
-        directlyAssignable: [
-          { type: "user" },
-          { type: "user", wildcard: true },
-          { type: "workspace" },
-          { type: "workspace", wildcard: true },
-        ],
-        impliedBy: null,
-        computedUserset: null,
-        tupleToUserset: null,
-        excludedBy: null,
-        intersection: [{ type: "computedUserset", relation: "member" }],
-      });
+      await store.upsertRelationConfig(
+        ungatedConfig({
+          objectType: "resource",
+          relation: "can_edit",
+          directlyAssignable: [
+            { type: "user" },
+            { type: "user", wildcard: true },
+            { type: "workspace" },
+            { type: "workspace", wildcard: true },
+          ],
+          impliedBy: null,
+          computedUserset: null,
+          tupleToUserset: null,
+          excludedBy: null,
+          intersection: [{ type: "direct" }],
+        }),
+      );
+      await store.upsertRelationConfig(
+        ungatedConfig({
+          objectType: "resource",
+          relation: "can_edit",
+          directlyAssignable: [
+            { type: "user" },
+            { type: "user", wildcard: true },
+            { type: "workspace" },
+            { type: "workspace", wildcard: true },
+          ],
+          impliedBy: null,
+          computedUserset: null,
+          tupleToUserset: null,
+          excludedBy: null,
+          intersection: [{ type: "computedUserset", relation: "member" }],
+        }),
+      );
 
       const config = await store.findRelationConfig("resource", "can_edit");
       expect(config?.intersection).toEqual([
@@ -896,41 +1215,49 @@ describe("KyselyTupleStore", () => {
 
   describe("Query methods", () => {
     test("listCandidateObjectIds", async () => {
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "user",
-        subjectId: uuid2,
-      });
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid3,
-        relation: "writer",
-        subjectType: "user",
-        subjectId: uuid2,
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "user",
+          subjectId: uuid2,
+        }),
+      );
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid3,
+          relation: "writer",
+          subjectType: "user",
+          subjectId: uuid2,
+        }),
+      );
 
       const ids = await store.listCandidateObjectIds("channel");
       expect(ids.sort()).toEqual([uuid1, uuid3].sort());
     });
 
     test("findTuplesByRelation returns direct and userset rows", async () => {
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "user",
-        subjectId: uuid2,
-      });
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "workspace",
-        subjectId: uuid3,
-        subjectRelation: "member",
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "user",
+          subjectId: uuid2,
+        }),
+      );
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "workspace",
+          subjectId: uuid3,
+          subjectRelation: "member",
+        }),
+      );
 
       const subjects = await store.findTuplesByRelation(
         "channel",
@@ -965,21 +1292,25 @@ describe("KyselyTupleStore", () => {
     });
 
     test("findCheckTuples partitions rows correctly", async () => {
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "user",
-        subjectId: uuid2,
-      });
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "workspace",
-        subjectId: uuid3,
-        subjectRelation: "member",
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "user",
+          subjectId: uuid2,
+        }),
+      );
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "workspace",
+          subjectId: uuid3,
+          subjectRelation: "member",
+        }),
+      );
 
       const result = await camelStore.findCheckTuples({
         objectType: "channel",
@@ -995,19 +1326,21 @@ describe("KyselyTupleStore", () => {
       expect(result.direct).not.toBeNull();
       expect(result.direct?.subjectId).toBe(uuid2);
       expect(result.direct?.subjectRelation).toBeNull();
-      expect(result.wildcard).toBeNull();
+      expect(result.wildcard).toHaveLength(0);
       expect(result.usersets).toHaveLength(1);
       expect(result.usersets[0]?.subjectRelation).toBe("member");
     });
 
     test("findCheckTuples maps the wildcard row back", async () => {
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "user",
-        subjectId: "*",
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "user",
+          subjectId: "*",
+        }),
+      );
 
       const result = await camelStore.findCheckTuples({
         objectType: "channel",
@@ -1021,8 +1354,8 @@ describe("KyselyTupleStore", () => {
       });
 
       expect(result.direct).toBeNull();
-      expect(result.wildcard).not.toBeNull();
-      expect(result.wildcard?.subjectId).toBe("*");
+      expect(result.wildcard).toHaveLength(1);
+      expect(result.wildcard[0]?.subjectId).toBe("*");
     });
 
     test("rowToTuple carries every field", async () => {
@@ -1031,15 +1364,17 @@ describe("KyselyTupleStore", () => {
         expression: "hour < 18",
         parameters: { hour: "int" },
       });
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "user",
-        subjectId: uuid2,
-        conditionName: "in_hours",
-        conditionContext: { hour: 9 },
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "user",
+          subjectId: uuid2,
+          conditionName: "in_hours",
+          conditionContext: { hour: 9 },
+        }),
+      );
 
       const tuples = await camelStore.findTuplesByRelation(
         "channel",
@@ -1060,19 +1395,21 @@ describe("KyselyTupleStore", () => {
     });
 
     test("findRelationConfig round-trips", async () => {
-      await store.upsertRelationConfig({
-        objectType: "channel",
-        relation: "writer",
-        directlyAssignable: [
-          { type: "user" },
-          { type: "workspace", relation: "member" },
-        ],
-        impliedBy: ["admin"],
-        computedUserset: null,
-        tupleToUserset: [{ tupleset: "parent", computedUserset: "member" }],
-        excludedBy: "banned",
-        intersection: null,
-      });
+      await store.upsertRelationConfig(
+        ungatedConfig({
+          objectType: "channel",
+          relation: "writer",
+          directlyAssignable: [
+            { type: "user" },
+            { type: "workspace", relation: "member" },
+          ],
+          impliedBy: ["admin"],
+          computedUserset: null,
+          tupleToUserset: [{ tupleset: "parent", computedUserset: "member" }],
+          excludedBy: "banned",
+          intersection: null,
+        }),
+      );
 
       const config = await camelStore.findRelationConfig("channel", "writer");
       expect(config).not.toBeNull();
@@ -1104,14 +1441,16 @@ describe("KyselyTupleStore", () => {
     });
 
     test("the query methods round-trip", async () => {
-      await store.insertTuple({
-        objectType: "channel",
-        objectId: uuid1,
-        relation: "writer",
-        subjectType: "workspace",
-        subjectId: uuid3,
-        subjectRelation: "member",
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "channel",
+          objectId: uuid1,
+          relation: "writer",
+          subjectType: "workspace",
+          subjectId: uuid3,
+          subjectRelation: "member",
+        }),
+      );
 
       expect(await camelStore.listCandidateObjectIds("channel")).toEqual([
         uuid1,

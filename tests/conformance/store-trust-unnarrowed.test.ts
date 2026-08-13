@@ -16,6 +16,7 @@ import {
   fgaWriteModel,
   fgaWriteTuples,
 } from "./helpers/openfga.ts";
+import { ungatedTuple } from "./helpers/ungated.ts";
 
 /**
  * The clamp, tested where the conformance suite can see it.
@@ -213,7 +214,7 @@ describe("Clamp Conformance Through an Unnarrowing Store", () => {
         subjectId: "*",
       },
     ]) {
-      await store.insertTuple(tuple);
+      await store.insertTuple(ungatedTuple(tuple));
     }
 
     storeId = await fgaCreateStore("clamp-unnarrowed-conformance");

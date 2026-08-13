@@ -1,0 +1,134 @@
+# --- shared principals -------------------------------------------
+
+# t1 reaches everyone through a userset hop onto t2's wildcard.
+- user: team_a1:t2#member
+  relation: member
+  object: team_a1:t1
+- user: user_a1:*
+  relation: member
+  object: team_a1:t2
+
+# tb admits alice only.
+- user: user_a1:alice
+  relation: member
+  object: team_a1:tb
+
+# g1 and g2 point at each other: any check that walks them loops.
+- user: group_a1:g2#member
+  relation: member
+  object: group_a1:g1
+- user: group_a1:g1#member
+  relation: member
+  object: group_a1:g2
+
+# p1 and p2 loop through two different relations, which keeps the
+# pair off upstream's recursive-relation resolvers.
+- user: pair_a1:p2#owner
+  relation: member
+  object: pair_a1:p1
+- user: pair_a1:p1#member
+  relation: owner
+  object: pair_a1:p2
+
+# fp grants everyone and blocks nobody; fq blocks everyone;
+# fr grants alice alone.
+- user: user_a1:*
+  relation: viewer
+  object: folder_a1:fp
+- user: user_a1:*
+  relation: blocked
+  object: folder_a1:fq
+- user: user_a1:alice
+  relation: viewer
+  object: folder_a1:fr
+
+# --- x1: all three intersection operands hold for alice ----------
+- user: user_a1:alice
+  relation: a
+  object: doc_a1:x1
+- user: user_a1:alice
+  relation: b
+  object: doc_a1:x1
+- user: user_a1:alice
+  relation: c
+  object: doc_a1:x1
+
+# --- x2: a and b, no c -------------------------------------------
+- user: user_a1:alice
+  relation: a
+  object: doc_a1:x2
+- user: user_a1:alice
+  relation: b
+  object: doc_a1:x2
+
+# --- x3: a, b and c — so `b but not c` is false ------------------
+- user: user_a1:alice
+  relation: a
+  object: doc_a1:x3
+- user: user_a1:alice
+  relation: b
+  object: doc_a1:x3
+- user: user_a1:alice
+  relation: c
+  object: doc_a1:x3
+
+# --- x5: a, parented under the folder that blocks everyone -------
+- user: user_a1:alice
+  relation: a
+  object: doc_a1:x5
+- user: folder_a1:fq
+  relation: parent
+  object: doc_a1:x5
+
+# --- x6: a, parented under a folder that blocks nobody -----------
+- user: user_a1:alice
+  relation: a
+  object: doc_a1:x6
+- user: folder_a1:fr
+  relation: parent
+  object: doc_a1:x6
+
+# --- x7: viewer via fr (alice only), member via t1 (everyone) ----
+- user: folder_a1:fr
+  relation: parent
+  object: doc_a1:x7
+- user: team_a1:t1
+  relation: owner
+  object: doc_a1:x7
+
+# --- x8: viewer via fp (everyone), member via tb (alice only) ----
+- user: folder_a1:fp
+  relation: parent
+  object: doc_a1:x8
+- user: team_a1:tb
+  relation: owner
+  object: doc_a1:x8
+
+# --- x10: a, plus a cyclic userset ------------------------------
+- user: user_a1:alice
+  relation: a
+  object: doc_a1:x10
+- user: group_a1:g1#member
+  relation: cyc
+  object: doc_a1:x10
+- user: pair_a1:p1#member
+  relation: cyc2
+  object: doc_a1:x10
+
+# --- x11: a, subtracted by a public wildcard --------------------
+- user: user_a1:alice
+  relation: a
+  object: doc_a1:x11
+- user: user_a1:*
+  relation: wild_blocked
+  object: doc_a1:x11
+
+# --- x12: b only — the exclusion arm of the union holds ---------
+- user: user_a1:alice
+  relation: b
+  object: doc_a1:x12
+
+# --- x13: c only — the exclusion arm is subtracted away ---------
+- user: user_a1:alice
+  relation: c
+  object: doc_a1:x13

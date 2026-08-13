@@ -1,0 +1,124 @@
+# Groups: g_ops nests inside g_staff
+- user: user_d4m:ivy
+  relation: member
+  object: group_d4m:g_ops
+- user: group_d4m:g_ops#member
+  relation: member
+  object: group_d4m:g_staff
+- user: user_d4m:hank
+  relation: member
+  object: group_d4m:g_staff
+- user: user_d4m:judy
+  relation: member
+  object: group_d4m:g_arb
+
+# Merchants
+- user: user_d4m:mona
+  relation: owner
+  object: merchant_d4m:m_acme
+- user: group_d4m:g_staff#member
+  relation: staff
+  object: merchant_d4m:m_acme
+- user: user_d4m:hank
+  relation: banned
+  object: merchant_d4m:m_acme
+- user: user_d4m:nate
+  relation: owner
+  object: merchant_d4m:m_bad
+- user: user_d4m:quinn
+  relation: staff
+  object: merchant_d4m:m_bad
+- user: user_d4m:*
+  relation: banned
+  object: merchant_d4m:m_bad
+
+# Sellers
+- user: merchant_d4m:m_acme
+  relation: merchant
+  object: seller_d4m:s_alpha
+- user: user_d4m:pete
+  relation: operator
+  object: seller_d4m:s_alpha
+- user: merchant_d4m:m_bad
+  relation: merchant
+  object: seller_d4m:s_beta
+- user: user_d4m:quinn
+  relation: operator
+  object: seller_d4m:s_beta
+
+# Listings
+- user: seller_d4m:s_alpha
+  relation: seller
+  object: listing_d4m:l_boots
+- user: seller_d4m:s_beta
+  relation: seller
+  object: listing_d4m:l_hat
+- user: user_d4m:rita
+  relation: editor
+  object: listing_d4m:l_boots
+- user: user_d4m:sam
+  relation: editor
+  object: listing_d4m:l_boots
+  condition:
+    name: escrow_state_d4m
+    context:
+      allowed: ["draft", "live"]
+- user: user_d4m:pete
+  relation: verified
+  object: listing_d4m:l_boots
+- user: group_d4m:g_ops#member
+  relation: verified
+  object: listing_d4m:l_hat
+
+# Orders
+- user: listing_d4m:l_boots
+  relation: listing
+  object: order_d4m:ord1
+- user: user_d4m:tina
+  relation: buyer
+  object: order_d4m:ord1
+- user: user_d4m:hank
+  relation: buyer
+  object: order_d4m:ord1
+- user: user_d4m:umar
+  relation: buyer
+  object: order_d4m:ord1
+  condition:
+    name: escrow_state_d4m
+    context:
+      allowed: ["funded", "shipped"]
+- user: user_d4m:wes
+  relation: buyer
+  object: order_d4m:ord1
+  condition:
+    name: escrow_state_d4m
+    context:
+      allowed: []
+- user: user_d4m:vera
+  relation: auditor
+  object: order_d4m:ord1
+  condition:
+    name: order_ref_d4m
+- user: listing_d4m:l_hat
+  relation: listing
+  object: order_d4m:ord2
+- user: user_d4m:tina
+  relation: buyer
+  object: order_d4m:ord2
+- user: user_d4m:*
+  relation: blocked
+  object: order_d4m:ord2
+
+# Disputes
+- user: order_d4m:ord1
+  relation: order
+  object: dispute_d4m:d1
+- user: group_d4m:g_arb#member
+  relation: arbiter
+  object: dispute_d4m:d1
+- user: order_d4m:ord2
+  relation: order
+  object: dispute_d4m:d2
+- user: user_d4m:judy
+  relation: arbiter
+  object: dispute_d4m:d2

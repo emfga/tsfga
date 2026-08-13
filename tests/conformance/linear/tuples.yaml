@@ -1,0 +1,98 @@
+# Organization
+- user: user_a6:alice
+  relation: admin
+  object: organization_a6:acme
+- user: user_a6:bob
+  relation: member
+  object: organization_a6:acme
+- user: user_a6:carol
+  relation: member
+  object: organization_a6:acme
+- user: user_a6:dave
+  relation: member
+  object: organization_a6:acme
+- user: user_a6:dave
+  relation: suspended
+  object: organization_a6:acme
+- user: user_a6:alice
+  relation: billing
+  object: organization_a6:acme
+- user: user_a6:dave
+  relation: billing
+  object: organization_a6:acme
+
+# Teams
+- user: organization_a6:acme
+  relation: organization
+  object: team_a6:eng
+- user: organization_a6:acme#member
+  relation: member
+  object: team_a6:eng
+- user: user_a6:carol
+  relation: lead
+  object: team_a6:eng
+- user: organization_a6:acme
+  relation: organization
+  object: team_a6:design
+- user: organization_a6:acme#member
+  relation: member
+  object: team_a6:design
+
+# Projects
+- user: team_a6:eng
+  relation: team
+  object: project_a6:apollo
+- user: user_a6:erin
+  relation: guest_viewer
+  object: project_a6:apollo
+
+# zephyr is archived for everyone
+- user: team_a6:design
+  relation: team
+  object: project_a6:zephyr
+- user: user_a6:*
+  relation: archived
+  object: project_a6:zephyr
+
+# borealis is archived only for org members; erin is an outside
+# collaborator with a direct membership, so the exclusion misses her
+- user: team_a6:eng
+  relation: team
+  object: project_a6:borealis
+- user: user_a6:erin
+  relation: member
+  object: project_a6:borealis
+- user: organization_a6:acme#member
+  relation: archived
+  object: project_a6:borealis
+
+# Issues
+- user: project_a6:apollo
+  relation: project
+  object: issue_a6:bug1
+- user: user_a6:bob
+  relation: assignee
+  object: issue_a6:bug1
+- user: user_a6:carol
+  relation: creator
+  object: issue_a6:bug1
+- user: team_a6:eng#member
+  relation: subscriber
+  object: issue_a6:bug1
+- user: user_a6:dave
+  relation: confidential
+  object: issue_a6:bug1
+
+- user: project_a6:zephyr
+  relation: project
+  object: issue_a6:bug2
+- user: user_a6:carol
+  relation: assignee
+  object: issue_a6:bug2
+
+- user: project_a6:borealis
+  relation: project
+  object: issue_a6:bug3
+- user: user_a6:erin
+  relation: assignee
+  object: issue_a6:bug3

@@ -1,0 +1,88 @@
+# Groups. g_all nests g_eng's direct members, and then excludes bob
+# again — an exclusion applied *after* a nested userset resolved it.
+- user: user_d4o:alice
+  relation: direct_member
+  object: group_d4o:g_eng
+- user: user_d4o:bob
+  relation: direct_member
+  object: group_d4o:g_eng
+- user: group_d4o:g_eng#direct_member
+  relation: direct_member
+  object: group_d4o:g_all
+- user: user_d4o:carol
+  relation: direct_member
+  object: group_d4o:g_all
+- user: user_d4o:bob
+  relation: excluded
+  object: group_d4o:g_all
+
+# The org-unit tree
+- user: ou_d4o:ou_root
+  relation: parent_ou
+  object: ou_d4o:ou_eu
+- user: ou_d4o:ou_eu
+  relation: parent_ou
+  object: ou_d4o:ou_eu_sales
+- user: group_d4o:g_all#member
+  relation: admin
+  object: ou_d4o:ou_root
+- user: user_d4o:dan
+  relation: helpdesk
+  object: ou_d4o:ou_eu
+- user: user_d4o:carol
+  relation: suspended
+  object: ou_d4o:ou_eu_sales
+
+# Applications
+- user: ou_d4o:ou_eu_sales
+  relation: owner_ou
+  object: app_d4o:app_crm
+- user: ou_d4o:ou_root
+  relation: owner_ou
+  object: app_d4o:app_hr
+- user: ou_d4o:ou_eu
+  relation: owner_ou
+  object: app_d4o:app_wiki
+- user: group_d4o:g_all#member
+  relation: assigned
+  object: app_d4o:app_crm
+- user: user_d4o:dan
+  relation: assigned
+  object: app_d4o:app_crm
+- user: user_d4o:frank
+  relation: assigned
+  object: app_d4o:app_crm
+  condition:
+    name: mfa_ok_d4o
+    context:
+      required_levels: ["otp", "fido"]
+- user: group_d4o:g_all#member
+  relation: assigned
+  object: app_d4o:app_hr
+- user: user_d4o:carol
+  relation: deprovisioned
+  object: app_d4o:app_hr
+- user: group_d4o:g_all#member
+  relation: assigned
+  object: app_d4o:app_wiki
+- user: user_d4o:*
+  relation: deprovisioned
+  object: app_d4o:app_wiki
+
+# Sessions
+- user: app_d4o:app_crm
+  relation: app
+  object: session_d4o:s1
+- user: user_d4o:alice
+  relation: principal
+  object: session_d4o:s1
+  condition:
+    name: device_trusted_d4o
+- user: app_d4o:app_wiki
+  relation: app
+  object: session_d4o:s2
+- user: user_d4o:alice
+  relation: principal
+  object: session_d4o:s2
+  condition:
+    name: device_trusted_d4o

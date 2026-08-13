@@ -1,0 +1,95 @@
+# Role hierarchy: r_rep and r_rep2 report to r_vp, which reports
+# to r_ceo. r_support hangs outside the tree entirely.
+- user: role_a6c:r_ceo
+  relation: parent
+  object: role_a6c:r_vp
+- user: role_a6c:r_vp
+  relation: parent
+  object: role_a6c:r_rep
+- user: role_a6c:r_vp
+  relation: parent
+  object: role_a6c:r_rep2
+
+- user: user_a6c:ceo
+  relation: assignee
+  object: role_a6c:r_ceo
+- user: user_a6c:vp
+  relation: assignee
+  object: role_a6c:r_vp
+- user: user_a6c:rep
+  relation: assignee
+  object: role_a6c:r_rep
+- user: user_a6c:rep2
+  relation: assignee
+  object: role_a6c:r_rep2
+- user: user_a6c:support
+  relation: assignee
+  object: role_a6c:r_support
+
+# A sharing group whose members are named by a role, not by user
+- user: role_a6c:r_support#at_or_above
+  relation: member
+  object: group_a6c:g_support
+
+# Orgs. acme keeps its default private; pub is world-readable.
+- user: user_a6c:ceo
+  relation: member
+  object: org_a6c:acme
+- user: user_a6c:vp
+  relation: member
+  object: org_a6c:acme
+- user: user_a6c:rep
+  relation: member
+  object: org_a6c:acme
+- user: user_a6c:rep2
+  relation: member
+  object: org_a6c:acme
+- user: user_a6c:sysadmin
+  relation: member
+  object: org_a6c:acme
+- user: user_a6c:sysadmin
+  relation: sysadmin
+  object: org_a6c:acme
+- user: user_a6c:ceo
+  relation: sysadmin
+  object: org_a6c:acme
+- user: user_a6c:*
+  relation: owd_public_read
+  object: org_a6c:pub
+
+# Accounts
+- user: org_a6c:acme
+  relation: org
+  object: account_a6c:a_big
+- user: user_a6c:rep
+  relation: owner
+  object: account_a6c:a_big
+- user: role_a6c:r_rep
+  relation: owner_role
+  object: account_a6c:a_big
+- user: user_a6c:vp
+  relation: confidential
+  object: account_a6c:a_big
+
+- user: org_a6c:acme
+  relation: org
+  object: account_a6c:a_small
+- user: user_a6c:rep2
+  relation: owner
+  object: account_a6c:a_small
+- user: role_a6c:r_rep2
+  relation: owner_role
+  object: account_a6c:a_small
+- user: group_a6c:g_support#member
+  relation: shared_with
+  object: account_a6c:a_small
+
+- user: org_a6c:pub
+  relation: org
+  object: account_a6c:a_open
+- user: user_a6c:rep
+  relation: owner
+  object: account_a6c:a_open
+- user: role_a6c:r_rep
+  relation: owner_role
+  object: account_a6c:a_open

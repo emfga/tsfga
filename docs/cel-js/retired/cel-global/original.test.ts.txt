@@ -1,0 +1,334 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { TypeName } from "@openfga/sdk";
+import { createTsfga, type TsfgaClient, TsfgaError } from "@tsfga/core";
+import type { DB } from "@tsfga/kysely";
+import { KyselyTupleStore } from "@tsfga/kysely";
+import type { Kysely } from "kysely";
+import {
+  expectConfigsMatchModel,
+  expectConformance,
+  type FixtureRecord,
+  recordFixture,
+} from "./helpers/conformance.ts";
+import {
+  beginTransaction,
+  destroyDb,
+  getDb,
+  rollbackTransaction,
+} from "./helpers/db.ts";
+import {
+  fgaCreateStore,
+  fgaWriteModel,
+  fgaWriteModelOutcome,
+  fgaWriteTuplesRaw,
+} from "./helpers/openfga.ts";
+
+/**
+ * The CEL splice layer, attacked from the side round 2 did not
+ * reach: `matches` is not only a receiver call.
+ *
+ * cel-go's standard library declares `matches` twice — a member
+ * overload `string.matches(string)` and a **global** overload
+ * `matches(string, string)`, both bound to the same RE2 matcher
+ * (`common/stdlib/standard.go`). tsfga's rewrite table splits the
+ * two: `CALL_REWRITES` holds `int` and `double`, `RECEIVER_REWRITES`
+ * holds `matches`. A global `matches(s, p)` parses as a `call`
+ * node, finds no entry, and is left for cel-js — which has no
+ * global `matches` at all.
+ *
+ * So the global form escapes both halves of round 2's work: the
+ * RE2 rewrite (issue 240) and the write-time constant-pattern
+ * compile (issue 241).
+ *
+ * The rest of the file is the mask and the backwards scan
+ * `findReceiverCallName` performs, pushed on: a `//` inside a
+ * string, a comment inside the argument list, four nested parens,
+ * a raw-string pattern, a map index receiver, and two calls in one
+ * expression.
+ */
+
+const uuidMap = new Map<string, string>([
+  ["alice", "00000000-0000-4000-d4e0-000000000001"],
+  ["doc1", "00000000-0000-4000-d4e0-000000000002"],
+]);
+
+function uuid(name: string): string {
+  const id = uuidMap.get(name);
+  if (!id) throw new Error(`No UUID for ${name}`);
+  return id;
+}
+
+const CONDITIONS: Array<{ relation: string; condition: string; expr: string }> =
+  [
+    {
+      relation: "recv_posix",
+      condition: "recv_posix_c2",
+      expr: 's.matches("[[:alpha:]]+")',
+    },
+    {
+      relation: "global_posix",
+      condition: "global_posix_c2",
+      expr: 'matches(s, "[[:alpha:]]+")',
+    },
+    {
+      relation: "global_plain",
+      condition: "global_plain_c2",
+      expr: 'matches(s, "^a.c$")',
+    },
+    {
+      relation: "comment_arg",
+      condition: "comment_arg_c2",
+      expr: 's.matches(\n  // the pattern lives on its own line\n  "[[:alpha:]]+")',
+    },
+    {
+      relation: "slashes",
+      condition: "slashes_c2",
+      expr: '("//" + s).matches("[[:alpha:]]+")',
+    },
+    {
+      relation: "nest_parens",
+      condition: "nest_parens_c2",
+      expr: '((((s)))).matches("[[:alpha:]]+")',
+    },
+    {
+      relation: "raw_pattern",
+      condition: "raw_pattern_c2",
+      expr: 's.matches(r"[[:alpha:]]+")',
+    },
+    {
+      relation: "list_hetero",
+      condition: "list_hetero_c2",
+      expr: '["x", s][1].matches("[[:alpha:]]+")',
+    },
+    {
+      relation: "list_dynfirst",
+      condition: "list_dynfirst_c2",
+      expr: '[s, "//"][0].matches("[[:alpha:]]+")',
+    },
+    {
+      relation: "two_calls",
+      condition: "two_calls_c2",
+      expr: 's.matches("a//b") || s.matches("[[:alpha:]]+")',
+    },
+  ];
+
+describe("CEL Global-Call Conformance", () => {
+  let db: Kysely<DB>;
+  let storeId: string;
+  let authorizationModelId: string;
+  let tsfgaClient: TsfgaClient;
+  let fixture: FixtureRecord;
+
+  beforeAll(async () => {
+    db = getDb();
+    await beginTransaction(db);
+
+    const store = new KyselyTupleStore(db);
+    tsfgaClient = createTsfga(store);
+    fixture = recordFixture(tsfgaClient);
+
+    for (const { condition, expr } of CONDITIONS) {
+      await tsfgaClient.writeConditionDefinition({
+        name: condition,
+        expression: expr,
+        parameters: { s: "string" },
+      });
+    }
+
+    for (const { relation, condition } of CONDITIONS) {
+      await tsfgaClient.writeRelationConfig({
+        objectType: "doc_c2g",
+        relation,
+        directlyAssignable: [{ type: "user_c2g", condition }],
+        impliedBy: null,
+        computedUserset: null,
+        tupleToUserset: null,
+        excludedBy: null,
+        intersection: null,
+      });
+      await tsfgaClient.addTuple({
+        objectType: "doc_c2g",
+        objectId: uuid("doc1"),
+        relation,
+        subjectType: "user_c2g",
+        subjectId: uuid("alice"),
+        conditionName: condition,
+      });
+    }
+
+    storeId = await fgaCreateStore("cel-global-conformance");
+    authorizationModelId = await fgaWriteModel(
+      storeId,
+      "./cel-global/model.dsl",
+    );
+    await fgaWriteTuplesRaw(
+      storeId,
+      authorizationModelId,
+      CONDITIONS.map(({ relation, condition }) => ({
+        user: `user_c2g:${uuid("alice")}`,
+        relation,
+        object: `doc_c2g:${uuid("doc1")}`,
+        condition: { name: condition },
+      })),
+    );
+  });
+
+  afterAll(async () => {
+    await rollbackTransaction(db);
+    await destroyDb();
+  });
+
+  async function expectCheck(
+    relation: string,
+    s: string,
+    expected: boolean | "refused",
+  ): Promise<void> {
+    await expectConformance(
+      storeId,
+      authorizationModelId,
+      tsfgaClient,
+      {
+        objectType: "doc_c2g",
+        objectId: uuid("doc1"),
+        relation,
+        subjectType: "user_c2g",
+        subjectId: uuid("alice"),
+        context: { s },
+      },
+      expected,
+    );
+  }
+
+  // --- the receiver form, the control ----------------------------
+
+  test("the receiver form reads a POSIX class as RE2", async () => {
+    await expectCheck("recv_posix", "abc", true);
+  });
+
+  test("the receiver form denies a non-match", async () => {
+    await expectCheck("recv_posix", "123", false);
+  });
+
+  // --- the global form -------------------------------------------
+
+  test("GAP-320: a global matches() does not resolve at all", async () => {
+    // Nothing exotic in the pattern: `^a.c$` reads the same way in
+    // both dialects. What is being asserted is only that the call
+    // resolves, which upstream's global overload does.
+    await expectCheck("global_plain", "abc", true);
+  });
+
+  test("GAP-320: a global matches() loses RE2 POSIX classes", async () => {
+    await expectCheck("global_posix", "abc", true);
+  });
+
+  test("GAP-320: a global matches() denies a non-match", async () => {
+    await expectCheck("global_posix", "123", false);
+  });
+
+  // --- the mask and the backwards scan ---------------------------
+
+  test("a comment inside the argument list is masked", async () => {
+    await expectCheck("comment_arg", "abc", true);
+  });
+
+  test("a `//` inside a string does not start a comment", async () => {
+    await expectCheck("slashes", "abc", true);
+  });
+
+  test("a `//` inside a string still denies a non-match", async () => {
+    await expectCheck("slashes", "123", false);
+  });
+
+  test("four nested parens around the receiver are consumed", async () => {
+    await expectCheck("nest_parens", "abc", true);
+  });
+
+  test("a raw-string pattern is located from its `r`", async () => {
+    await expectCheck("raw_pattern", "abc", true);
+  });
+
+  test("GAP-322: a list literal of a literal then a variable", async () => {
+    // Nothing to do with the splice — `[s][0]` above is spliced and
+    // answers. cel-js's default types a list literal from its first
+    // element and refuses every later element of another type, so a
+    // variable (`dyn`) beside a string literal used to be an
+    // evaluation error. CEL's list type is `list(dyn)`, cel-go
+    // accepts it, and OpenFGA never turns the homogeneous option
+    // on, so `conditions.ts` turns it off and the two now agree.
+    await expectCheck("list_hetero", "abc", true);
+  });
+
+  test("GAP-322: a list literal of a variable then a literal", async () => {
+    // The same refusal with the elements swapped, so it is the
+    // mixture and not one particular order.
+    await expectCheck("list_dynfirst", "abc", true);
+  });
+
+  test("two calls in one expression are both spliced", async () => {
+    await expectCheck("two_calls", "abc", true);
+  });
+
+  test("two calls in one expression both deny", async () => {
+    await expectCheck("two_calls", "123", false);
+  });
+
+  // --- the write gate --------------------------------------------
+
+  test("GAP-321: a global matches() escapes the write-time compile", async () => {
+    // Issue 241 closed the receiver form: a constant pattern RE2
+    // cannot compile is refused at `writeConditionDefinition`,
+    // because upstream compiles it while validating the model.
+    // `refuseUncompilableConstantPattern` is called from the
+    // `rcall` branch only, so the same pattern written globally is
+    // stored — a model that cannot be used, accepted as if it
+    // could.
+    const outcome = await fgaWriteModelOutcome(storeId, {
+      schema_version: "1.1",
+      type_definitions: [
+        { type: "user_c2g", relations: {}, metadata: undefined },
+        {
+          type: "gate_c2g",
+          relations: { viewer: { this: {} } },
+          metadata: {
+            relations: {
+              viewer: {
+                directly_related_user_types: [
+                  { type: "user_c2g", condition: "global_lookahead_c2" },
+                ],
+              },
+            },
+          },
+        },
+      ],
+      conditions: {
+        global_lookahead_c2: {
+          name: "global_lookahead_c2",
+          expression: 'matches(s, "a(?=b)")',
+          parameters: { s: { type_name: TypeName.String } },
+        },
+      },
+    });
+    expect(outcome).not.toBe("accepted");
+
+    const tsfgaOutcome = await tsfgaClient
+      .writeConditionDefinition({
+        name: "global_lookahead_c2",
+        expression: 'matches(s, "a(?=b)")',
+        parameters: { s: "string" },
+      })
+      .then(() => "accepted" as const)
+      .catch((error: unknown) =>
+        error instanceof TsfgaError
+          ? ("refused" as const)
+          : Promise.reject(error),
+      );
+    expect(tsfgaOutcome).toBe("refused");
+  });
+
+  test("the fixture's configs match its model", () => {
+    expectConfigsMatchModel("./cel-global/model.dsl", fixture, {
+      coverage: "complete",
+    });
+  });
+});

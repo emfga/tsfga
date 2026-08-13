@@ -1,0 +1,1263 @@
+{
+  "openfga": {
+    "tag": "v1.18.2",
+    "sha": "560d5d3dd46b5adda9ecfb29efeb4f4f70c96327"
+  },
+  "scope": [
+    "Every refusal OpenFGA constructs in `sources` is disposed below.",
+    "The enumeration is mechanical -- four rules, in `scripts/write-gate-causes.mjs` -- and its recall over those files is 100%, enforced by the residue check: every error-construction site in them is attributed to a key, or listed in `excluded` with a reason. That is what makes the count below mean anything.",
+    "It is not a claim that these files are upstream's whole refusal vocabulary. The protovalidate field constraints on the generated protobuf types are a real refusal layer living in a different Go module, which is not in the checkout and cannot be grepped; they are entered under `probes`, by measurement against the running container, and their completeness is not claimed.",
+    "The file set itself was widened once by measurement rather than by reading: running the conformance suite with `TSFGA_REFUSAL_LOG` set recorded two user-visible refusals -- the condition compile failure and the parameter type error -- that no file then in scope constructed. `internal/condition/errors.go` and rule R4 are that measurement's result.",
+    "`n/a` means 'not a rule of tsfga's write gate'. Where the refusal is implemented somewhere else -- the check path, an envelope around causes disposed on their own rows -- the reason says where."
+  ],
+  "sources": [
+    {
+      "path": "pkg/typesystem/error.go",
+      "kind": "go",
+      "why": "the model-validation sentinels and the three refusal constructors"
+    },
+    {
+      "path": "pkg/typesystem/typesystem.go",
+      "kind": "go",
+      "why": "the model refusals raised as bare `fmt.Errorf`, including the three tsfga's `InvalidRelationConfigError` causes port"
+    },
+    {
+      "path": "internal/validation/validation.go",
+      "kind": "go",
+      "why": "the tuple-write validator"
+    },
+    {
+      "path": "pkg/server/commands/write.go",
+      "kind": "go",
+      "why": "the Write command's own refusals"
+    },
+    {
+      "path": "pkg/storage/errors.go",
+      "kind": "go",
+      "why": "`cannot delete a tuple which does not exist`, `cannot write a tuple which already exists`, and the condition conflict"
+    },
+    {
+      "path": "pkg/server/errors/errors.go",
+      "kind": "go",
+      "why": "the constructor family `write.go` returns"
+    },
+    {
+      "path": "internal/condition/errors.go",
+      "kind": "go",
+      "why": "the condition compile and parameter-type refusals. Added after the refusal recorder observed two of them coming out of the container that no file then in scope constructed -- the measurement \u00a73.4 exists for, working."
+    }
+  ],
+  "measured": {
+    "sites": 107,
+    "causes": 98,
+    "residue": 0,
+    "dispositions": {
+      "n/a": 51,
+      "pinned": 4,
+      "claimed": 40,
+      "claimed-partial": 2,
+      "open": 1
+    }
+  },
+  "excluded": [],
+  "probes": [
+    {
+      "field": "TupleKeyWithoutCondition.User",
+      "constraint": "<= 512 UTF-8 bytes",
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-SUBJECT-MALFORMED",
+        "DELETE-SUBJECT-TOO-LONG"
+      ],
+      "test": "packages/core/tests/tuple-validation.test.ts:the `user` field is bounded at 512 bytes"
+    },
+    {
+      "field": "TupleKey.object",
+      "constraint": "^[^\\s]{2,256}$",
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-OBJECT-MALFORMED",
+        "TUPLE-OBJECT-TOO-LONG",
+        "DELETE-OBJECT-MALFORMED"
+      ],
+      "test": "packages/core/tests/tuple-validation.test.ts:the `object` field is bounded at 256 code points"
+    },
+    {
+      "field": "TypeDefinition.Type",
+      "constraint": "^[^:#@\\s]{1,254}$",
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-TYPE-NAME-MALFORMED"
+      ],
+      "test": "tests/conformance/relation-names.test.ts:a type name past the length limit"
+    },
+    {
+      "field": "TypeDefinition.Relations[]",
+      "constraint": "^[^:#@\\s]{1,50}$",
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-RELATION-NAME-MALFORMED"
+      ],
+      "test": "tests/conformance/relation-names.test.ts:a relation name past the length limit"
+    },
+    {
+      "field": "Condition.Name",
+      "constraint": "^[^:#@\\s]{1,50}$",
+      "disposition": "claimed",
+      "rules": [
+        "CONDITION-NAME-MALFORMED"
+      ],
+      "test": "packages/core/tests/config-validation.test.ts:a condition name holding a reserved character"
+    },
+    {
+      "field": "Condition.Parameters[]",
+      "constraint": "^[^:#@\\s]{1,50}$",
+      "disposition": "claimed",
+      "rules": [
+        "CONDITION-PARAMETER-NAME-MALFORMED"
+      ],
+      "test": "packages/core/tests/config-validation.test.ts:every parameter key runs the same rule"
+    },
+    {
+      "field": "TupleKey.relation",
+      "constraint": "^[^:#@\\s]{1,50}$",
+      "disposition": "claimed",
+      "rules": [
+        "DELETE-RELATION-MALFORMED"
+      ],
+      "test": "tests/conformance/delete-gate.test.ts:a relation holding a space",
+      "note": "Applied only to a non-empty relation: protovalidate patterns do not run on an empty field, so an empty relation on a delete falls through to 'does not exist'."
+    }
+  ],
+  "causes": [
+    {
+      "package": "typesystem",
+      "key": "ErrModelNotFound",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:12"
+      ],
+      "disposition": "n/a",
+      "reason": "tsfga has no model store and no model id: a relation config is written on its own, so there is nothing to look up and fail to find."
+    },
+    {
+      "package": "typesystem",
+      "key": "ErrDuplicateTypes",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:15"
+      ],
+      "disposition": "n/a",
+      "reason": "a relation config is keyed by (objectType, relation) in the store, so a model cannot carry the same type twice."
+    },
+    {
+      "package": "typesystem",
+      "key": "ErrInvalidSchemaVersion",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:18"
+      ],
+      "disposition": "n/a",
+      "reason": "tsfga has no schema version field. Every config is 1.1 semantics by construction."
+    },
+    {
+      "package": "typesystem",
+      "key": "ErrInvalidModel",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:21"
+      ],
+      "disposition": "n/a",
+      "reason": "an envelope wrapped around whichever model rule fired; each is disposed on its own row."
+    },
+    {
+      "package": "typesystem",
+      "key": "ErrRelationUndefined",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:24"
+      ],
+      "disposition": "pinned",
+      "test": "tests/conformance/model-gate.test.ts:the gap (155): a rewrite names an undefined relation"
+    },
+    {
+      "package": "typesystem",
+      "key": "ErrObjectTypeUndefined",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:27"
+      ],
+      "disposition": "n/a",
+      "reason": "decided on the check path, not the write gate: `check.ts` raises `InvalidSubjectTypeError` with cause 'undefined subject type'. A config write names its own type, which is validated for shape rather than for existence."
+    },
+    {
+      "package": "typesystem",
+      "key": "ErrInvalidUsersetRewrite",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:30"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-REWRITE-NAMES-ITSELF"
+      ],
+      "test": "tests/conformance/model-gate-rules.test.ts:a bare computed userset onto itself is refused"
+    },
+    {
+      "package": "typesystem",
+      "key": "ErrReservedKeywords",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:33"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-TYPE-NAME-RESERVED",
+        "CONFIG-RELATION-NAME-RESERVED"
+      ],
+      "test": "tests/conformance/model-gate-rules.test.ts:as an object type name is refused"
+    },
+    {
+      "package": "typesystem",
+      "key": "ErrCycle",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:38"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-REWRITE-CYCLE"
+      ],
+      "test": "tests/conformance/model-cycles.test.ts:two relations rewriting onto each other"
+    },
+    {
+      "package": "typesystem",
+      "key": "ErrNoEntrypoints",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:42"
+      ],
+      "disposition": "claimed-partial",
+      "rules": [
+        "CONFIG-NO-ENTRYPOINT"
+      ],
+      "test": "tests/conformance/model-gate.test.ts:a relation with no entrypoint is refused",
+      "gap": "only the one form a single config decides -- a relation whose sole arm is a tuple-to-userset onto itself over a tupleset admitting its own object type. The general rule is a whole-model property, which a per-config gate cannot decide."
+    },
+    {
+      "package": "typesystem",
+      "key": "ErrNoEntryPointsLoop",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:46"
+      ],
+      "disposition": "open",
+      "gap": "`hasEntrypoints` traverses direct assignment and tuple-to-userset across types, so the general 'nothing can ever satisfy this relation' rule is a whole-model property. At a per-config gate it would refuse ordinary models whose relations are written in definition order rather than dependency order -- measured on this repo's own corpus. The pure-rewrite subset of it is the cycle rule.",
+      "readmeAnchor": "packages/core/README.md#write-time-model-validation"
+    },
+    {
+      "package": "typesystem",
+      "key": "ErrNoConditionForRelation",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:49"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-CONDITION-UNDEFINED"
+      ],
+      "test": "packages/core/tests/config-validation.test.ts:a restriction naming an undefined condition"
+    },
+    {
+      "package": "typesystem",
+      "key": "ErrInvalidRelation",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:52"
+      ],
+      "disposition": "claimed-partial",
+      "rules": [
+        "CONFIG-INTERSECTION-TOO-FEW-OPERANDS"
+      ],
+      "test": "packages/core/tests/config-validation.test.ts:an intersection with one operand",
+      "gap": "the sentinel is wrapped by two messages: the intersection arm is implemented, the union arm is not expressible -- `impliedBy` is a list of arms rather than a union node, so a union with fewer than two children has no representation to refuse."
+    },
+    {
+      "package": "typesystem",
+      "key": "InvalidTypeError",
+      "rule": "R4",
+      "sites": [
+        "pkg/typesystem/error.go:63"
+      ],
+      "disposition": "n/a",
+      "reason": "an envelope: `the definition of type '%s' is invalid`, wrapped around whichever relation rule fired. Each of those is disposed on its own row."
+    },
+    {
+      "package": "typesystem",
+      "key": "InvalidRelationError",
+      "rule": "R4",
+      "sites": [
+        "pkg/typesystem/error.go:80"
+      ],
+      "disposition": "n/a",
+      "reason": "an envelope, as `InvalidTypeError`."
+    },
+    {
+      "package": "typesystem",
+      "key": "ObjectTypeUndefinedError",
+      "rule": "R4",
+      "sites": [
+        "pkg/typesystem/error.go:96"
+      ],
+      "disposition": "n/a",
+      "reason": "decided on the check path rather than the write gate; see `ErrObjectTypeUndefined`."
+    },
+    {
+      "package": "typesystem",
+      "key": "RelationUndefinedError",
+      "rule": "R4",
+      "sites": [
+        "pkg/typesystem/error.go:114",
+        "pkg/typesystem/error.go:117"
+      ],
+      "disposition": "pinned",
+      "test": "tests/conformance/model-gate.test.ts:the gap (155): a rewrite names an undefined relation"
+    },
+    {
+      "package": "typesystem",
+      "key": "RelationConditionError",
+      "rule": "R4",
+      "sites": [
+        "pkg/typesystem/error.go:134"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-CONDITION-UNDEFINED"
+      ],
+      "test": "packages/core/tests/config-validation.test.ts:a restriction naming an undefined condition"
+    },
+    {
+      "package": "typesystem",
+      "key": "AssignableRelationError()",
+      "rule": "R2",
+      "sites": [
+        "pkg/typesystem/error.go:144"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-ADMITS-AND-REWRITES-NOTHING"
+      ],
+      "test": "tests/conformance/model-gate.test.ts:an assignable relation with no type restrictions is refused"
+    },
+    {
+      "package": "typesystem",
+      "key": "NonAssignableRelationError()",
+      "rule": "R2",
+      "sites": [
+        "pkg/typesystem/error.go:149"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-RESTRICTIONS-ON-NON-ASSIGNABLE"
+      ],
+      "test": "tests/conformance/model-gate.test.ts:type restrictions on a non-assignable relation are refused"
+    },
+    {
+      "package": "typesystem",
+      "key": "InvalidRelationTypeError()",
+      "rule": "R2",
+      "sites": [
+        "pkg/typesystem/error.go:159"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-TUPLESET-ADMITS-USERSET",
+        "CONFIG-TUPLESET-ADMITS-WILDCARD"
+      ],
+      "test": "packages/core/tests/config-validation.test.ts:a tupleset relation that admits too much"
+    },
+    {
+      "package": "typesystem",
+      "key": "ResolveComputedRelation()",
+      "rule": "R2",
+      "sites": [
+        "pkg/typesystem/typesystem.go:311"
+      ],
+      "disposition": "n/a",
+      "reason": "a typesystem traversal helper reached at resolution time, not a write refusal; its user-visible cause is `ErrRelationUndefined`, disposed on its own row."
+    },
+    {
+      "package": "typesystem",
+      "key": "invalid type restriction '%s#%s' specified on tupleset relation '%s#%s': %w",
+      "rule": "R3",
+      "sites": [
+        "pkg/typesystem/typesystem.go:865"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-TUPLESET-ADMITS-USERSET"
+      ],
+      "test": "packages/core/tests/config-validation.test.ts:a tupleset relation that admits too much"
+    },
+    {
+      "package": "typesystem",
+      "key": "undefined type definition for '%s#%s'",
+      "rule": "R3",
+      "sites": [
+        "pkg/typesystem/typesystem.go:958",
+        "pkg/typesystem/typesystem.go:975",
+        "pkg/typesystem/typesystem.go:998",
+        "pkg/typesystem/typesystem.go:1017"
+      ],
+      "disposition": "pinned",
+      "test": "tests/conformance/model-gate.test.ts:the gap (154): no tupleset type defines it"
+    },
+    {
+      "package": "typesystem",
+      "key": "%w: '%s#%s' as union has less than 2 children",
+      "rule": "R3",
+      "sites": [
+        "pkg/typesystem/typesystem.go:1049"
+      ],
+      "disposition": "n/a",
+      "reason": "not expressible. `RelationConfig` has no union node: `impliedBy` is a list of arms beside the relation's own direct assignment, so a union of fewer than two things is a plain rewrite rather than a malformed union."
+    },
+    {
+      "package": "typesystem",
+      "key": "%w: '%s#%s' as intersection has less than 2 children",
+      "rule": "R3",
+      "sites": [
+        "pkg/typesystem/typesystem.go:1066"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-INTERSECTION-TOO-FEW-OPERANDS"
+      ],
+      "test": "packages/core/tests/config-validation.test.ts:an intersection with one operand"
+    },
+    {
+      "package": "typesystem",
+      "key": "hasEntrypoints unknown rewrite %s for '%s#%s'",
+      "rule": "R3",
+      "sites": [
+        "pkg/typesystem/typesystem.go:1110"
+      ],
+      "disposition": "n/a",
+      "reason": "an exhaustiveness error over the protobuf rewrite kinds. No model the API accepts can reach it, and `RelationConfig` has no unknown arm to carry."
+    },
+    {
+      "package": "typesystem",
+      "key": "the type name of a type definition cannot be an empty string",
+      "rule": "R3",
+      "sites": [
+        "pkg/typesystem/typesystem.go:1256"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-TYPE-NAME-MALFORMED"
+      ],
+      "test": "tests/conformance/model-gate-rules.test.ts:control: a plain direct relation is stored by both"
+    },
+    {
+      "package": "typesystem",
+      "key": "type '%s' defines a relation with an empty string for a name",
+      "rule": "R3",
+      "sites": [
+        "pkg/typesystem/typesystem.go:1265"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-RELATION-NAME-MALFORMED"
+      ],
+      "test": "packages/core/tests/config-validation.test.ts:as a relation name"
+    },
+    {
+      "package": "typesystem",
+      "key": "the '%s#%s' relation is referenced in at least one tupleset and thus must be a direct relation",
+      "rule": "R3",
+      "sites": [
+        "pkg/typesystem/typesystem.go:1303"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-TUPLESET-NOT-DIRECT"
+      ],
+      "test": "tests/conformance/model-gate.test.ts:a computed tupleset relation is refused"
+    },
+    {
+      "package": "typesystem",
+      "key": "%w: %s does not appear as a relation in any of the directly related user types %s",
+      "rule": "R3",
+      "sites": [
+        "pkg/typesystem/typesystem.go:1316"
+      ],
+      "disposition": "pinned",
+      "test": "tests/conformance/model-gate.test.ts:the gap (154): no tupleset type defines it"
+    },
+    {
+      "package": "typesystem",
+      "key": "condition key '%s' does not match condition name '%s'",
+      "rule": "R3",
+      "sites": [
+        "pkg/typesystem/typesystem.go:1417"
+      ],
+      "disposition": "n/a",
+      "reason": "not expressible. A `ConditionDefinition` carries its name in one field; there is no separate map key that could disagree with it."
+    },
+    {
+      "package": "typesystem",
+      "key": "GetEdgesFromNode()",
+      "rule": "R2",
+      "sites": [
+        "pkg/typesystem/typesystem.go:1536",
+        "pkg/typesystem/typesystem.go:1549"
+      ],
+      "disposition": "n/a",
+      "reason": "the weighted-graph API, read by the recursive-relation resolvers tsfga does not implement. Not a write refusal."
+    },
+    {
+      "package": "typesystem",
+      "key": "GetConnectedEdges()",
+      "rule": "R2",
+      "sites": [
+        "pkg/typesystem/typesystem.go:1573"
+      ],
+      "disposition": "n/a",
+      "reason": "the weighted-graph API, as above."
+    },
+    {
+      "package": "typesystem",
+      "key": "WalkUsersetRewrite()",
+      "rule": "R2",
+      "sites": [
+        "pkg/typesystem/typesystem.go:1654"
+      ],
+      "disposition": "n/a",
+      "reason": "a rewrite-tree walker; its error is an exhaustiveness case over protobuf rewrite kinds, not a user-visible refusal."
+    },
+    {
+      "package": "validation",
+      "key": "unexpected rewrite encountered with tupleset relation '%s#%s'",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:106"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-TUPLESET-NOT-DIRECT"
+      ],
+      "test": "tests/conformance/model-gate.test.ts:a computed tupleset relation is refused"
+    },
+    {
+      "package": "validation",
+      "key": "unexpected wildcard relationship with tupleset relation '%s#%s'",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:115"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-TUPLESET-ADMITS-WILDCARD"
+      ],
+      "test": "packages/core/tests/config-validation.test.ts:a tupleset relation that admits too much"
+    },
+    {
+      "package": "validation",
+      "key": "unexpected user '%s' with tupleset relation '%s#%s'",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:120"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-TUPLESET-ADMITS-USERSET"
+      ],
+      "test": "packages/core/tests/config-validation.test.ts:a tupleset relation that admits too much"
+    },
+    {
+      "package": "validation",
+      "key": "type '%s' does not exist in the authorization model",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:137"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-RELATION-UNDEFINED"
+      ],
+      "test": "tests/conformance/write-gate.test.ts:a relation the model does not define"
+    },
+    {
+      "package": "validation",
+      "key": "'%s#%s' is not an allowed type restriction for '%s#%s'",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:154"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-SUBJECT-NOT-ADMITTED"
+      ],
+      "test": "tests/conformance/userset-restrictions.test.ts:11: a userset on a relation admitting none is refused"
+    },
+    {
+      "package": "validation",
+      "key": "the typed wildcard '%s' is not an allowed type restriction for '%s#%s'",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:165"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-SUBJECT-NOT-ADMITTED"
+      ],
+      "test": "tests/conformance/userset-restrictions.test.ts:12: a wildcard on a relation admitting only the bare type is refused"
+    },
+    {
+      "package": "validation",
+      "key": "type '%s' is not an allowed type restriction for '%s#%s'",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:175"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-SUBJECT-NOT-ADMITTED"
+      ],
+      "test": "tests/conformance/write-gate.test.ts:a subject type the relation does not admit"
+    },
+    {
+      "package": "validation",
+      "key": "condition is missing",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:229"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-CONDITION-MISSING"
+      ],
+      "test": "tests/conformance/write-gate.test.ts:the condition omitted where the restriction requires one"
+    },
+    {
+      "package": "validation",
+      "key": "condition name contains forbidden characters",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:235"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-CONDITION-NAME-FORBIDDEN-CHARS"
+      ],
+      "test": "packages/core/tests/tuple-validation.test.ts:a control character in the condition name"
+    },
+    {
+      "package": "validation",
+      "key": "undefined condition",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:242"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-CONDITION-UNDEFINED"
+      ],
+      "test": "tests/conformance/write-gate.test.ts:a condition name the model does not define"
+    },
+    {
+      "package": "validation",
+      "key": "invalid condition for type restriction",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:262"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-CONDITION-NOT-ADMITTED"
+      ],
+      "test": "tests/conformance/write-gate.test.ts:a condition where the restriction names none"
+    },
+    {
+      "package": "validation",
+      "key": "found invalid context parameter: %s",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:287"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-CONTEXT-PARAMETER-UNDECLARED"
+      ],
+      "test": "tests/conformance/write-gate.test.ts:a context key the condition does not declare"
+    },
+    {
+      "package": "validation",
+      "key": "ValidateObject()",
+      "rule": "R2",
+      "sites": [
+        "internal/validation/validation.go:311",
+        "internal/validation/validation.go:316"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-OBJECT-MALFORMED",
+        "TUPLE-OBJECT-WILDCARD",
+        "TUPLE-OBJECT-TOO-LONG"
+      ],
+      "test": "packages/core/tests/tuple-validation.test.ts:an object id of '*' is refused"
+    },
+    {
+      "package": "validation",
+      "key": "ValidateRelation()",
+      "rule": "R2",
+      "sites": [
+        "internal/validation/validation.go:336"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-RELATION-UNDEFINED"
+      ],
+      "test": "tests/conformance/write-gate.test.ts:a relation the model does not define"
+    },
+    {
+      "package": "validation",
+      "key": "ValidateUser()",
+      "rule": "R2",
+      "sites": [
+        "internal/validation/validation.go:364",
+        "internal/validation/validation.go:375"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-SUBJECT-WILDCARD-SHAPE",
+        "TUPLE-SUBJECT-MALFORMED"
+      ],
+      "test": "packages/core/tests/tuple-validation.test.ts:the refusal is discriminated as a malformed subject"
+    },
+    {
+      "package": "validation",
+      "key": "ValidateStruct()",
+      "rule": "R2",
+      "sites": [
+        "internal/validation/validation.go:411"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "REQUEST-CONTEXT-FORBIDDEN-CHARS",
+        "TUPLE-CONTEXT-FORBIDDEN-CHARS"
+      ],
+      "test": "packages/core/tests/tuple-validation.test.ts:a control character in a context value"
+    },
+    {
+      "package": "validation",
+      "key": "context value %q contains forbidden characters",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:427"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-CONTEXT-FORBIDDEN-CHARS"
+      ],
+      "test": "packages/core/tests/tuple-validation.test.ts:a control character in a context value"
+    },
+    {
+      "package": "commands",
+      "key": "invalid on_duplicate option: %s",
+      "rule": "R3",
+      "sites": [
+        "pkg/server/commands/write.go:65"
+      ],
+      "disposition": "n/a",
+      "reason": "tsfga's `addTuple` takes one tuple and no options. Upstream's default -- `error` -- is the only behaviour tsfga has, and it is `TUPLE-DUPLICATE`."
+    },
+    {
+      "package": "commands",
+      "key": "invalid on_missing option: %s",
+      "rule": "R3",
+      "sites": [
+        "pkg/server/commands/write.go:76"
+      ],
+      "disposition": "n/a",
+      "reason": "`removeTuple` takes no options. Upstream's default -- `error` -- is the only behaviour tsfga has, and it is `DELETE-TUPLE-MISSING`."
+    },
+    {
+      "package": "commands",
+      "key": "Execute()",
+      "rule": "R2",
+      "sites": [
+        "pkg/server/commands/write.go:106"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-DUPLICATE",
+        "DELETE-TUPLE-MISSING"
+      ],
+      "test": "packages/core/tests/tuple-validation.test.ts:the second write of the same edge"
+    },
+    {
+      "package": "commands",
+      "key": "condition context size limit exceeded: %d bytes exceeds %d bytes",
+      "rule": "R3",
+      "sites": [
+        "pkg/server/commands/write.go:162"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-CONTEXT-TOO-LARGE"
+      ],
+      "test": "packages/core/tests/tuple-validation.test.ts:a context over the default limit"
+    },
+    {
+      "package": "commands",
+      "key": "the 'user' field is malformed",
+      "rule": "R3",
+      "sites": [
+        "pkg/server/commands/write.go:174"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-SUBJECT-MALFORMED",
+        "DELETE-SUBJECT-MALFORMED"
+      ],
+      "test": "tests/conformance/delete-gate.test.ts:a subject holding a space"
+    },
+    {
+      "package": "commands",
+      "key": "cannot write a tuple that is implicit",
+      "rule": "R3",
+      "sites": [
+        "pkg/server/commands/write.go:224"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-IMPLICIT"
+      ],
+      "test": "packages/core/tests/config-validation.test.ts:the write is refused"
+    },
+    {
+      "package": "storage",
+      "key": "ErrCollision",
+      "rule": "R1",
+      "sites": [
+        "pkg/storage/errors.go:14"
+      ],
+      "disposition": "n/a",
+      "reason": "a datastore concurrency sentinel. tsfga has no transactional write command of its own; a `TupleStore` owns its own transaction."
+    },
+    {
+      "package": "storage",
+      "key": "ErrInvalidContinuationToken",
+      "rule": "R1",
+      "sites": [
+        "pkg/storage/errors.go:17"
+      ],
+      "disposition": "n/a",
+      "reason": "tsfga has no paginated read API."
+    },
+    {
+      "package": "storage",
+      "key": "ErrInvalidStartTime",
+      "rule": "R1",
+      "sites": [
+        "pkg/storage/errors.go:20"
+      ],
+      "disposition": "n/a",
+      "reason": "the changes/watch API, explicitly out of scope."
+    },
+    {
+      "package": "storage",
+      "key": "ErrInvalidWriteInput",
+      "rule": "R1",
+      "sites": [
+        "pkg/storage/errors.go:24"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-DUPLICATE",
+        "DELETE-TUPLE-MISSING"
+      ],
+      "test": "packages/core/tests/tuple-validation.test.ts:the second write of the same edge"
+    },
+    {
+      "package": "storage",
+      "key": "ErrWriteConflictOnInsert",
+      "rule": "R1",
+      "sites": [
+        "pkg/storage/errors.go:27"
+      ],
+      "disposition": "n/a",
+      "reason": "concurrency, as `ErrCollision`."
+    },
+    {
+      "package": "storage",
+      "key": "ErrWriteConflictOnDelete",
+      "rule": "R1",
+      "sites": [
+        "pkg/storage/errors.go:30"
+      ],
+      "disposition": "n/a",
+      "reason": "concurrency, as `ErrCollision`."
+    },
+    {
+      "package": "storage",
+      "key": "ErrTransactionalWriteFailed",
+      "rule": "R1",
+      "sites": [
+        "pkg/storage/errors.go:33"
+      ],
+      "disposition": "n/a",
+      "reason": "concurrency, as `ErrCollision`."
+    },
+    {
+      "package": "storage",
+      "key": "ErrTransactionThrottled",
+      "rule": "R1",
+      "sites": [
+        "pkg/storage/errors.go:36"
+      ],
+      "disposition": "n/a",
+      "reason": "a datastore throttle. tsfga has no throttler."
+    },
+    {
+      "package": "storage",
+      "key": "ErrNotFound",
+      "rule": "R1",
+      "sites": [
+        "pkg/storage/errors.go:39"
+      ],
+      "disposition": "n/a",
+      "reason": "a datastore row-not-found sentinel for stores and models, neither of which tsfga has."
+    },
+    {
+      "package": "storage",
+      "key": "InvalidWriteInputError()",
+      "rule": "R2",
+      "sites": [
+        "pkg/storage/errors.go:50",
+        "pkg/storage/errors.go:58"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-DUPLICATE",
+        "DELETE-TUPLE-MISSING"
+      ],
+      "test": "packages/core/tests/tuple-validation.test.ts:the second write of the same edge"
+    },
+    {
+      "package": "storage",
+      "key": "TupleConditionConflictError()",
+      "rule": "R2",
+      "sites": [
+        "pkg/storage/errors.go:71"
+      ],
+      "disposition": "n/a",
+      "reason": "not expressible. It is raised for two operations on one natural key **within one Write request**; tsfga's write is one tuple per call, so a request cannot conflict with itself. The same key written twice is `TUPLE-DUPLICATE`."
+    },
+    {
+      "package": "errors",
+      "key": "ErrAuthorizationModelResolutionTooComplex",
+      "rule": "R1",
+      "sites": [
+        "pkg/server/errors/errors.go:22"
+      ],
+      "disposition": "n/a",
+      "reason": "not a write refusal: it is the resolution-depth bound, which tsfga implements on the check path as `DepthExceededError`."
+    },
+    {
+      "package": "errors",
+      "key": "ErrInvalidWriteInput",
+      "rule": "R1",
+      "sites": [
+        "pkg/server/errors/errors.go:23"
+      ],
+      "disposition": "n/a",
+      "reason": "'provide at least one write, or at least one delete' -- tsfga's write API takes exactly one tuple, so an empty request is not expressible."
+    },
+    {
+      "package": "errors",
+      "key": "ErrInvalidContinuationToken",
+      "rule": "R1",
+      "sites": [
+        "pkg/server/errors/errors.go:24"
+      ],
+      "disposition": "n/a",
+      "reason": "no paginated read API."
+    },
+    {
+      "package": "errors",
+      "key": "ErrInvalidStartTime",
+      "rule": "R1",
+      "sites": [
+        "pkg/server/errors/errors.go:25"
+      ],
+      "disposition": "n/a",
+      "reason": "the changes/watch API, out of scope."
+    },
+    {
+      "package": "errors",
+      "key": "ErrInvalidExpandInput",
+      "rule": "R1",
+      "sites": [
+        "pkg/server/errors/errors.go:26"
+      ],
+      "disposition": "n/a",
+      "reason": "no Expand API."
+    },
+    {
+      "package": "errors",
+      "key": "ErrUnsupportedUserSet",
+      "rule": "R1",
+      "sites": [
+        "pkg/server/errors/errors.go:27"
+      ],
+      "disposition": "n/a",
+      "reason": "no Expand API."
+    },
+    {
+      "package": "errors",
+      "key": "ErrStoreIDNotFound",
+      "rule": "R1",
+      "sites": [
+        "pkg/server/errors/errors.go:28"
+      ],
+      "disposition": "n/a",
+      "reason": "multi-tenant store isolation is explicitly out of scope."
+    },
+    {
+      "package": "errors",
+      "key": "ErrMismatchObjectType",
+      "rule": "R1",
+      "sites": [
+        "pkg/server/errors/errors.go:29"
+      ],
+      "disposition": "n/a",
+      "reason": "pagination, as above."
+    },
+    {
+      "package": "errors",
+      "key": "ErrRequestCancelled",
+      "rule": "R1",
+      "sites": [
+        "pkg/server/errors/errors.go:30"
+      ],
+      "disposition": "n/a",
+      "reason": "transport."
+    },
+    {
+      "package": "errors",
+      "key": "ErrRequestDeadlineExceeded",
+      "rule": "R1",
+      "sites": [
+        "pkg/server/errors/errors.go:31"
+      ],
+      "disposition": "n/a",
+      "reason": "transport."
+    },
+    {
+      "package": "errors",
+      "key": "ErrThrottledTimeout",
+      "rule": "R1",
+      "sites": [
+        "pkg/server/errors/errors.go:32"
+      ],
+      "disposition": "n/a",
+      "reason": "throttling; tsfga has no throttler."
+    },
+    {
+      "package": "errors",
+      "key": "ErrTransactionThrottled",
+      "rule": "R1",
+      "sites": [
+        "pkg/server/errors/errors.go:35"
+      ],
+      "disposition": "n/a",
+      "reason": "throttling; tsfga has no throttler."
+    },
+    {
+      "package": "errors",
+      "key": "ErrNil",
+      "rule": "R1",
+      "sites": [
+        "pkg/server/errors/errors.go:37"
+      ],
+      "disposition": "n/a",
+      "reason": "an internal placeholder, never returned to a caller."
+    },
+    {
+      "package": "errors",
+      "key": "NewInternalError()",
+      "rule": "R2",
+      "sites": [
+        "pkg/server/errors/errors.go:75"
+      ],
+      "disposition": "n/a",
+      "reason": "the internal-error envelope. tsfga raises the underlying error."
+    },
+    {
+      "package": "errors",
+      "key": "ValidationError()",
+      "rule": "R2",
+      "sites": [
+        "pkg/server/errors/errors.go:81"
+      ],
+      "disposition": "n/a",
+      "reason": "an envelope: it wraps whichever validation cause fired, and each of those is disposed on its own row."
+    },
+    {
+      "package": "errors",
+      "key": "AssertionsNotForAuthorizationModelFound()",
+      "rule": "R2",
+      "sites": [
+        "pkg/server/errors/errors.go:85"
+      ],
+      "disposition": "n/a",
+      "reason": "the assertions API, out of scope."
+    },
+    {
+      "package": "errors",
+      "key": "AuthorizationModelNotFound()",
+      "rule": "R2",
+      "sites": [
+        "pkg/server/errors/errors.go:89"
+      ],
+      "disposition": "n/a",
+      "reason": "no model store; see `ErrModelNotFound`."
+    },
+    {
+      "package": "errors",
+      "key": "LatestAuthorizationModelNotFound()",
+      "rule": "R2",
+      "sites": [
+        "pkg/server/errors/errors.go:93"
+      ],
+      "disposition": "n/a",
+      "reason": "no model store; see `ErrModelNotFound`."
+    },
+    {
+      "package": "errors",
+      "key": "TypeNotFound()",
+      "rule": "R2",
+      "sites": [
+        "pkg/server/errors/errors.go:97"
+      ],
+      "disposition": "n/a",
+      "reason": "not a write refusal: tsfga decides an undefined subject type on the check path, as `InvalidSubjectTypeError` with cause 'undefined subject type'."
+    },
+    {
+      "package": "errors",
+      "key": "RelationNotFound()",
+      "rule": "R2",
+      "sites": [
+        "pkg/server/errors/errors.go:106"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-RELATION-UNDEFINED"
+      ],
+      "test": "tests/conformance/write-gate.test.ts:a relation the model does not define"
+    },
+    {
+      "package": "errors",
+      "key": "ExceededEntityLimit()",
+      "rule": "R2",
+      "sites": [
+        "pkg/server/errors/errors.go:110"
+      ],
+      "disposition": "n/a",
+      "reason": "batch-size bounds on a Write request and on a check's contextual tuples. tsfga's write is one tuple per call, and its contextual-tuple bound is a check-path limit rather than a write rule."
+    },
+    {
+      "package": "errors",
+      "key": "DuplicateTupleInWrite()",
+      "rule": "R2",
+      "sites": [
+        "pkg/server/errors/errors.go:115"
+      ],
+      "disposition": "n/a",
+      "reason": "two operations on one natural key within one Write request; not expressible, as `TupleConditionConflictError`."
+    },
+    {
+      "package": "errors",
+      "key": "WriteFailedDueToInvalidInput()",
+      "rule": "R2",
+      "sites": [
+        "pkg/server/errors/errors.go:119"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-DUPLICATE",
+        "DELETE-TUPLE-MISSING"
+      ],
+      "test": "packages/core/tests/tuple-validation.test.ts:the second write of the same edge"
+    },
+    {
+      "package": "errors",
+      "key": "InvalidAuthorizationModelInput()",
+      "rule": "R2",
+      "sites": [
+        "pkg/server/errors/errors.go:123"
+      ],
+      "disposition": "n/a",
+      "reason": "an envelope for the typesystem's causes, each disposed on its own row."
+    },
+    {
+      "package": "errors",
+      "key": "HandleTupleValidateError()",
+      "rule": "R2",
+      "sites": [
+        "pkg/server/errors/errors.go:150",
+        "pkg/server/errors/errors.go:159"
+      ],
+      "disposition": "n/a",
+      "reason": "the mapper from a validation error to an API code. An envelope, not a cause."
+    },
+    {
+      "package": "condition",
+      "key": "ErrEvaluationFailed",
+      "rule": "R1",
+      "sites": [
+        "internal/condition/errors.go:10"
+      ],
+      "disposition": "n/a",
+      "reason": "a check-path failure, not a write refusal: tsfga raises `ConditionEvaluationError` when the evaluator throws."
+    },
+    {
+      "package": "condition",
+      "key": "CompilationError",
+      "rule": "R4",
+      "sites": [
+        "internal/condition/errors.go:18"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONDITION-EXPRESSION-COMPILE"
+      ],
+      "test": "packages/core/tests/config-validation.test.ts:the names are checked before the expression"
+    },
+    {
+      "package": "condition",
+      "key": "EvaluationError",
+      "rule": "R4",
+      "sites": [
+        "internal/condition/errors.go:43"
+      ],
+      "disposition": "n/a",
+      "reason": "a check-path failure; see `ErrEvaluationFailed`."
+    },
+    {
+      "package": "condition",
+      "key": "ParameterTypeError",
+      "rule": "R4",
+      "sites": [
+        "internal/condition/errors.go:56"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "TUPLE-CONTEXT-PARAMETER-TYPE"
+      ],
+      "test": "tests/conformance/write-gate.test.ts:a context value that cannot be coerced"
+    }
+  ]
+}

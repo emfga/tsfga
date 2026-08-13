@@ -1,0 +1,51 @@
+- user: user_a4c:alice
+  relation: direct
+  object: doc_a4c:c_direct
+
+- user: user_a4c:alice
+  relation: direct
+  object: doc_a4c:c_cond
+  condition:
+    name: flag_a4
+
+- user: user_a4c:*
+  relation: pub
+  object: doc_a4c:c_pub
+  condition:
+    name: flag_a4
+
+- user: user_a4c:alice
+  relation: member
+  object: group_a4c:g1
+  condition:
+    name: flag_a4
+
+- user: group_a4c:g1#member
+  relation: grp
+  object: doc_a4c:c_grp
+
+- user: user_a4c:alice
+  relation: viewer
+  object: folder_a4c:f1
+
+- user: folder_a4c:f1
+  relation: parent
+  object: doc_a4c:c_inh
+  condition:
+    name: flag_a4
+
+- user: user_a4c:alice
+  relation: direct
+  object: doc_a4c:c_block
+
+- user: user_a4c:alice
+  relation: blocked
+  object: doc_a4c:c_block
+  condition:
+    name: flag_a4
+
+- user: user_a4c:alice
+  relation: strict
+  object: doc_a4c:c_strict
+  condition:
+    name: needs_x_a4

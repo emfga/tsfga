@@ -15,6 +15,27 @@ both tsfga (via `KyselyTupleStore`) and OpenFGA (via
 identical results for every test case using
 `expectConformance()`.
 
+## Assertion helpers
+
+- `expectConformance` — both engines answer, and they must agree
+  with each other and with what the test expected. A refusal is an
+  outcome, not a failure, because several parity shapes are ones
+  where both engines refuse.
+- `expectWriteConformance` — the same, for a write that must be
+  refused.
+- `expectPinnedDivergence` — the engines disagree **stably**. Both
+  sides are asserted, so it fails if they ever agree.
+- `expectToleratedNondeterminism` — **one** engine answers two
+  ways on identical input. tsfga's side is asserted exactly; only
+  OpenFGA's is tolerated, and only over the listed answers. It is
+  for a measured race, never for a divergence that is merely
+  inconvenient to fix, and it refuses to pass when the tolerated
+  set has a single distinct entry.
+
+`expectListObjectsConformance` and
+`expectPinnedListObjectsDivergence` are the `listObjects`
+counterparts of the first and third.
+
 ## Prerequisites
 
 - [Docker](https://www.docker.com/) — runs PostgreSQL and

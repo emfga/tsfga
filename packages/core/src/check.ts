@@ -1,8 +1,12 @@
 import { CachingTupleStore } from "./caching-store.ts";
-import { evaluateTupleCondition } from "./conditions.ts";
+import {
+  evaluateTupleCondition,
+  resolveMaxConditionEvaluationCost,
+} from "./conditions.ts";
 import { ContextualTupleStore } from "./contextual-store.ts";
 import {
   DepthExceededError,
+  InvalidSubjectTypeError,
   RelationConfigNotFoundError,
   TsfgaError,
 } from "./errors.ts";
@@ -11,11 +15,22 @@ import {
   admitsSubjectRef,
   admittedRefsForShape,
   admittedUsersetRefs,
+  CHECK_OBJECT_RUNE_LIMIT,
+  CHECK_SUBJECT_BYTE_LIMIT,
   directSubjectRef,
   refsAdmit,
+  requestSubjectDefect,
   subjectShape,
+  validateIdDomain,
+  validateObjectRef,
+  validateSubjectIdDomain,
   validateTupleWrite,
 } from "./tuple-validation.ts";
+import {
+  createReachability,
+  type Reachability,
+  type SubjectRef,
+} from "./type-graph.ts";
 import type {
   AddTupleRequest,
   CheckOptions,
@@ -143,21 +158,34 @@ interface MemoEntry {
  * the same reason, but nothing in the types enforces it, and a
  * future code path that varied the subject would make the path
  * key merely over-eager while making the memo *wrong*.
+ *
+ * The subject's *relation* is a level of its own, and it is not
+ * optional: `group:eng#member` and `group:eng` are different
+ * subjects that answer differently, so leaving it out of the key
+ * would hand one subject's answer back for the other's question the
+ * moment a scope is shared — which `listObjects` and `checkMany`
+ * both do by construction. It keys `null` directly rather than a
+ * sentinel string, because a relation name is unconstrained and any
+ * stand-in for "none" could be one.
  */
 type MemoMap<V> = Map<string, V>;
-type NodeMap<V> = MemoMap<MemoMap<MemoMap<MemoMap<MemoMap<V>>>>>;
+type NodeMap<V> = Map<
+  string | null,
+  MemoMap<MemoMap<MemoMap<MemoMap<MemoMap<V>>>>>
+>;
 type NodeMemo = NodeMap<MemoEntry>;
 
 function nodeGet<V>(map: NodeMap<V>, request: CheckRequest): V | undefined {
   return map
-    .get(request.subjectType)
+    .get(request.subjectRelation ?? null)
+    ?.get(request.subjectType)
     ?.get(request.subjectId)
     ?.get(request.objectType)
     ?.get(request.objectId)
     ?.get(request.relation);
 }
 
-function memoLevel<V>(map: MemoMap<MemoMap<V>>, key: string): MemoMap<V> {
+function memoLevel<K, V>(map: Map<K, MemoMap<V>>, key: K): MemoMap<V> {
   let level = map.get(key);
   if (!level) {
     level = new Map();
@@ -167,7 +195,8 @@ function memoLevel<V>(map: MemoMap<MemoMap<V>>, key: string): MemoMap<V> {
 }
 
 function nodeSet<V>(map: NodeMap<V>, request: CheckRequest, value: V): void {
-  const bySubjectId = memoLevel(map, request.subjectType);
+  const bySubjectType = memoLevel(map, request.subjectRelation ?? null);
+  const bySubjectId = memoLevel(bySubjectType, request.subjectType);
   const byObjectType = memoLevel(bySubjectId, request.subjectId);
   const byObjectId = memoLevel(byObjectType, request.objectType);
   const byRelation = memoLevel(byObjectId, request.objectId);
@@ -182,7 +211,8 @@ function nodeSet<V>(map: NodeMap<V>, request: CheckRequest, value: V): void {
 function nodeDelete<V>(map: NodeMap<V>, request: CheckRequest, value: V): void {
   if (nodeGet(map, request) === value) {
     map
-      .get(request.subjectType)
+      .get(request.subjectRelation ?? null)
+      ?.get(request.subjectType)
       ?.get(request.subjectId)
       ?.get(request.objectType)
       ?.get(request.objectId)
@@ -311,6 +341,16 @@ function wouldDeadlock(entry: InflightEntry, waiter: WaitNode | null): boolean {
  * - Contextual tuples are validated against relation configs
  *   exactly like `addTuple` (RelationConfigNotFoundError,
  *   InvalidSubjectTypeError, InvalidConditionalTupleError).
+ * - The request's own subject is validated first, before any of it
+ *   is resolved: a subject the request cannot be asking about
+ *   raises rather than resolving to `false`. See
+ *   `validateCheckSubject`.
+ *
+ * The subject may be a **userset** — `request.subjectRelation` set
+ * — which asks whether that whole userset holds the relation
+ * rather than expanding it. See `CheckRequest` for the three
+ * consequences that follow, and `checkBase` for where the ref is
+ * matched.
  *
  * Depth accounting: only steps that move to a *different object*
  * — userset expansion and tuple-to-userset expansion — cost
@@ -373,8 +413,26 @@ export interface CheckScope {
   readonly store: TupleStore;
   readonly maxDepth: number;
   readonly maxBreadth: number;
+  /**
+   * Resolved and validated once, then carried, so a whole
+   * `listObjects` or `checkMany` cannot disagree with itself about
+   * the budget and a bad value is refused before any store read.
+   */
+  readonly maxConditionEvaluationCost: number;
   readonly memo: NodeMemo;
   readonly inflight: NodeMap<InflightEntry>;
+  /**
+   * The model-shape prune, memoized for the life of the scope so a
+   * whole `listObjects` or `checkMany` pays for each backward walk
+   * once. Scope-lived rather than process-lived: a model that
+   * changes between requests is then picked up.
+   *
+   * Deliberately built over the scope's *caching* store and kept
+   * even when a request overlays contextual tuples: contextual
+   * tuples are validated against the same relation configs, so they
+   * cannot introduce an edge the model does not already admit.
+   */
+  readonly reachability: Reachability;
 }
 
 /**
@@ -488,18 +546,45 @@ export function createCheckScope(
     );
   }
 
+  const maxDepth = options.maxDepth ?? 25;
+  // The same predicate, for the same reasons. `NaN` is the one
+  // that matters here: `depth >= NaN` is false at every node, so a
+  // caller who was trying to set a budget silently removes it, and
+  // this file's contract says exhaustion must never resolve
+  // `false`. A fraction admits one dispatch more than it states
+  // (`depth >= 2.5` first holds at 3), and `0` — like a negative —
+  // is a budget no check can ever run inside.
+  if (
+    !(maxDepth >= 1) ||
+    (maxDepth !== Number.POSITIVE_INFINITY && !Number.isInteger(maxDepth))
+  ) {
+    throw new TsfgaError(
+      `maxDepth must be a positive integer or Infinity, got ${maxDepth}`,
+    );
+  }
+
+  // Cache for relation configs and condition definitions: static
+  // per model, but read at every node. A store that already caches
+  // is passed through: `checkMany` builds a scope per context group
+  // and they share one config cache, which a second wrapper would
+  // silently split in two.
+  const caching =
+    store instanceof CachingTupleStore ? store : new CachingTupleStore(store);
+
+  // Validated in `conditions.ts`, which owns the option, so the
+  // predicate lives beside the model it bounds. Called here so a
+  // mistyped budget is a construction error like the other two,
+  // rather than a surprise at the first conditioned row.
+  const maxConditionEvaluationCost = resolveMaxConditionEvaluationCost(options);
+
   return {
-    // Cache for relation configs and condition definitions: static
-    // per model, but read at every node. A store that already
-    // caches is passed through: `checkMany` builds a scope per
-    // context group and they share one config cache, which a second
-    // wrapper would silently split in two.
-    store:
-      store instanceof CachingTupleStore ? store : new CachingTupleStore(store),
-    maxDepth: options.maxDepth ?? 25,
+    store: caching,
+    maxDepth,
     maxBreadth,
+    maxConditionEvaluationCost,
     memo: new Map(),
     inflight: new Map(),
+    reachability: createReachability(caching, maxBreadth),
   };
 }
 
@@ -528,12 +613,182 @@ export async function validateContextualTuples(
   }
 }
 
+/**
+ * The subject fields a request must have for its subject to be
+ * validated. Narrower than `CheckRequest` so `listObjects`, which
+ * has no `objectId`, can be validated by the same function.
+ */
+interface SubjectRequest {
+  readonly objectType: string;
+  readonly relation: string;
+  readonly subjectType: string;
+  readonly subjectId: string;
+  readonly subjectRelation?: string | null;
+}
+
+/**
+ * Refuse a subject the request cannot be asking about, before any
+ * of it is resolved.
+ *
+ * Upstream validates the `user` field at the command layer
+ * (`validation.ValidateUser`) and answers a 400 rather than a
+ * boolean, so a caller learns their request was not understood.
+ * tsfga spells the subject as three fields instead of one string,
+ * which removes most of the ways to malform it and adds one: a
+ * caller forwarding an OpenFGA-shaped `user` has only `subjectId`
+ * to put it in, and `subjectId: "eng#member"` used to resolve
+ * quietly to `false`. A silent deny is the worst answer available
+ * — it is indistinguishable from a real one — so the shapes below
+ * raise.
+ *
+ * The subject **type** and, when one is given, the subject
+ * **relation** are both required to be defined. Probed against
+ * v1.18.2: a check for `group:eng#nonexistent` is refused with
+ * `relation 'group#nonexistent' not found`, and one naming a type
+ * the model does not define is refused with `type 'x' not found`.
+ * The type is asked about first, because upstream reports it first
+ * and a userset subject of an undefined type shows the difference.
+ *
+ * The type question needs `hasTypeDefinition`: a relation-config
+ * lookup cannot answer it, since a type with no relations of its
+ * own — the shape of nearly every subject type there is — has no
+ * config at all and is defined by the restrictions that admit it.
+ *
+ * `allowed` is empty on the error rather than the relation's
+ * restriction list: nothing has read a relation config at this
+ * point, and upstream's refusal is likewise about the request
+ * rather than about what the relation admits.
+ */
+export async function validateCheckSubject(
+  store: TupleStore,
+  request: SubjectRequest,
+): Promise<void> {
+  const subjectRelation = request.subjectRelation ?? null;
+  const shape = subjectShape(
+    request.subjectType,
+    request.subjectId,
+    subjectRelation,
+  );
+  // Explicitly typed so TypeScript treats it as never-returning.
+  const refuse: (detail: string) => never = (detail) => {
+    throw new InvalidSubjectTypeError(
+      shape,
+      request.objectType,
+      request.relation,
+      [],
+      "malformed subject",
+      detail,
+    );
+  };
+
+  // Upstream's `userIDRegex` is `^[^:#\s\x00\p{Cc}]+$`, and the
+  // whole of it applies: an empty id, a space, a control character
+  // and the two separators are each a 400 rather than a boolean,
+  // through the `CheckRequestTupleKey.User` proto pattern
+  // (`^[^\s]{2,512}$`, which also carries the length bound) and
+  // `IsValidUser` behind it.
+  //
+  // Only `:` and `#` were refused here at first, on the reading
+  // that they are the characters that turn a mis-shaped request
+  // into a plausible-looking denial. So do the others: a
+  // trailing space or a stray `U+0001` in an id read from an
+  // untrusted source matched no row, and a caller got `false` from
+  // tsfga where upstream told them the request was not a question.
+  // The predicate is the write path's, shared rather than
+  // re-spelled, so the two gates cannot drift.
+  const subjectDefect = requestSubjectDefect(
+    request.subjectType,
+    request.subjectId,
+    subjectRelation,
+    CHECK_SUBJECT_BYTE_LIMIT,
+  );
+  if (subjectDefect !== null) refuse(subjectDefect);
+
+  if (subjectRelation !== null) {
+    if (subjectRelation === "") {
+      refuse("a subject relation may not be empty");
+    }
+    // `team:*#member` is not a userset, not a wildcard and not a
+    // concrete subject — the check-path half of the same rule the
+    // write path applies in `validateTupleWrite`.
+    if (request.subjectId === "*") {
+      refuse("a wildcard subject has no subject relation");
+    }
+  }
+
+  // The last string rule, and the only one that is not upstream's:
+  // an id upstream accepts and this store cannot hold. Ahead of
+  // the model questions below and behind every request rule above,
+  // which is where it sits on the write path too --
+  // `validateIdDomain` says why.
+  validateSubjectIdDomain(store, request.subjectType, request.subjectId);
+
+  // The type itself must be one the model defines. Upstream reports
+  // it here and nowhere else: `ValidateUser` runs `IsValidUser`
+  // first (every refusal above), then `TypeNotFoundError` on the
+  // `user` field's type, and only then resolves a userset's
+  // relation — an order that is observable, since a userset subject
+  // of an undefined type is refused for its *type*.
+  //
+  // Without it an undefined type was simply a type no row mentions,
+  // so every read missed and the answer was a plain `false` — a
+  // misspelled type reading exactly like a real denial. The
+  // ordinary "this relation does not admit that type" refusal is a
+  // different thing and keeps its own, causeless, error.
+  if (!(await store.hasTypeDefinition(request.subjectType))) {
+    throw new InvalidSubjectTypeError(
+      shape,
+      request.objectType,
+      request.relation,
+      [],
+      "undefined subject type",
+      `the model defines no type '${request.subjectType}'`,
+    );
+  }
+
+  if (subjectRelation === null) return;
+
+  const config = await store.findRelationConfig(
+    request.subjectType,
+    subjectRelation,
+  );
+  if (config === null) {
+    throw new RelationConfigNotFoundError(request.subjectType, subjectRelation);
+  }
+}
+
 /** Run one check in a scope. Internal; see `CheckScope`. */
 export async function runCheck(
   scope: CheckScope,
   request: CheckRequest,
 ): Promise<boolean> {
   let resolution = scope;
+
+  // The object first, and without a store read: upstream's
+  // `ValidateUserObjectRelation` settles the request's own strings
+  // before it looks anything up, and `ValidateObject` is the half
+  // tsfga had only on the write path. An id the wire cannot carry
+  // — empty, holding `:`, `#`, a space or a control character, the
+  // typed wildcard, or past 256 code points rendered — is a
+  // request upstream answers 400 to and tsfga answered `false` to,
+  // having read no row because no row could match.
+  //
+  // `listObjects` does not run this and needs no exemption: it
+  // names an object *type* and no id at all.
+  validateObjectRef(
+    request.objectType,
+    request.objectId,
+    CHECK_OBJECT_RUNE_LIMIT,
+  );
+  validateIdDomain(scope.store, "object", request.objectType, request.objectId);
+
+  // Before the contextual tuples, which is upstream's order:
+  // `validateCheckRequest` validates the request's own tuple key
+  // and only then loops the contextual ones
+  // (`pkg/server/commands/check_command.go:186-205`). The read this
+  // costs goes through the scope's config cache, so a `checkMany`
+  // or `listObjects` pays for it once.
+  await validateCheckSubject(scope.store, request);
 
   // Wrap store with contextual tuples for the whole request.
   // Contextual tuples must pass the same validation as addTuple.
@@ -590,6 +845,29 @@ async function checkNode(
     // Not an error: an indeterminate `false` that the set
     // operators above interpret for themselves.
     return CYCLE;
+  }
+
+  // A userset subject standing on its own node — is
+  // `group:eng#member` a `member` of `group:eng`? — holds by
+  // definition, whatever the model says. Upstream answers it in
+  // `IsSelfDefining` between the cycle guard and `GetRelation`
+  // (`internal/graph/check.go:433-437`), so the answer arrives
+  // before the relation is looked up and before the type graph is
+  // consulted: measured on v1.18.2, the check is `true` even where
+  // the relation admits no userset at all and `PathExists` would
+  // have pruned it.
+  //
+  // Unreachable while the subject relation is absent, which is
+  // every request tsfga could express before it was added: a
+  // relation name is never `null`.
+  if (
+    request.subjectRelation !== null &&
+    request.subjectRelation !== undefined &&
+    request.subjectRelation === request.relation &&
+    request.subjectType === request.objectType &&
+    request.subjectId === request.objectId
+  ) {
+    return GRANTED;
   }
 
   // Consulted *after* the cycle guard: a node already on this path
@@ -780,6 +1058,71 @@ async function resolveNode(
     throw new RelationConfigNotFoundError(request.objectType, request.relation);
   }
 
+  // The model-shape prune. Upstream consults the type graph at
+  // **every** node, before resolving the rewrite:
+  //
+  //   hasPath, err := typesys.PathExists(user, relation, objectType)
+  //   if !hasPath { return &ResolveCheckResponse{Allowed: false}, nil }
+  //
+  // Narrowing at the node it is standing on — this relation's own
+  // `directlyAssignable` — is not the same question. `via_ring:
+  // [ring#member]` admits the row it is holding; what it cannot
+  // say is that `ring#member` takes its entrypoint from a type the
+  // subject is not, so no subject of this type reaches the far end
+  // whatever the data says. Walking that subtree anyway made
+  // whatever it ran into the answer: an unevaluable condition, the
+  // depth budget, or a cycle whose indeterminacy then *denied* on
+  // the subtract side of a `but not` — the one of the three that is
+  // wrong in the granting direction.
+  //
+  // Two properties of the returned value are load-bearing:
+  //
+  // - it is the **unflagged** `DENIED`, never `CYCLE`. The prune is
+  //   a definitive answer read off the model, not a truncation, and
+  //   an exclusion's subtrahend reads the two differently.
+  // - it comes **after** the missing-config raise above, so a
+  //   relation the model does not define is still refused rather
+  //   than pruned to `false`.
+  //
+  // It sits before `readNodeTuples`, so a pruned node issues no
+  // tuple read at all — the point of upstream's placement. The
+  // synchronous form is tried first and answers for every node a
+  // walk has already settled, which after the first check of a
+  // scope is nearly all of them; only a genuinely cold node awaits.
+  // That matters beyond speed: an extra await here reorders the
+  // node's read against its siblings', and which branch of a union
+  // reads first decides which one wins a race.
+  //
+  // A userset subject asks the question about its own ref:
+  // upstream passes the whole `user` string to `PathExists`, which
+  // walks from `team#member` rather than from `team` — and skips
+  // the wildcard retry, since a userset can never be a wildcard
+  // (`pkg/typesystem/typesystem.go:708-729`).
+  const subject: SubjectRef =
+    request.subjectRelation === null || request.subjectRelation === undefined
+      ? { type: request.subjectType }
+      : { type: request.subjectType, relation: request.subjectRelation };
+  let reachable = scope.reachability.settledReaches(
+    subject,
+    request.objectType,
+    request.relation,
+  );
+  if (reachable === undefined) {
+    reachable = await scope.reachability.reaches(
+      subject,
+      request.objectType,
+      request.relation,
+    );
+    // A cold walk is an await a sibling branch can win inside, so
+    // the abandonment checkpoint is re-taken on the way out.
+    if (frame.branch.abandoned) {
+      throw new BranchAbandoned();
+    }
+  }
+  if (!reachable) {
+    return DENIED;
+  }
+
   // Some paths never await the batch (config error, or an
   // intersection without a direct operand); the derived catch
   // keeps such a rejection from going unhandled while awaiting
@@ -884,10 +1227,26 @@ async function readNodeTuples(
   // `clampToQuery` do the exact match once the rows are in hand.
   // Anything narrower would have to fetch conditioned and bare
   // rows separately.
-  const directRefs = admittedRefsForShape(
-    config,
-    subjectShape(request.subjectType, request.subjectId, null),
-  );
+  //
+  // Both probes are for a subject with no subject relation, so a
+  // **userset** subject excludes them outright rather than
+  // narrowing them. Upstream reaches the same two exclusions
+  // separately: `shouldCheckPublicAssignable` returns false the
+  // moment the user is an object-relation, and its direct read is
+  // for the exact `type:id#relation` ref, which is a row the
+  // userset scan already returns. `checkBase` picks that row out of
+  // the scan, so nothing is lost by not asking for it twice —
+  // asking would mean a `subjectRelation` on `CheckTuplesQuery`
+  // that every store had to honour to be correct, when the clamp
+  // can do the same match on rows already in hand.
+  const subjectRelation = request.subjectRelation ?? null;
+  const directRefs =
+    subjectRelation === null
+      ? admittedRefsForShape(
+          config,
+          subjectShape(request.subjectType, request.subjectId, null),
+        )
+      : [];
   // Checking the wildcard subject itself makes the two probes the
   // same query, and `subjectShape` folds `subjectId === "*"` into
   // the wildcard shape, so the direct slot already carries the
@@ -895,7 +1254,7 @@ async function readNodeTuples(
   // identically, so folding it into `direct` loses nothing and
   // saves a duplicate condition evaluation.
   const wildcardRefs =
-    request.subjectId === "*"
+    subjectRelation !== null || request.subjectId === "*"
       ? []
       : admittedRefsForShape(config, {
           type: request.subjectType,
@@ -935,7 +1294,7 @@ async function readNodeTuples(
  * Stand-in for a node whose reads the config rules out entirely.
  * Never mutated, so aliasing it across nodes is safe.
  */
-const NO_TUPLES: CheckTuples = { direct: null, wildcard: null, usersets: [] };
+const NO_TUPLES: CheckTuples = { direct: null, wildcard: [], usersets: [] };
 
 /**
  * Discard anything in a store's reply that the query did not ask
@@ -1021,9 +1380,19 @@ function clampToQuery(
   // relation admitting only `team#member`, or a conditioned row on
   // a relation admitting only the bare ref, loses it here rather
   // than having it expanded and granted.
+  //
+  // A wildcard is a subject *shape*, not an id, so a wildcard
+  // carrying a subject relation — `team:*#member` — is a row no
+  // legal model has, and `subjectShape` folds `"*"` into the
+  // wildcard shape only when there is no subject relation. Left
+  // in, it would be offered to this gate as the ordinary ref
+  // `team#member` and `checkBase` would dispatch onto object id
+  // `"*"`. The guard sits beside `relationOf(tuple) !== null`, so
+  // a legitimate direct `user:*` row is untouched.
   const isUserset = (tuple: Tuple): boolean =>
     onNode(tuple) &&
     relationOf(tuple) !== null &&
+    tuple.subjectId !== "*" &&
     refsAdmit(query.usersetRefs, refOf(tuple));
 
   let usersets: readonly Tuple[] = NO_TUPLES.usersets;
@@ -1035,13 +1404,26 @@ function clampToQuery(
       : reply.usersets.filter(isUserset);
   }
 
+  // Every element, not the first one. The wildcard slot became a
+  // list so a contextual row can join a stored one instead of
+  // replacing it, and the clamp is the reason that shape is not a
+  // way in: each row is matched against the same four fields the
+  // single slot was, so a row the model does not admit is dropped
+  // however it arrived.
+  const isWildcard = (tuple: Tuple): boolean =>
+    isProbe(tuple, "*", query.wildcardRefs);
+  let wildcard: readonly Tuple[] = NO_TUPLES.wildcard;
+  if (query.wildcardRefs === null || query.wildcardRefs.length > 0) {
+    wildcard = reply.wildcard.every(isWildcard)
+      ? reply.wildcard
+      : reply.wildcard.filter(isWildcard);
+  }
+
   return {
     direct: isProbe(reply.direct, query.subjectId, query.directRefs)
       ? reply.direct
       : null,
-    wildcard: isProbe(reply.wildcard, "*", query.wildcardRefs)
-      ? reply.wildcard
-      : null,
+    wildcard,
     usersets,
   };
 }
@@ -1052,13 +1434,14 @@ function clampToQuery(
  * never be indeterminate.
  */
 async function evaluateCondition(
-  store: TupleStore,
+  scope: CheckScope,
   tuple: Tuple,
   context: Record<string, unknown> | undefined,
 ): Promise<CheckResult> {
-  return (await evaluateTupleCondition(store, tuple, context))
-    ? GRANTED
-    : DENIED;
+  const held = await evaluateTupleCondition(scope.store, tuple, context, {
+    maxConditionEvaluationCost: scope.maxConditionEvaluationCost,
+  });
+  return held ? GRANTED : DENIED;
 }
 
 /**
@@ -1076,16 +1459,45 @@ async function checkBase(
   const { store, maxBreadth } = scope;
   const {
     direct: directTuple,
-    wildcard: wildcardTuple,
+    wildcard: wildcardTuples,
     usersets: usersetTuples,
   } = await reads;
+
+  // The userset row that *is* the subject, when the subject is a
+  // userset: `doc:1#viewer@group:eng#member` answering a check for
+  // `group:eng#member`.
+  //
+  // It is a direct hit, not a hop. Upstream finds the same row
+  // through `checkDirectUserTuple` — gated by
+  // `shouldCheckDirectTuple`, which builds the source ref out of
+  // the user's own type *and relation*, so it is exactly the
+  // userset restriction — and answers at this node's depth.
+  // Reaching it only through the userset scan's dispatch would
+  // still grant, via the self-defining rule one level down, but it
+  // would cost a depth the model does not spend and evaluate the
+  // row's condition twice.
+  const subjectRelation = request.subjectRelation ?? null;
+  const selfTuple =
+    subjectRelation === null
+      ? null
+      : (usersetTuples.find(
+          (tuple) =>
+            tuple.subjectType === request.subjectType &&
+            tuple.subjectId === request.subjectId &&
+            tuple.subjectRelation === subjectRelation,
+        ) ?? null);
 
   // Steps 1/1b: an unconditioned direct or wildcard hit answers
   // immediately, before any sub-check is launched
   if (directTuple && !directTuple.conditionName) {
     return GRANTED;
   }
-  if (wildcardTuple && !wildcardTuple.conditionName) {
+  // Any unconditioned wildcard row answers, whichever it is: the
+  // rows are a union, so one that grants outright ends the node.
+  if (wildcardTuples.some((tuple) => !tuple.conditionName)) {
+    return GRANTED;
+  }
+  if (selfTuple && !selfTuple.conditionName) {
     return GRANTED;
   }
 
@@ -1097,12 +1509,24 @@ async function checkBase(
   // fetch) does not block the fanout below. Union semantics
   // apply: a sibling `true` beats a condition error.
   if (directTuple) {
-    handlers.push(() => evaluateCondition(store, directTuple, request.context));
+    handlers.push(() => evaluateCondition(scope, directTuple, request.context));
   }
-  if (wildcardTuple) {
+  // One branch per conditioned wildcard row. They race as siblings
+  // of a union, so a stored row whose condition holds still grants
+  // when a contextual row on the same key does not — which is the
+  // whole point of carrying a list: the contextual row joins the
+  // stored one, it does not stand in for it.
+  for (const wildcardTuple of wildcardTuples) {
     handlers.push(() =>
-      evaluateCondition(store, wildcardTuple, request.context),
+      evaluateCondition(scope, wildcardTuple, request.context),
     );
+  }
+  // Its own branch, outside the userset stash below: upstream reads
+  // it separately from the userset scan, so its condition error
+  // carries its own decision rather than being weighed against the
+  // scan's other rows.
+  if (selfTuple) {
+    handlers.push(() => evaluateCondition(scope, selfTuple, request.context));
   }
 
   // Step 2: Userset expansion handlers. This moves to another
@@ -1118,6 +1542,9 @@ async function checkBase(
   let usersetHeld = false;
   for (const userset of usersetTuples) {
     if (!userset.subjectRelation) continue;
+    // Already answered above, at this node's depth. Dispatching it
+    // as well would resolve the same row a second time.
+    if (userset === selfTuple) continue;
     const relation = userset.subjectRelation;
     handlers.push(async (branch) => {
       // The condition can cost a condition-definition fetch, so it
@@ -1125,10 +1552,19 @@ async function checkBase(
       if (branch.abandoned) throw new BranchAbandoned();
       let held: boolean;
       try {
-        held = await evaluateTupleCondition(store, userset, request.context);
+        held = await evaluateTupleCondition(store, userset, request.context, {
+          maxConditionEvaluationCost: scope.maxConditionEvaluationCost,
+        });
       } catch (error) {
         // Held, not raised: whether it becomes the answer depends
         // on what the sibling rows do, which is not known yet.
+        //
+        // A userset row does not name the request subject — the
+        // subject reaches it, if at all, through the object it
+        // points at — so `listObjects` may defer it. See
+        // `onSubjectRow`. The `selfTuple` row, which *is* the
+        // subject, is answered above and never reaches here.
+        markScanReadError(error);
         stashError(usersetStash, error);
         return DENIED;
       }
@@ -1144,6 +1580,7 @@ async function checkBase(
           relation,
           subjectType: request.subjectType,
           subjectId: request.subjectId,
+          subjectRelation: request.subjectRelation,
           context: request.context,
         },
         depth + 1,
@@ -1184,24 +1621,39 @@ async function checkBase(
     );
   }
 
-  // Step 5: Tuple-to-userset composite handler. Like step 2 this
-  // moves to another object, so each child costs one depth.
+  // Step 5: Tuple-to-userset. Like step 2 this moves to another
+  // object, so each child costs one depth.
+  //
+  // **One handler per entry, not one for the array.** Upstream
+  // turns every child of a union into its own `CheckHandlerFunc`
+  // and `checkTTU` is one such child (`internal/graph/check.go`),
+  // so a `viewer from parent or viewer from owner` relation is two
+  // union branches. Batching the arms behind a single handler put
+  // their tupleset reads in one `Promise.all`: an arm whose
+  // tupleset rows carried an unevaluable condition rejected before
+  // any arm's dispatches were built, so it sank the arm beside it
+  // that granted. Now an arm's raise is just one branch's raise —
+  // a sibling grant wins, and the error propagates only when
+  // nothing granted.
+  //
+  // `raiseUnlessOneHeld` stays scoped to one tupleset read inside
+  // `resolveTupleset`, which is exactly upstream's
+  // `ConditionsFilteredTupleKeyIterator` scope: per `checkTTU`
+  // call, not per relation.
   if (config.tupleToUserset) {
-    const ttuEntries = config.tupleToUserset;
-    handlers.push(async (branch) => {
-      if (branch.abandoned) throw new BranchAbandoned();
-      // Batch all tupleset lookups. Each returns only the rows
-      // the tupleset relation admits whose condition holds.
-      const linkedResults = await Promise.all(
-        ttuEntries.map(({ tupleset, computedUserset }) =>
-          resolveTupleset(store, request, tupleset, computedUserset),
-        ),
-      );
+    for (const { tupleset, computedUserset } of config.tupleToUserset) {
+      handlers.push(async (branch) => {
+        if (branch.abandoned) throw new BranchAbandoned();
+        // Only the rows this arm's tupleset relation admits whose
+        // condition holds.
+        const linkedTuples = await resolveTupleset(
+          scope,
+          request,
+          tupleset,
+          computedUserset,
+        );
 
-      // Collect all linked-tuple check handlers
-      const ttuHandlers: Handler[] = [];
-      for (const [i, { computedUserset }] of ttuEntries.entries()) {
-        const linkedTuples = linkedResults[i] ?? [];
+        const ttuHandlers: Handler[] = [];
         for (const linked of linkedTuples) {
           ttuHandlers.push((child) =>
             checkNode(
@@ -1212,6 +1664,7 @@ async function checkBase(
                 relation: computedUserset,
                 subjectType: request.subjectType,
                 subjectId: request.subjectId,
+                subjectRelation: request.subjectRelation,
                 context: request.context,
               },
               depth + 1,
@@ -1220,10 +1673,10 @@ async function checkBase(
             ),
           );
         }
-      }
 
-      return resolveUnion(ttuHandlers, maxBreadth, branch);
-    });
+        return resolveUnion(ttuHandlers, maxBreadth, branch);
+      });
+    }
   }
 
   // A rejection from any other handler still wins: `resolveUnion`
@@ -1246,7 +1699,7 @@ async function checkIntersection(
   path: ReadonlySet<string>,
   frame: Frame,
 ): Promise<CheckResult> {
-  const { store, maxBreadth } = scope;
+  const { maxBreadth } = scope;
   const operands = config.intersection;
   // An intersection with no operands would resolve vacuously true,
   // granting access to every subject on a malformed config.
@@ -1288,7 +1741,7 @@ async function checkIntersection(
       handlers.push(async (branch) => {
         if (branch.abandoned) throw new BranchAbandoned();
         const linkedTuples = await resolveTupleset(
-          store,
+          scope,
           request,
           operand.tupleset,
           operand.computedUserset,
@@ -1304,6 +1757,7 @@ async function checkIntersection(
                 relation: operand.computedUserset,
                 subjectType: request.subjectType,
                 subjectId: request.subjectId,
+                subjectRelation: request.subjectRelation,
                 context: request.context,
               },
               depth + 1,
@@ -1355,11 +1809,12 @@ async function checkIntersection(
  * mirror-image of the fail-open this gate exists to remove.
  */
 async function resolveTupleset(
-  store: TupleStore,
+  scope: CheckScope,
   request: CheckRequest,
   tupleset: string,
   computedUserset: string,
 ): Promise<Tuple[]> {
+  const { store } = scope;
   const [linked, config] = await Promise.all([
     store.findTuplesByRelation(request.objectType, request.objectId, tupleset),
     store.findRelationConfig(request.objectType, tupleset),
@@ -1372,7 +1827,45 @@ async function resolveTupleset(
     throw new RelationConfigNotFoundError(request.objectType, tupleset);
   }
 
-  const admitted = linked.filter((tuple) =>
+  // The store's reply is a hint here too. `clampToQuery` re-applies
+  // the exact node match to `findCheckTuples`; this read had only
+  // the subject-shape half of the same guarantee, so an adapter
+  // whose `WHERE` lost `object_id` or `relation` handed back a row
+  // linking a *different* document to a folder and this dispatch
+  // granted on it. The three fields are the ones `onNode` spells,
+  // and the drop is silent for the reason given there: a check is
+  // the wrong place to discover an adapter bug, and denying is the
+  // conservative answer.
+  //
+  // The subject half is the same call. A dispatch target must be
+  // an *object*: a userset row would have its subject relation
+  // discarded and land on a different relation of the linked
+  // object, and a wildcard row names no object at all — the
+  // dispatch would ask for object id `"*"`, which an opaque store
+  // answers `false` and a store holding its ids in a `uuid` column
+  // answers with a driver error. `config-validation.ts` refuses
+  // both shapes at model write, but only against the tupleset
+  // config that exists when the TTU is written, so widening the
+  // tupleset afterwards leaves the row reachable. Dropping is the
+  // right answer rather than raising: upstream refuses the model
+  // and so never reaches this state, and every store then agrees
+  // on `false`.
+  //
+  // `?? null` and not `=== null`: a store may hand back
+  // `undefined`, which `relationOf` in `clampToQuery` normalises
+  // for exactly this reason, and `=== null` here would drop every
+  // tupleset row from such a store and answer `false` for every
+  // tuple-to-userset.
+  const onNode = linked.filter(
+    (tuple) =>
+      tuple.objectType === request.objectType &&
+      tuple.objectId === request.objectId &&
+      tuple.relation === tupleset &&
+      (tuple.subjectRelation ?? null) === null &&
+      tuple.subjectId !== "*",
+  );
+
+  const admitted = onNode.filter((tuple) =>
     admitsSubjectRef(
       config,
       directSubjectRef(
@@ -1392,10 +1885,16 @@ async function resolveTupleset(
   const stash: ErrorStash = { error: null };
   for (const tuple of admitted) {
     try {
-      if (await evaluateTupleCondition(store, tuple, request.context)) {
+      const held = await evaluateTupleCondition(store, tuple, request.context, {
+        maxConditionEvaluationCost: scope.maxConditionEvaluationCost,
+      });
+      if (held) {
         satisfied.push(tuple);
       }
     } catch (error) {
+      // A tupleset row names the linked object, not the request
+      // subject, so `listObjects` may defer it — `onSubjectRow`.
+      markScanReadError(error);
       stashError(stash, error);
     }
   }
@@ -1429,6 +1928,54 @@ interface ErrorStash {
 /** Keep the first error only, so the raised one is deterministic. */
 function stashError(stash: ErrorStash, error: unknown): void {
   if (!stash.error) stash.error = { cause: error };
+}
+
+/**
+ * Condition errors raised on a read that does **not** name the
+ * request subject — a userset scan, a tupleset scan.
+ *
+ * A `WeakSet` rather than a field because the error classes live in
+ * `errors.ts` and this is not a property of the error, it is a
+ * property of the read that produced it: the same
+ * `ConditionEvaluationError` message can come from either side.
+ * Entries die with the error object.
+ */
+const scanReadConditionErrors = new WeakSet<object>();
+
+/** Record that this error came from a scan read, not a subject row. */
+function markScanReadError(error: unknown): void {
+  if (typeof error === "object" && error !== null) {
+    scanReadConditionErrors.add(error);
+  }
+}
+
+/**
+ * Whether a check error was raised while reading a row that names
+ * the **request subject** — `findCheckTuples`' direct row, its
+ * `subjectType:*` wildcard row, and the userset row that *is* the
+ * subject.
+ *
+ * `listObjects` needs the distinction and cannot see it: an error
+ * carries a condition name and a cause and nothing about the read
+ * behind it. Upstream reverse-expands from the subject and its
+ * first query is exactly "rows whose subject is this subject on
+ * this relation", so it always evaluates those conditions — an
+ * error on one of them is one upstream raises too, and the call
+ * must abort. An error on any other read is one upstream may never
+ * have materialised, and deferring it is the approximation
+ * `listObjects` makes.
+ *
+ * **True is the abort side and true is the default.** Only the scan
+ * sites in this module mark themselves, so an error from anywhere
+ * else — an adapter, a future read, an error class nobody
+ * considered — keeps today's behaviour of aborting the call.
+ */
+export function onSubjectRow(error: unknown): boolean {
+  return !(
+    typeof error === "object" &&
+    error !== null &&
+    scanReadConditionErrors.has(error)
+  );
 }
 
 /**

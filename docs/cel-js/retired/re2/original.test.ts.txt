@@ -1,0 +1,279 @@
+import { afterAll, beforeAll, describe, test } from "bun:test";
+import { createTsfga, type TsfgaClient } from "@tsfga/core";
+import type { DB } from "@tsfga/kysely";
+import { KyselyTupleStore } from "@tsfga/kysely";
+import type { Kysely } from "kysely";
+import {
+  type CheckOutcome,
+  expectConfigsMatchModel,
+  expectConformance,
+  type FixtureRecord,
+  recordFixture,
+} from "./helpers/conformance.ts";
+import {
+  beginTransaction,
+  destroyDb,
+  getDb,
+  rollbackTransaction,
+} from "./helpers/db.ts";
+import {
+  fgaCreateStore,
+  fgaWriteModel,
+  fgaWriteTuplesRaw,
+} from "./helpers/openfga.ts";
+
+/**
+ * Round 3 made the RE2 translator refuse by default. This file
+ * attacks that decision from the over-refusal side: every pattern
+ * an ordinary model carries must still compile, and the bounds the
+ * translator now enforces must be upstream's bounds and not a
+ * neighbouring number.
+ *
+ * Same shape as `cel-re2.test.ts` — one condition `s.matches(p)`
+ * with both the subject and the pattern in the request context, so
+ * each pattern is compiled at check time by both engines.
+ */
+
+const uuidMap = new Map<string, string>([
+  ["alice", "00000000-0000-4000-d520-000000000001"],
+  ["doc", "00000000-0000-4000-d520-000000000002"],
+]);
+
+function uuid(name: string): string {
+  const id = uuidMap.get(name);
+  if (!id) throw new Error(`No UUID for ${name}`);
+  return id;
+}
+
+describe("RE2 translator: over-refusal sweep", () => {
+  let db: Kysely<DB>;
+  let storeId: string;
+  let modelId: string;
+  let tsfgaClient: TsfgaClient;
+  let fixture: FixtureRecord;
+
+  beforeAll(async () => {
+    db = getDb();
+    await beginTransaction(db);
+
+    tsfgaClient = createTsfga(new KyselyTupleStore(db));
+    fixture = recordFixture(tsfgaClient);
+
+    await tsfgaClient.writeConditionDefinition({
+      name: "re_gate_d1",
+      expression: "s.matches(p)",
+      parameters: { s: "string", p: "string" },
+    });
+    await tsfgaClient.writeRelationConfig({
+      objectType: "doc_d1",
+      relation: "re_d1",
+      directlyAssignable: [{ type: "user_d1", condition: "re_gate_d1" }],
+      impliedBy: null,
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    await tsfgaClient.addTuple({
+      objectType: "doc_d1",
+      objectId: uuid("doc"),
+      relation: "re_d1",
+      subjectType: "user_d1",
+      subjectId: uuid("alice"),
+      conditionName: "re_gate_d1",
+    });
+
+    storeId = await fgaCreateStore("re2");
+    modelId = await fgaWriteModel(storeId, "./re2/model.dsl");
+    await fgaWriteTuplesRaw(storeId, modelId, [
+      {
+        user: `user_d1:${uuid("alice")}`,
+        relation: "re_d1",
+        object: `doc_d1:${uuid("doc")}`,
+        condition: { name: "re_gate_d1" },
+      },
+    ]);
+  });
+
+  afterAll(async () => {
+    await rollbackTransaction(db);
+    await destroyDb();
+  });
+
+  const match = (s: string, p: string, expected: CheckOutcome) =>
+    expectConformance(
+      storeId,
+      modelId,
+      tsfgaClient,
+      {
+        objectType: "doc_d1",
+        objectId: uuid("doc"),
+        relation: "re_d1",
+        subjectType: "user_d1",
+        subjectId: uuid("alice"),
+        context: { s, p },
+      },
+      expected,
+    );
+
+  /**
+   * The patterns a real authorization model actually carries. A
+   * refuse-by-default translator is only correct if none of these
+   * moved.
+   */
+  describe("ordinary patterns still compile", () => {
+    test("an anchored literal", async () => {
+      await match("abc", "^abc$", true);
+    });
+
+    test("an email-shaped pattern", async () => {
+      await match(
+        "a@b.com",
+        "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+        true,
+      );
+    });
+
+    test("an identifier-shaped pattern", async () => {
+      await match("a_1", "^[a-zA-Z_][a-zA-Z0-9_]*$", true);
+    });
+
+    test("a date-shaped pattern", async () => {
+      await match("2024-01-02", "^\\d{4}-\\d{2}-\\d{2}$", true);
+    });
+
+    test("alternation, grouped and repeated", async () => {
+      await match("abab", "^((a)(b))+$", true);
+      await match("ok", "^(?:ok|no)$", true);
+    });
+
+    test("a dash last in a bracket expression", async () => {
+      await match("a-b", "^[a-z-]+$", true);
+    });
+
+    test("escaped punctuation outside a class", async () => {
+      await match("price: $5", "\\$5", true);
+      await match("a/b", "a\\/b", true);
+      await match("a b", "a\\ b", true);
+      await match("100%", "100\\%", true);
+    });
+
+    test("a backslash-escaped backslash", async () => {
+      await match("C:\\path", "^C:\\\\path$", true);
+    });
+
+    test("punctuation escaped inside a class", async () => {
+      await match("]", "[\\]]", true);
+      await match("^", "[\\^]", true);
+      await match("-", "[a\\-z]", true);
+    });
+
+    test("a unicode literal, in and out of a class", async () => {
+      await match("日本", "^日本+$", true);
+      await match("é", "^[é]$", true);
+    });
+
+    test("an astral literal and a dot over one", async () => {
+      await match("😀", "^😀$", true);
+      await match("😀", "^.$", true);
+    });
+
+    test("hex escapes as range endpoints", async () => {
+      await match("Z", "[\\x41-\\x5a]", true);
+      await match("a", "[\\x41-\\x5a]", false);
+    });
+
+    test("a word boundary", async () => {
+      await match("hi there", "\\bhi\\b", true);
+    });
+
+    test("a lazy quantifier", async () => {
+      await match("ab", "a+?b", true);
+      await match("aa", "a{2,3}?", true);
+    });
+
+    test("a POSIX class beside a literal in one class", async () => {
+      await match("1", "^[a[:digit:]]$", true);
+      await match("a", "^[a[:digit:]]$", true);
+    });
+
+    test("a script name and a category", async () => {
+      await match("日本", "^\\p{Han}+$", true);
+      await match("A", "\\p{Lu}", true);
+    });
+  });
+
+  /**
+   * The repetition ceiling round 3 added.
+   *
+   * `regexp/syntax` refuses a bound *above* 1000 — `min < 0 ||
+   * min > 1000 || max > 1000` in parse.go — and then refuses a
+   * *nested* repetition whose product exceeds 1000, via
+   * `repeatIsValid(re, 1000)`. tsfga implements neither rule: it
+   * refuses at 1000 rather than above it, and it counts only one
+   * repetition at a time.
+   */
+  describe("the repetition ceiling", () => {
+    test("GAP-400: a bound of exactly 1000 is valid RE2", async () => {
+      await match("aaa", "^a{1000}$", false);
+    });
+
+    test("GAP-400: an open bound of exactly 1000", async () => {
+      await match("aaa", "^a{1000,}$", false);
+    });
+
+    test("GAP-400: an upper bound of exactly 1000", async () => {
+      await match("aa", "^a{2,1000}$", true);
+    });
+
+    test("a bound above 1000 is refused by both", async () => {
+      await match("a", "a{1001}", "refused");
+    });
+
+    test("GAP-401: nested repetitions multiply past 1000", async () => {
+      await match("a".repeat(100), "^(a{100}){100}$", "refused");
+    });
+
+    test("nested repetitions under 1000 are fine", async () => {
+      await match("a".repeat(100), "^(a{10}){10}$", true);
+    });
+  });
+
+  /**
+   * The limit round 3 reached for `MAX_REPEAT` to enforce, and
+   * missed.
+   *
+   * Upstream bounds a condition by what evaluating it *costs*, not
+   * by any one construct inside it: `WithMaxEvaluationCost` passes
+   * `cel.CostLimit(100)` to every program it builds
+   * (`pkg/server/config/config.go`, `DefaultMaxConditionEvaluationCost
+   * = 100`; `pkg/typesystem/typesystem.go:226`). cel-go charges a
+   * regex match `0.1` per code point of subject plus pattern, so a
+   * subject of 950 characters evaluates and one of 1000 exceeds the
+   * budget and the check returns an error.
+   *
+   * tsfga accounts for nothing. That is the same denial-of-service
+   * lever `MAX_REPEAT` was added for, still open and reachable from
+   * request context — and it is a parity gap in the *answering*
+   * direction, which is the worse one.
+   */
+  describe("the CEL evaluation cost limit", () => {
+    test("a subject just under the budget evaluates on both", async () => {
+      await match("a".repeat(950), "^a+$", true);
+    });
+
+    test("GAP-402: a subject over the budget is not refused", async () => {
+      await match("a".repeat(1000), "^a+$", "refused");
+    });
+
+    test("GAP-402: and the budget is reachable from context", async () => {
+      await match("a".repeat(5000), "^a+$", "refused");
+    });
+  });
+
+  test("relation configs match the DSL", () => {
+    expectConfigsMatchModel("./re2/model.dsl", fixture, {
+      coverage: "complete",
+    });
+  });
+});

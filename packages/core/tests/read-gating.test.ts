@@ -49,11 +49,34 @@ const request = {
   subjectId: "alice",
 };
 
+/**
+ * Define `user` without declaring anything about `doc.viewer`.
+ *
+ * A type is defined by the relation configs that name it, so a
+ * fixture whose only config admits `team` defines no `user` — and
+ * `check` refuses the *subject* before it reaches the read gating
+ * these tests are about, upstream's order (`ValidateUser` ahead of
+ * `ValidateRelation`, `internal/validation/validation.go:18-32`).
+ * The declaration is on a type nothing else here mentions, so it
+ * adds no `doc.viewer` read and every query assertion below still
+ * measures what it did.
+ */
+function declareSubjectTypes(store: MockTupleStore): void {
+  store.relationConfigs.push(
+    makeConfig({
+      objectType: "subject_types",
+      relation: "declared",
+      directlyAssignable: [{ type: "user" }],
+    }),
+  );
+}
+
 describe("structurally impossible reads are skipped", () => {
   let store: MockTupleStore;
 
   beforeEach(() => {
     store = new MockTupleStore();
+    declareSubjectTypes(store);
   });
 
   /** Push a `doc.viewer` config and run one check against it. */

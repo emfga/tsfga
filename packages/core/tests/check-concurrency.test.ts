@@ -310,6 +310,19 @@ describe("node reads", () => {
     // means they are never issued at all — but the error the
     // caller sees is the same one as when they raced it.
     const store = new DelayedConfigErrorStore();
+    // The subject gate runs before the config read and would
+    // otherwise refuse first, hiding the failure under test. This
+    // store overrides `findRelationConfig` only, and
+    // `MockTupleStore.hasTypeDefinition` reads `relationConfigs`
+    // directly — so the type is defined while every config read
+    // still throws, which is exactly the state the test wants.
+    store.relationConfigs.push(
+      makeConfig({
+        objectType: "doc",
+        relation: "viewer",
+        directlyAssignable: [{ type: "user" }],
+      }),
+    );
     store.tuples.push(
       makeTuple({
         objectType: "doc",

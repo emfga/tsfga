@@ -20,6 +20,7 @@ import {
   fgaWriteModel,
   fgaWriteTuplesRaw,
 } from "./helpers/openfga.ts";
+import { ungatedTuple } from "./helpers/ungated.ts";
 
 /**
  * A relation the model does not define, on both engines.
@@ -151,13 +152,15 @@ describe("Missing Relation Config Conformance", () => {
     // The row under test, and the one no public method would
     // write: `document.reviewer` has no config here and no
     // definition in the model.
-    await store.insertTuple({
-      objectType: "document",
-      objectId: uuid("viaFolder"),
-      relation: "reviewer",
-      subjectType: "user",
-      subjectId: uuid("alice"),
-    });
+    await store.insertTuple(
+      ungatedTuple({
+        objectType: "document",
+        objectId: uuid("viaFolder"),
+        relation: "reviewer",
+        subjectType: "user",
+        subjectId: uuid("alice"),
+      }),
+    );
 
     storeId = await fgaCreateStore("missing-config-conformance");
     authorizationModelId = await fgaWriteModel(

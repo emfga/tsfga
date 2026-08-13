@@ -23,6 +23,7 @@ import {
   getDb,
   rollbackTransaction,
 } from "./helpers/db.ts";
+import { ungatedConfig, ungatedTuple } from "./helpers/ungated.ts";
 
 /**
  * The subject filter on `listSubjects`, exercised against real
@@ -32,9 +33,11 @@ import {
  * `listDirectSubjects` has since left `TupleStore`, so this is the
  * only library path to those rows — and its whole coverage was one
  * mock-driven core suite. What the mock cannot show is that the
- * rows survive a round trip through PostgreSQL: the wildcard
- * sentinel, the nullable `subject_relation`, and the condition
- * name all have to come back in the shape the filter compares.
+ * rows survive a round trip through PostgreSQL: the wildcard's
+ * column pair — `subject_id` NULL beside `subject_wildcard` true,
+ * which core spells `subjectId: "*"` — the nullable
+ * `subject_relation`, and the condition name all have to come back
+ * in the shape the filter compares.
  *
  * **Rows are pushed straight to the store.** `addTuple` refuses
  * exactly the rows under test, so a fixture built on the write path
@@ -119,10 +122,12 @@ describe("listSubjects over the adapter", () => {
 
   test("reports only the shapes the relation admits", async () => {
     await store.upsertRelationConfig(
-      config("viewer", [
-        { type: "user" },
-        { type: "team", relation: "member" },
-      ]),
+      ungatedConfig(
+        config("viewer", [
+          { type: "user" },
+          { type: "team", relation: "member" },
+        ]),
+      ),
     );
 
     for (const row of [
@@ -136,12 +141,14 @@ describe("listSubjects over the adapter", () => {
       // The wildcard is its own shape, and is not admitted here.
       { subjectType: "user", subjectId: "*" },
     ]) {
-      await store.insertTuple({
-        objectType: "document",
-        objectId: doc,
-        relation: "viewer",
-        ...row,
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "document",
+          objectId: doc,
+          relation: "viewer",
+          ...row,
+        }),
+      );
     }
 
     expect(
@@ -151,11 +158,33 @@ describe("listSubjects over the adapter", () => {
 
   test("matches the condition, not just the shape", async () => {
     await store.upsertRelationConfig(
-      config("editor", [
-        { type: "user", condition: "weekday_only" },
-        { type: "user", wildcard: true },
-      ]),
+      ungatedConfig(
+        config("editor", [
+          { type: "user", condition: "weekday_only" },
+          { type: "user", wildcard: true },
+        ]),
+      ),
     );
+    // Both definitions exist because `listSubjects` now evaluates
+    // an admitted row's condition rather than only matching its
+    // name. `other_cond` is never evaluated — carol's row is
+    // dropped by the ref match, which is what this test is about —
+    // but a fixture naming a condition the store does not define is
+    // a state no model write can produce, and leaving it that way
+    // would make an undefined-condition refusal look like the ref
+    // filter working.
+    for (const name of ["weekday_only", "other_cond"]) {
+      await store.upsertConditionDefinition({
+        name,
+        expression: 'day != "sun"',
+        parameters: { day: "string" },
+      });
+    }
+    // Satisfies `weekday_only`, so alice's row is reported for the
+    // reason under test: its ref is admitted. The context is the
+    // only thing keeping the row alive, which the second assertion
+    // below pins.
+    const weekday = { context: { day: "mon" } };
 
     // The condition is not part of a tuple's natural key, so each
     // spelling needs its own subject: written on one, the last
@@ -179,32 +208,50 @@ describe("listSubjects over the adapter", () => {
         conditionName: "other_cond",
       },
     ]) {
-      await store.insertTuple({
-        objectType: "document",
-        objectId: doc,
-        relation: "editor",
-        ...row,
-      });
+      await store.insertTuple(
+        ungatedTuple({
+          objectType: "document",
+          objectId: doc,
+          relation: "editor",
+          ...row,
+        }),
+      );
     }
 
     expect(
-      subjects(await client.listSubjects("document", doc, "editor")),
+      subjects(await client.listSubjects("document", doc, "editor", weekday)),
     ).toEqual(["user:*", `user:${alice}`]);
+
+    // The ref match and the condition's value are two gates, not
+    // one: alice's ref is admitted either way, and a context the
+    // condition does not hold under drops her row where the bare
+    // wildcard's survives.
+    expect(
+      subjects(
+        await client.listSubjects("document", doc, "editor", {
+          context: { day: "sun" },
+        }),
+      ),
+    ).toEqual(["user:*"]);
 
     // The wildcard is admitted bare here, so a conditioned wildcard
     // is a different ref and is not. It needs its own object for
     // the same reason.
-    await store.insertTuple({
-      objectType: "document",
-      objectId: otherDoc,
-      relation: "editor",
-      subjectType: "user",
-      subjectId: "*",
-      conditionName: "weekday_only",
-    });
+    await store.insertTuple(
+      ungatedTuple({
+        objectType: "document",
+        objectId: otherDoc,
+        relation: "editor",
+        subjectType: "user",
+        subjectId: "*",
+        conditionName: "weekday_only",
+      }),
+    );
 
     expect(
-      subjects(await client.listSubjects("document", otherDoc, "editor")),
+      subjects(
+        await client.listSubjects("document", otherDoc, "editor", weekday),
+      ),
     ).toEqual([]);
   });
 
@@ -215,14 +262,16 @@ describe("listSubjects over the adapter", () => {
     // refuses such a relation, as OpenFGA does, and so does this:
     // the two paths disagreeing in the granting direction is worse
     // than either answer on its own.
-    await store.insertTuple({
-      objectType: "document",
-      objectId: doc,
-      relation: "unconfigured",
-      subjectType: "group",
-      subjectId: eng,
-      subjectRelation: "owner",
-    });
+    await store.insertTuple(
+      ungatedTuple({
+        objectType: "document",
+        objectId: doc,
+        relation: "unconfigured",
+        subjectType: "group",
+        subjectId: eng,
+        subjectRelation: "owner",
+      }),
+    );
 
     await expect(
       client.listSubjects("document", doc, "unconfigured"),

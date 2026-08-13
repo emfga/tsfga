@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { check } from "../src/check.ts";
-import { DepthExceededError } from "../src/errors.ts";
+import {
+  ConditionEvaluationError,
+  DepthExceededError,
+  InvalidRequestContextError,
+  RelationConfigNotFoundError,
+  TsfgaError,
+} from "../src/errors.ts";
 import { createTsfga } from "../src/index.ts";
 import { listObjects } from "../src/list-objects.ts";
 import type {
@@ -351,16 +357,415 @@ describe("listObjects", () => {
       );
     });
 
-    test("depth exhaustion aborts the whole call", async () => {
-      // Upstream maps a depth-exceeded candidate to a failed
-      // ListObjects rather than silently dropping that object.
+    test("depth exhaustion drops the candidate, it does not abort", async () => {
+      // The one error that does not abort. Upstream's reverse
+      // expansion walks a job queue rather than recursing, so a
+      // chain long enough to exhaust tsfga's budget is one it
+      // still answers -- and aborting here costs the caller every
+      // object, including the ones well inside the budget that
+      // both engines agree on. Dropping the candidate is closer to
+      // upstream on every shape upstream can actually answer.
+      //
+      // The three cases above still hold: every other error
+      // aborts the call, bar the deferred condition error the
+      // block below is about. `StoreReadFailure` is not one, so
+      // none of the three moved.
       seedSharedSubtree(3);
 
-      await expect(
-        listObjects(store, ALICE_VIEWER, {
-          maxDepth: 1,
+      expect(await listObjects(store, ALICE_VIEWER, { maxDepth: 1 })).toEqual(
+        [],
+      );
+    });
+  });
+
+  /**
+   * The other exception, and the one that is not a blanket rule:
+   * whether a `ConditionEvaluationError` aborts depends on *which
+   * read* raised it, which `check.ts` records on the error as
+   * `onSubjectRow`.
+   *
+   * Upstream reverse-expands `ListObjects` from the subject, and
+   * its first query is for the rows whose subject is the request
+   * subject on that relation. A condition on one of those is
+   * always evaluated upstream too, so an error there must refuse
+   * here. Anything further out upstream may never materialise, so
+   * an error there is dropped outright: the candidate counts
+   * `false` and the call answers with the granted set, which may
+   * be empty.
+   *
+   * These go through the real check path rather than injecting the
+   * error, because the flag is only worth anything if the read
+   * sites actually set it.
+   */
+  describe("which read raised a condition error decides", () => {
+    /** A condition whose parameter no request here supplies. */
+    function seedCondition() {
+      store.conditionDefinitions.push({
+        name: "flag",
+        expression: "flag == true",
+        parameters: { flag: "bool" },
+      });
+    }
+
+    /**
+     * `doc:1` grants alice outright; `doc:2` carries her own row
+     * on the same relation, conditioned. That second row is
+     * exactly upstream's first reverse-expansion query.
+     */
+    function seedSubjectRow() {
+      seedCondition();
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          directlyAssignable: [
+            { type: "user" },
+            { type: "user", condition: "flag" },
+          ],
         }),
-      ).rejects.toBeInstanceOf(DepthExceededError);
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+        }),
+        makeTuple({
+          objectType: "doc",
+          objectId: "2",
+          relation: "viewer",
+          subjectType: "user",
+          subjectId: "alice",
+          conditionName: "flag",
+        }),
+      );
+    }
+
+    /**
+     * `doc:2`'s failure is a hop away: its tupleset row is
+     * conditioned, so the error comes off a scan rather than off
+     * alice's own row. `grantOk` decides whether the candidate
+     * beside it grants anything.
+     */
+    function seedTuplesetScan(grantOk: boolean) {
+      seedCondition();
+      store.relationConfigs.push(
+        makeConfig({
+          objectType: "doc",
+          relation: "viewer",
+          // Nothing is assigned directly, but the arm is kept so
+          // the candidate still opens with a `findCheckTuples` --
+          // which is what `CandidateStore` counts and fails on.
+          directlyAssignable: [{ type: "user" }],
+          tupleToUserset: [{ tupleset: "parent", computedUserset: "member" }],
+        }),
+        makeConfig({
+          objectType: "doc",
+          relation: "parent",
+          directlyAssignable: [
+            { type: "folder" },
+            { type: "folder", condition: "flag" },
+          ],
+        }),
+        makeConfig({
+          objectType: "folder",
+          relation: "member",
+          directlyAssignable: [{ type: "user" }],
+        }),
+      );
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "1",
+          relation: "parent",
+          subjectType: "folder",
+          subjectId: "ok",
+        }),
+        makeTuple({
+          objectType: "doc",
+          objectId: "2",
+          relation: "parent",
+          subjectType: "folder",
+          subjectId: "err",
+          conditionName: "flag",
+        }),
+      );
+      if (grantOk) {
+        store.tuples.push(
+          makeTuple({
+            objectType: "folder",
+            objectId: "ok",
+            relation: "member",
+            subjectType: "user",
+            subjectId: "alice",
+          }),
+        );
+      }
+    }
+
+    test("an error on the subject's own row aborts the call", async () => {
+      // Both engines refuse: upstream reads alice's conditioned
+      // row on `doc:2` in the very first query it issues, so
+      // answering `["1"]` here would answer where upstream
+      // refuses -- on the commonest shape there is, one
+      // conditioned row beside an unconditioned one.
+      seedSubjectRow();
+
+      await expect(listObjects(store, ALICE_VIEWER)).rejects.toBeInstanceOf(
+        ConditionEvaluationError,
+      );
+    });
+
+    test("an error a hop away does not cost the answer", async () => {
+      // `doc:2` grants alice nothing -- the conditioned row under
+      // it points at a folder she is not a member of. Upstream
+      // never walks back to it and answers `["1"]`.
+      seedTuplesetScan(true);
+
+      expect(await listObjects(store, ALICE_VIEWER)).toEqual(["1"]);
+    });
+
+    test("a dropped error still lets the call answer empty", async () => {
+      // The same shape with the grant removed, and the rule does
+      // not change with it: an empty granted set is not evidence
+      // that the erroring row was on alice's path -- a subject who
+      // reaches nothing grants nothing for reasons that have
+      // nothing to do with the condition. So the error is dropped
+      // here too and the call answers `[]`.
+      //
+      // The earlier shape of this rule raised it instead, which is
+      // what made `listObjects` refuse where upstream answers `[]`.
+      // The cost is stated with it:
+      // where upstream's reverse expansion *does* reach the
+      // erroring row it refuses the whole call and this answers,
+      // which is the under-reporting residue pinned in
+      // `tests/conformance/vault.test.ts` and
+      // `list-objects-probes.test.ts`.
+      seedTuplesetScan(false);
+
+      expect(await listObjects(store, ALICE_VIEWER)).toEqual([]);
+    });
+
+    test("a hard failure still wins over a dropped one", async () => {
+      // A dropped failure is not a launch cut-off, so `doc:3` is
+      // reached and its failure aborts -- even though the
+      // condition error sits at a lower index.
+      seedTuplesetScan(true);
+      store.tuples.push(
+        makeTuple({
+          objectType: "doc",
+          objectId: "3",
+          relation: "parent",
+          subjectType: "folder",
+          subjectId: "ok",
+        }),
+      );
+      store.failures.set("3", new StoreReadFailure("doc:3 failed"));
+
+      expect(await failureMessage(listObjects(store, ALICE_VIEWER))).toBe(
+        "doc:3 failed",
+      );
+    });
+  });
+
+  /**
+   * Upstream stops at `ListObjectsMaxResults` (default 1000) and
+   * truncates silently — no cursor, no error, no field saying the
+   * answer was cut. The cap is asserted from **both** sides here on
+   * purpose: a cap that quietly shortened a small answer would be
+   * far worse than the divergence it closes, and nothing else in
+   * the suite would notice.
+   *
+   * Which thousand upstream keeps is whatever its worker pool
+   * finished first, so tsfga does not try to reproduce the
+   * membership. It keeps the first `listObjectsMaxResults` granting
+   * candidates in candidate order, which is deterministic on this
+   * side whatever the completion order was.
+   */
+  describe("the answer stops at listObjectsMaxResults", () => {
+    /** Grant alice outright on every candidate `1..count`. */
+    function grantAll(count: number) {
+      for (const objectId of docIds(count)) {
+        store.tuples.push(
+          makeTuple({
+            objectType: "doc",
+            objectId,
+            relation: "viewer",
+            subjectType: "user",
+            subjectId: "alice",
+          }),
+        );
+      }
+    }
+
+    test("a pool below the cap is returned whole", async () => {
+      // The boundary from below. This is the case a cap must never
+      // touch, and it is the expensive one to get wrong.
+      seedSharedSubtree(5);
+      grantAll(5);
+
+      expect(
+        await listObjects(store, ALICE_VIEWER, { listObjectsMaxResults: 10 }),
+      ).toEqual(docIds(5));
+    });
+
+    test("a pool exactly at the cap is returned whole", async () => {
+      seedSharedSubtree(5);
+      grantAll(5);
+
+      expect(
+        await listObjects(store, ALICE_VIEWER, { listObjectsMaxResults: 5 }),
+      ).toEqual(docIds(5));
+    });
+
+    test("a pool one over the cap loses exactly its last object", async () => {
+      seedSharedSubtree(6);
+      grantAll(6);
+
+      expect(
+        await listObjects(store, ALICE_VIEWER, { listObjectsMaxResults: 5 }),
+      ).toEqual(docIds(5));
+    });
+
+    test("the default cap is 1000", async () => {
+      // The figure itself, not just that some cap exists:
+      // `DefaultListObjectsMaxResults` is what the conformance
+      // fixtures measured at 1006 and 1100 candidates.
+      seedSharedSubtree(1001);
+      grantAll(1001);
+      for (const id of docIds(1001)) store.delays.set(id, 0);
+
+      expect(await listObjects(store, ALICE_VIEWER)).toHaveLength(1000);
+    });
+
+    test("Infinity opts out", async () => {
+      seedSharedSubtree(6);
+      grantAll(6);
+
+      expect(
+        await listObjects(store, ALICE_VIEWER, {
+          listObjectsMaxResults: Number.POSITIVE_INFINITY,
+        }),
+      ).toEqual(docIds(6));
+    });
+
+    test("a cap of 1 answers with the first granting candidate", async () => {
+      seedSharedSubtree(6);
+      grantAll(6);
+
+      expect(
+        await listObjects(store, ALICE_VIEWER, { listObjectsMaxResults: 1 }),
+      ).toEqual(["1"]);
+    });
+
+    test("only granting candidates count against the cap", async () => {
+      // The cap bounds the answer, not the walk: four candidates
+      // are checked to fill a cap of two, because two of them do
+      // not grant.
+      seedSharedSubtree(5);
+      for (const objectId of ["2", "4"]) {
+        store.tuples.push(
+          makeTuple({
+            objectType: "doc",
+            objectId,
+            relation: "viewer",
+            subjectType: "user",
+            subjectId: "alice",
+          }),
+        );
+      }
+
+      expect(
+        await listObjects(store, ALICE_VIEWER, {
+          listObjectsMaxResults: 2,
+          maxBreadth: 1,
+        }),
+      ).toEqual(["2", "4"]);
+      expect(store.started).toEqual(["1", "2", "3", "4"]);
+    });
+
+    test("reaching the cap stops the producers", async () => {
+      // Upstream stops its producers rather than filtering a
+      // complete walk, so a candidate past the cap is never
+      // resolved. Candidate 6 would fail the whole call; it is
+      // never launched, so it never does.
+      seedSharedSubtree(6);
+      grantAll(6);
+      store.failures.set("6", new StoreReadFailure("doc:6 failed"));
+
+      expect(
+        await listObjects(store, ALICE_VIEWER, {
+          listObjectsMaxResults: 3,
+          maxBreadth: 1,
+        }),
+      ).toEqual(["1", "2", "3"]);
+      expect(store.started).toEqual(["1", "2", "3"]);
+    });
+
+    test("a failure the pool did reach still aborts under a cap", async () => {
+      // The other half of the rule above, and the one that keeps
+      // the cap from becoming a way to swallow errors: the cap
+      // stops candidates being *launched*, it does not suppress a
+      // refusal from one that was.
+      seedSharedSubtree(6);
+      grantAll(6);
+      store.failures.set("2", new StoreReadFailure("doc:2 failed"));
+
+      expect(
+        await failureMessage(
+          listObjects(store, ALICE_VIEWER, {
+            listObjectsMaxResults: 3,
+            maxBreadth: 1,
+          }),
+        ),
+      ).toBe("doc:2 failed");
+    });
+
+    test("truncation is in candidate order, not completion order", async () => {
+      // All six race at breadth 6, so the granted count overshoots
+      // the cap and the answer is truncated on the way out. Which
+      // three survive must not depend on who finished first.
+      seedSharedSubtree(6);
+      grantAll(6);
+      for (const [index, id] of docIds(6).entries()) {
+        store.delays.set(id, (6 - index) * 5);
+      }
+
+      expect(
+        await listObjects(store, ALICE_VIEWER, {
+          listObjectsMaxResults: 3,
+          maxBreadth: 6,
+        }),
+      ).toEqual(["1", "2", "3"]);
+    });
+
+    test("a cap does not turn a refusal into a short list", async () => {
+      // A relation with no config is refused whatever the cap is.
+      // The gates run before the pool, and the cap bounds only the
+      // answer.
+      await expect(
+        listObjects(store, ALICE_VIEWER, { listObjectsMaxResults: 1 }),
+      ).rejects.toBeInstanceOf(RelationConfigNotFoundError);
+    });
+
+    test("an invalid cap rejects before any store read", async () => {
+      seedSharedSubtree(3);
+      grantAll(3);
+      store.resetCounts();
+
+      for (const listObjectsMaxResults of [0, -1, 1.5, Number.NaN]) {
+        await expect(
+          listObjects(store, ALICE_VIEWER, { listObjectsMaxResults }),
+        ).rejects.toBeInstanceOf(TsfgaError);
+      }
+
+      // Same predicate `maxDepth` carries, and applied in the same
+      // place it is read: an option the library cannot honour costs
+      // no round trip.
+      expect(store.callsWith("listCandidateObjectIds", "doc")).toBe(0);
+      expect(store.started).toEqual([]);
     });
   });
 
@@ -368,7 +773,25 @@ describe("listObjects", () => {
     test("an empty candidate list resolves to an empty array", async () => {
       // The pool must settle with nothing ever launched rather
       // than hanging on a promise no callback will resolve.
+      //
+      // Seeded so the relation is *defined* with no candidates,
+      // which is the state this is about. An undefined relation is
+      // now refused before the pool is read -- the case below.
+      seedSharedSubtree(0);
+
       expect(await listObjects(store, ALICE_VIEWER)).toEqual([]);
+    });
+
+    test("an undefined relation is refused, not answered empty", async () => {
+      // The gate upstream applies before it touches data. Without
+      // it the answer depends on whether the candidate pool
+      // happens to be empty: a relation nothing defines would
+      // report `[]` on an empty type and refuse on a populated
+      // one, so the same model would answer two different ways
+      // for a reason that has nothing to do with the model.
+      await expect(listObjects(store, ALICE_VIEWER)).rejects.toBeInstanceOf(
+        RelationConfigNotFoundError,
+      );
     });
   });
 
@@ -381,5 +804,120 @@ describe("listObjects", () => {
 
       expect(store.peakInFlight).toBe(2);
     });
+  });
+});
+
+/**
+ * What the two scan calls actually do at the two boundaries their
+ * JSDoc used to describe backwards: a candidate the depth budget
+ * cannot resolve, and a request context `check` refuses.
+ *
+ * Pinned here because both are documentation-shaped claims that
+ * ship in `dist/index.d.ts`, and prose is the one part of the
+ * library nothing else checks. The assertions are the contrast:
+ * each says what `check` does beside what the scan does, so an
+ * edit that makes the two agree fails rather than passes quietly.
+ */
+describe("the scan calls diverge from check at two boundaries", () => {
+  function chain(): MockTupleStore {
+    const store = new MockTupleStore();
+    store.relationConfigs.push({
+      objectType: "doc",
+      relation: "viewer",
+      directlyAssignable: [
+        { type: "user" },
+        { type: "doc", relation: "viewer" },
+      ],
+      impliedBy: null,
+      computedUserset: null,
+      tupleToUserset: null,
+      excludedBy: null,
+      intersection: null,
+    });
+    // `d0 -> d1 -> ... -> d10`, with only `d10` granting alice
+    // directly. Under `maxDepth: 3` the shallow end of the chain
+    // resolves and the deep end exhausts the budget.
+    for (let i = 0; i < 10; i++) {
+      store.tuples.push({
+        objectType: "doc",
+        objectId: `d${i}`,
+        relation: "viewer",
+        subjectType: "doc",
+        subjectId: `d${i + 1}`,
+        subjectRelation: "viewer",
+        conditionName: null,
+        conditionContext: null,
+      });
+    }
+    store.tuples.push({
+      objectType: "doc",
+      objectId: "d10",
+      relation: "viewer",
+      subjectType: "user",
+      subjectId: "alice",
+      subjectRelation: null,
+      conditionName: null,
+      conditionContext: null,
+    });
+    return store;
+  }
+
+  test("a depth-exceeded candidate is dropped, not propagated", async () => {
+    const client = createTsfga(chain(), { maxDepth: 3 });
+    // `check` raises for the deep candidate...
+    await expect(
+      client.check({
+        objectType: "doc",
+        objectId: "d0",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    ).rejects.toBeInstanceOf(DepthExceededError);
+    // ...and `listObjects` answers with the candidates it could
+    // resolve rather than abandoning the whole call.
+    expect(
+      await client.listObjects({
+        objectType: "doc",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+      }),
+    ).toEqual(["d8", "d9", "d10"]);
+  });
+
+  // A control character in a string value: the shape upstream's
+  // `ValidateStruct` refuses, and `ValidateStruct` lives in
+  // `CheckCommand` and nowhere else in `pkg/server/commands`.
+  const context = { role: "ad\u0001min" };
+
+  test("listObjects accepts a request context check refuses", async () => {
+    const client = createTsfga(chain());
+    await expect(
+      client.check({
+        objectType: "doc",
+        objectId: "d10",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+        context,
+      }),
+    ).rejects.toBeInstanceOf(InvalidRequestContextError);
+    expect(
+      await client.listObjects({
+        objectType: "doc",
+        relation: "viewer",
+        subjectType: "user",
+        subjectId: "alice",
+        context,
+      }),
+    ).toContain("d10");
+  });
+
+  test("listSubjects accepts a request context check refuses", async () => {
+    const client = createTsfga(chain());
+    expect(
+      await client.listSubjects("doc", "d10", "viewer", { context }),
+    ).toHaveLength(1);
   });
 });

@@ -1,0 +1,55 @@
+# The container-typed conditions upstream's AuthZEN suite runs
+# (`tests/authzen/evaluation_test.go`), reduced to plain checks:
+# `in` over a list, `size()` over a list, indexing a map, and a
+# three-parameter condition mixing all three.
+- user: user_b2a:alice
+  relation: roles_any
+  object: doc_b2a:d1
+  condition:
+    name: roles_c_b2a
+- user: user_b2a:alice
+  relation: perms_two
+  object: doc_b2a:d1
+  condition:
+    name: perms_c_b2a
+- user: user_b2a:alice
+  relation: roles_empty
+  object: doc_b2a:d1
+  condition:
+    name: empty_c_b2a
+- user: user_b2a:alice
+  relation: meta_admin
+  object: doc_b2a:d1
+  condition:
+    name: meta_c_b2a
+- user: user_b2a:alice
+  relation: limits_ok
+  object: doc_b2a:d1
+  condition:
+    name: limits_c_b2a
+- user: user_b2a:alice
+  relation: port_ok
+  object: doc_b2a:d1
+  condition:
+    name: port_c_b2a
+- user: user_b2a:alice
+  relation: upload_ok
+  object: doc_b2a:d1
+  condition:
+    name: upload_c_b2a
+- user: user_b2a:alice
+  relation: meta_missing
+  object: doc_b2a:d1
+  condition:
+    name: meta_missing_c_b2a
+
+# d2 carries the same condition with a context of its own, so the
+# request context and the tuple context disagree.
+- user: user_b2a:alice
+  relation: roles_any
+  object: doc_b2a:d2
+  condition:
+    name: roles_c_b2a
+    context:
+      subject_roles:
+        - admin

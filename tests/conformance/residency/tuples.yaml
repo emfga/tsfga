@@ -1,0 +1,155 @@
+# Groups: g_eu nests inside g_all
+- user: user_d4r:mira
+  relation: member
+  object: group_d4r:g_eu
+- user: group_d4r:g_eu#member
+  relation: member
+  object: group_d4r:g_all
+- user: user_d4r:noah
+  relation: member
+  object: group_d4r:g_all
+
+# The EU tenant
+- user: group_d4r:g_all#member
+  relation: steward
+  object: tenant_d4r:tenant_eu
+- user: user_d4r:ines
+  relation: steward
+  object: tenant_d4r:tenant_eu
+- user: user_d4r:pia
+  relation: auditor
+  object: tenant_d4r:tenant_eu
+- user: user_d4r:quinn
+  relation: auditor
+  object: tenant_d4r:tenant_eu
+  condition:
+    name: class_ok_d4r
+    context:
+      required: 3
+- user: user_d4r:noah
+  relation: embargoed
+  object: tenant_d4r:tenant_eu
+  condition:
+    name: retained_d4r
+    context:
+      expires_at: "2026-06-01T00:00:00Z"
+
+# The US tenant
+- user: user_d4r:sam
+  relation: steward
+  object: tenant_d4r:tenant_us
+
+# Datasets, each bound to its tenant through a conditioned row
+- user: tenant_d4r:tenant_eu
+  relation: tenant
+  object: dataset_d4r:ds_eu
+  condition:
+    name: region_ok_d4r
+    context:
+      allowed_regions: ["eu-west", "eu-north"]
+- user: tenant_d4r:tenant_eu
+  relation: tenant
+  object: dataset_d4r:ds_eu2
+  condition:
+    name: region_ok_d4r
+    context:
+      allowed_regions: ["eu-north"]
+- user: tenant_d4r:tenant_us
+  relation: tenant
+  object: dataset_d4r:ds_us
+  condition:
+    name: region_ok_d4r
+    context:
+      allowed_regions: ["us-east"]
+- user: group_d4r:g_eu#member
+  relation: curator
+  object: dataset_d4r:ds_eu
+- user: user_d4r:mira
+  relation: curator
+  object: dataset_d4r:ds_eu
+  condition:
+    name: eu_principal_d4r
+- user: user_d4r:tess
+  relation: curator
+  object: dataset_d4r:ds_orphan
+  condition:
+    name: eu_principal_d4r
+- user: user_d4r:ollie
+  relation: classified
+  object: dataset_d4r:ds_eu
+  condition:
+    name: class_ok_d4r
+    context:
+      required: 5
+- user: user_d4r:ines
+  relation: can_manage
+  object: dataset_d4r:ds_eu
+  condition:
+    name: residency_d4r
+    context:
+      tenant_key: acme
+
+# Records, each bound to its dataset through a conditioned row
+- user: dataset_d4r:ds_eu
+  relation: dataset
+  object: record_d4r:rec1
+  condition:
+    name: region_ok_d4r
+    context:
+      allowed_regions: ["eu-west"]
+- user: dataset_d4r:ds_eu
+  relation: dataset
+  object: record_d4r:rec2
+  condition:
+    name: region_ok_d4r
+    context:
+      allowed_regions: ["eu-west", "eu-north"]
+- user: dataset_d4r:ds_eu2
+  relation: dataset
+  object: record_d4r:rec3
+  condition:
+    name: region_ok_d4r
+    context:
+      allowed_regions: ["eu-west", "eu-north"]
+- user: dataset_d4r:ds_us
+  relation: dataset
+  object: record_d4r:rec4
+  condition:
+    name: region_ok_d4r
+    context:
+      allowed_regions: ["us-east"]
+- user: dataset_d4r:ds_eu
+  relation: dataset
+  object: record_d4r:rec6
+  condition:
+    name: region_ok_d4r
+    context:
+      allowed_regions: ["eu-west"]
+      region: "eu-west"
+- user: dataset_d4r:ds_eu
+  relation: dataset
+  object: record_d4r:rec7
+  condition:
+    name: region_ok_d4r
+    context:
+      allowed_regions: []
+- user: user_d4r:pia
+  relation: owner
+  object: record_d4r:rec5
+- user: user_d4r:rob
+  relation: reviewer
+  object: record_d4r:rec1
+  condition:
+    name: retained_d4r
+    context:
+      expires_at: "2027-01-01T00:00:00Z"
+- user: user_d4r:*
+  relation: embargoed
+  object: record_d4r:rec2
+- user: user_d4r:pia
+  relation: embargoed
+  object: record_d4r:rec3
+  condition:
+    name: retained_d4r
+    context:
+      expires_at: "2026-06-01T00:00:00Z"

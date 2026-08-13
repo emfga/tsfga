@@ -3,6 +3,7 @@ import { CamelCasePlugin, Kysely, PostgresDialect } from "kysely";
 import pg from "pg";
 import { KyselyTupleStore } from "../src/adapter.ts";
 import type { DB } from "../src/schema.ts";
+import { ungatedTuple } from "./helpers/ungated.ts";
 
 /**
  * `KyselyTupleStore` strips the instance's plugins, and Kysely
@@ -57,13 +58,15 @@ describe("transaction scoping", () => {
           .transaction()
           .execute(async (trx) => {
             const inside = new KyselyTupleStore(trx);
-            await inside.insertTuple({
-              objectType: "probe",
-              objectId,
-              relation: "reader",
-              subjectType: "user",
-              subjectId: objectId,
-            });
+            await inside.insertTuple(
+              ungatedTuple({
+                objectType: "probe",
+                objectId,
+                relation: "reader",
+                subjectType: "user",
+                subjectId: objectId,
+              }),
+            );
 
             expect(
               await inside.findTuplesByRelation("probe", objectId, "reader"),

@@ -1,6 +1,5 @@
-import type { TupleStore } from "./store-interface.ts";
+import type { IdDomain, TupleStore } from "./store-interface.ts";
 import type {
-  AddTupleRequest,
   CheckTuples,
   CheckTuplesQuery,
   ConditionDefinition,
@@ -8,6 +7,7 @@ import type {
   RemoveTupleRequest,
   Tuple,
 } from "./types.ts";
+import type { GatedRelationConfig, GatedTuple } from "./write-gate.ts";
 
 /**
  * Wraps a TupleStore, memoizing relation configs and condition
@@ -41,8 +41,19 @@ export class CachingTupleStore implements TupleStore {
     string,
     Promise<ConditionDefinition | null>
   >();
+  /**
+   * Type definitions, keyed by type name. The subject-type gate
+   * runs once per check, so a `listObjects` over a thousand
+   * candidates would otherwise issue a thousand identical reads.
+   */
+  private typeCache = new Map<string, Promise<boolean>>();
 
   constructor(private inner: TupleStore) {}
+
+  /** The wrapped store's; a cache holds no ids of its own. */
+  get idDomain(): IdDomain {
+    return this.inner.idDomain;
+  }
 
   findRelationConfig(
     objectType: string,
@@ -68,6 +79,16 @@ export class CachingTupleStore implements TupleStore {
       cached = this.inner.findConditionDefinition(name);
       this.conditionCache.set(name, cached);
       this.evictOnRejection(cached, this.conditionCache, name);
+    }
+    return cached;
+  }
+
+  hasTypeDefinition(type: string): Promise<boolean> {
+    let cached = this.typeCache.get(type);
+    if (!cached) {
+      cached = this.inner.hasTypeDefinition(type);
+      this.typeCache.set(type, cached);
+      this.evictOnRejection(cached, this.typeCache, type);
     }
     return cached;
   }
@@ -103,7 +124,7 @@ export class CachingTupleStore implements TupleStore {
     return this.inner.findTuplesByRelation(objectType, objectId, relation);
   }
 
-  insertTuple(tuple: AddTupleRequest): Promise<void> {
+  insertTuple(tuple: GatedTuple): Promise<boolean> {
     return this.inner.insertTuple(tuple);
   }
 
@@ -115,13 +136,21 @@ export class CachingTupleStore implements TupleStore {
     return this.inner.listCandidateObjectIds(objectType);
   }
 
-  upsertRelationConfig(config: RelationConfig): Promise<void> {
+  // Both config writes clear the *whole* type cache rather than one
+  // entry: a config defines its own object type and every type its
+  // `directlyAssignable` names, and deleting one can undefine a
+  // type only the deleted config mentioned. The invalidation is
+  // per-key nowhere because the key set is not derivable from the
+  // write alone.
+  upsertRelationConfig(config: GatedRelationConfig): Promise<void> {
     this.configCache.get(config.objectType)?.delete(config.relation);
+    this.typeCache.clear();
     return this.inner.upsertRelationConfig(config);
   }
 
   deleteRelationConfig(objectType: string, relation: string): Promise<boolean> {
     this.configCache.get(objectType)?.delete(relation);
+    this.typeCache.clear();
     return this.inner.deleteRelationConfig(objectType, relation);
   }
 

@@ -1,0 +1,70 @@
+# Groups
+- user: user_c3t:bob
+  relation: member
+  object: group_c3t:eng
+- user: user_c3t:carol
+  relation: member
+  object: group_c3t:eng
+
+# Workspace
+- user: user_c3t:alice
+  relation: owner
+  object: workspace_c3t:acme
+- user: group_c3t:eng#member
+  relation: collaborator
+  object: workspace_c3t:acme
+
+# Base: dan edits it without any workspace access at all
+- user: workspace_c3t:acme
+  relation: workspace
+  object: base_c3t:crm
+- user: user_c3t:dan
+  relation: editor
+  object: base_c3t:crm
+
+# Tables
+- user: base_c3t:crm
+  relation: base
+  object: table_c3t:leads
+- user: base_c3t:crm
+  relation: base
+  object: table_c3t:archive
+- user: user_c3t:*
+  relation: hidden
+  object: table_c3t:archive
+
+# Views
+- user: table_c3t:leads
+  relation: table
+  object: view_c3t:board
+- user: table_c3t:leads
+  relation: table
+  object: view_c3t:mine
+- user: user_c3t:*
+  relation: locked
+  object: view_c3t:mine
+- user: user_c3t:carol
+  relation: personal_owner
+  object: view_c3t:mine
+
+# Records
+- user: table_c3t:leads
+  relation: table
+  object: record_c3t:r1
+- user: user_c3t:*
+  relation: open
+  object: record_c3t:r1
+
+- user: table_c3t:leads
+  relation: table
+  object: record_c3t:r2
+- user: group_c3t:eng#member
+  relation: restricted_to
+  object: record_c3t:r2
+
+- user: table_c3t:archive
+  relation: table
+  object: record_c3t:r3
+- user: user_c3t:*
+  relation: open
+  object: record_c3t:r3

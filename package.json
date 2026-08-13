@@ -8,6 +8,7 @@
     "biome:check": "biome check .",
     "check:peer-range": "scripts/check-peer-range.sh",
     "check:schema-drift": "scripts/check-schema-drift.sh",
+    "check:write-gate-causes": "node scripts/check-write-gate-causes.mjs",
     "biome:format": "biome format --write .",
     "biome:lint": "biome lint .",
     "db:generate": "turbo run db:generate",

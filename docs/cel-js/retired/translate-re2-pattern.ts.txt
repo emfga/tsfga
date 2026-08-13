@@ -1,0 +1,845 @@
+/**
+ * The RE2 matcher, in **both** spellings CEL declares it in.
+ *
+ * cel-go's standard library declares `matches` twice in one
+ * `function(overloads.Matches, …)` block — a global
+ * `matches(string, string): bool` and the member overload
+ * `<string>.matches(string): bool` — bound to the same matcher, so
+ * the two spellings are the same function and must reach the same
+ * implementation here (issues 320 / 380).
+ */
+function re2Matches(value: string, pattern: string): boolean {
+  return compileRe2(pattern).test(value);
+}
+
+env.registerFunction("string.tsfga_re2_matches(string): bool", re2Matches);
+env.registerFunction("tsfga_re2_matches(string, string): bool", re2Matches);
+
+/** A closed range of code points, low first. */
+type CodePointRange = readonly [number, number];
+
+/**
+ * What a POSIX bracket class stands for, as RE2 defines it.
+ *
+ * A JavaScript `RegExp` reads `[[:alpha:]]` as a class of the
+ * characters `[:alph`, which matches nothing an author meant and
+ * errors nowhere — the silent half of issue 020.
+ *
+ * Held as code point ranges rather than as class source text
+ * because RE2's negated form (`[[:^alpha:]]`) is the complement of
+ * the class over the **whole** code point space, which is a set
+ * operation and not a string one. Each list is ascending and
+ * disjoint, which is what `complementRanges` assumes.
+ */
+const POSIX_CLASSES: Readonly<Record<string, readonly CodePointRange[]>> = {
+  alnum: [
+    [0x30, 0x39],
+    [0x41, 0x5a],
+    [0x61, 0x7a],
+  ],
+  alpha: [
+    [0x41, 0x5a],
+    [0x61, 0x7a],
+  ],
+  ascii: [[0x00, 0x7f]],
+  blank: [
+    [0x09, 0x09],
+    [0x20, 0x20],
+  ],
+  cntrl: [
+    [0x00, 0x1f],
+    [0x7f, 0x7f],
+  ],
+  digit: [[0x30, 0x39]],
+  graph: [[0x21, 0x7e]],
+  lower: [[0x61, 0x7a]],
+  print: [[0x20, 0x7e]],
+  punct: [
+    [0x21, 0x2f],
+    [0x3a, 0x40],
+    [0x5b, 0x60],
+    [0x7b, 0x7e],
+  ],
+  space: [
+    [0x09, 0x0d],
+    [0x20, 0x20],
+  ],
+  upper: [[0x41, 0x5a]],
+  word: [
+    [0x30, 0x39],
+    [0x41, 0x5a],
+    [0x5f, 0x5f],
+    [0x61, 0x7a],
+  ],
+  xdigit: [
+    [0x30, 0x39],
+    [0x41, 0x46],
+    [0x61, 0x66],
+  ],
+};
+
+/** The last code point, which is where a negated class ends. */
+const MAX_CODE_POINT = 0x10ffff;
+
+/**
+ * A code point as a class member.
+ *
+ * `\uXXXX` is read the same way with and without the `u` flag, so
+ * an ordinary expansion does not drag the flag in with it. Only a
+ * code point past the BMP needs `\u{…}`, and only a negated class
+ * produces one.
+ */
+function escapeCodePoint(code: number): string {
+  if (code > 0xffff) return `\\u{${code.toString(16).toUpperCase()}}`;
+  return `\\u${code.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+function formatRanges(ranges: readonly CodePointRange[]): string {
+  let out = "";
+  for (const [low, high] of ranges) {
+    out +=
+      low === high
+        ? escapeCodePoint(low)
+        : `${escapeCodePoint(low)}-${escapeCodePoint(high)}`;
+  }
+  return out;
+}
+
+/**
+ * The gaps between the ranges, over the whole code point space.
+ *
+ * That is what RE2 means by `[:^alpha:]`: Go's
+ * `regexp/syntax.appendNegatedClass` complements the table against
+ * the full rune range, not against ASCII, so a letter outside ASCII
+ * is a member of the negated class.
+ */
+function complementRanges(ranges: readonly CodePointRange[]): CodePointRange[] {
+  const out: CodePointRange[] = [];
+  let next = 0;
+  for (const [low, high] of ranges) {
+    if (low > next) out.push([next, low - 1]);
+    next = high + 1;
+  }
+  if (next <= MAX_CODE_POINT) out.push([next, MAX_CODE_POINT]);
+  return out;
+}
+
+/** Leading inline flag groups: `(?i)`, `(?is)`, `(?U)`. */
+const LEADING_FLAGS = /^\(\?([imsU]+)\)/;
+
+/** `{2}`, `{2,}`, `{2,5}` — a repetition rather than a literal. */
+const REPETITION = /^\{(\d+)(?:,(\d*))?\}/;
+
+/**
+ * The largest repetition count `regexp/syntax` accepts.
+ *
+ * Go names the constant `maxRepeat = 1000` and the bound is
+ * **inclusive**: `parse.go` refuses on `min < 0 || min > 1000 ||
+ * max > 1000 || max >= 0 && min > max`, so `a{1000}`, `a{1000,}`
+ * and `a{2,1000}` are all valid RE2 and only a count *above* 1000
+ * is refused.
+ *
+ * This comment used to say the opposite — "measured against the
+ * container, 1000 is already over the line" — and the measurement
+ * behind it was confounded. The probe matched `a{1000}` against a
+ * **1000-character subject**, and it was the subject's length that
+ * made upstream refuse: cel-go charges a regex match by the code
+ * points of subject plus pattern and bounds the whole evaluation
+ * at a cost of 100. The pattern was never the reason (issue 400).
+ *
+ * The ceiling exists because a repetition count is the cheapest way
+ * to make a pattern expensive, and in tsfga's shapes the pattern
+ * usually arrives in the request context — which is to say from
+ * whoever is asking. Bounding one repetition is not the whole rule:
+ * see `takeRepetition`, which also carries Go's `repeatIsValid`
+ * product over *nested* repetitions.
+ */
+const MAX_REPEAT = 1000;
+
+/** `[:alpha:]` and its negated form, inside a bracket expression. */
+const POSIX_CLASS = /^\[:(\^?)([a-z]+):\]/;
+
+/** A flag group RE2 accepts — scoped `(?i:…)` or bare `(?i)`. */
+const FLAG_GROUP = /^\(\?([imsU]*)(?:-([imsU]+))?[:)]/;
+
+/** `\a` and the four `\f\n\r\t\v` JavaScript shares with RE2. */
+const CONTROL_ESCAPES: Readonly<Record<string, number>> = {
+  a: 0x07,
+  f: 0x0c,
+  n: 0x0a,
+  r: 0x0d,
+  t: 0x09,
+  v: 0x0b,
+};
+
+/**
+ * RE2's `\s`, spelled out.
+ *
+ * Go's `\s` is the five ASCII characters `[\t\n\f\r ]`. JavaScript's
+ * is a Unicode set that also holds `\v`, every `Zs` space, the line
+ * and paragraph separators and the BOM — so passing `\s` through
+ * silently widens the class, which is the same failure mode as the
+ * POSIX classes and is invisible in exactly the same way.
+ */
+const RE2_SPACE = "\\t\\n\\f\\r\\u0020";
+
+/**
+ * Unicode general category names, which RE2 and JavaScript spell
+ * identically. Every other name RE2 takes in `\p{…}` is a script,
+ * which JavaScript spells `\p{Script=…}`.
+ *
+ * Transcribed from Go's `unicode.Categories`, which is what
+ * `regexp/syntax` looks a name up in before `unicode.Scripts`.
+ */
+const UNICODE_CATEGORIES: ReadonlySet<string> = new Set([
+  "C",
+  "Cc",
+  "Cf",
+  "Co",
+  "Cs",
+  "L",
+  "Ll",
+  "Lm",
+  "Lo",
+  "Lt",
+  "Lu",
+  "M",
+  "Mc",
+  "Me",
+  "Mn",
+  "N",
+  "Nd",
+  "Nl",
+  "No",
+  "P",
+  "Pc",
+  "Pd",
+  "Pe",
+  "Pf",
+  "Pi",
+  "Po",
+  "Ps",
+  "S",
+  "Sc",
+  "Sk",
+  "Sm",
+  "So",
+  "Z",
+  "Zl",
+  "Zp",
+  "Zs",
+]);
+
+/** Whether a code point is one RE2 refuses to read as an escaped
+ *  literal — it takes `\!` and `\-`, and refuses `\y` and `\8`. */
+function isAlphanumeric(code: number): boolean {
+  return (
+    (code >= 0x30 && code <= 0x39) ||
+    (code >= 0x41 && code <= 0x5a) ||
+    (code >= 0x61 && code <= 0x7a)
+  );
+}
+
+/** Every code point of `text`, as an escape a `RegExp` reads back
+ *  as that literal character — what `\Q…\E` means. */
+function quoteLiteral(text: string): string {
+  let out = "";
+  for (const char of text) {
+    const code = char.codePointAt(0);
+    if (code !== undefined) out += escapeCodePoint(code);
+  }
+  return out;
+}
+
+/**
+ * Why a pattern did not become a `RegExp`.
+ *
+ * - `invalid` — RE2 refuses it too. Upstream refuses the *model*
+ *   that carries such a pattern as a constant, so tsfga refuses the
+ *   write (issue 241).
+ * - `untranslatable` — RE2 accepts it and no faithful JavaScript
+ *   spelling exists, so the pattern is refused where it is met.
+ *   Refusing the write instead would refuse a model upstream
+ *   accepts, which would trade one divergence for a worse one.
+ *
+ * The distinction only exists because the refusal now has two
+ * audiences: a check, which must refuse either way, and
+ * `writeConditionDefinition`, which must refuse only what upstream
+ * refuses.
+ */
+type Re2RefusalKind = "invalid" | "untranslatable";
+
+class Re2PatternError extends Error {
+  readonly kind: Re2RefusalKind;
+
+  constructor(message: string, kind: Re2RefusalKind, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "Re2PatternError";
+    this.kind = kind;
+  }
+}
+
+function refusePattern(
+  pattern: string,
+  reason: string,
+  kind: Re2RefusalKind,
+): never {
+  throw new Re2PatternError(
+    `error parsing regexp: ${reason}: \`${pattern}\``,
+    kind,
+  );
+}
+
+interface TranslatedPattern {
+  source: string;
+  flags: string;
+}
+
+/**
+ * One member of a bracket expression, as JavaScript spells it.
+ *
+ * `code` is the member's code point when it is a single character
+ * and `null` when it is a class — which is what decides whether it
+ * may be a range endpoint. RE2 refuses a range whose endpoint is a
+ * class (issue 385) where JavaScript's Annex B fallback accepts
+ * one, so the distinction has to be carried rather than inferred.
+ */
+interface ClassItem {
+  readonly code: number | null;
+  readonly source: string;
+}
+
+/**
+ * Rewrite an RE2 pattern as the nearest JavaScript one, or refuse.
+ *
+ * The two dialects are not a superset of one another, so this runs
+ * in both directions:
+ *
+ * - RE2 spellings JavaScript cannot compile — the leading inline
+ *   flags `(?i)` `(?s)` `(?m)` `(?U)`, the `(?P<name>` group, `\A`,
+ *   `\z`, `\Q…\E`, `\x{…}`, an octal escape, a script name — become
+ *   flags, `(?<name>`, `^`, `$` and explicit code points. `(?U)`
+ *   inverts every quantifier's greediness, which is what the flag
+ *   means.
+ * - spellings both compile and read differently — the POSIX
+ *   classes, `\pL` / `\p{L}`, and `\s`, whose RE2 meaning is five
+ *   ASCII characters — become their JavaScript equivalents. A
+ *   negated POSIX class (`[[:^alpha:]]`) expands to the class's
+ *   complement over the whole code point space, which is what RE2
+ *   computes.
+ * - spellings JavaScript accepts and RE2 refuses — lookahead,
+ *   lookbehind, backreferences, `\b` inside a bracket expression, a
+ *   range whose endpoint is a class, a repetition of 1000 or more,
+ *   `\C` — are refused here, turning what was a silent grant into
+ *   the refusal upstream gives.
+ *
+ * **Nothing else passes through.** A construct this function does
+ * not recognise is refused rather than handed to `new RegExp`,
+ * because the outcome of handing it over is not "an error": it is a
+ * JavaScript regular expression that compiles and means something
+ * else, with no signal anywhere. `\Aabc` used to reach `new RegExp`
+ * verbatim, fail under the `u` flag, recompile without it, and mean
+ * *the literal letter A* under Annex B web compatibility (issue
+ * 383). Refusing by default closes that whole category, including
+ * for constructs nobody has enumerated.
+ *
+ * Ordinary characters are the one exception, and are not an
+ * exception to the rule: a literal is a literal in both dialects.
+ * The ones JavaScript would read as syntax under the `u` flag are
+ * escaped on the way out.
+ *
+ * Everything this function emits compiles under the `u` flag, which
+ * is why `compileRe2` no longer has a non-`u` retry: the retry was
+ * the mechanism behind three of the bugs this pass closes.
+ */
+function translateRe2Pattern(pattern: string): TranslatedPattern {
+  let flags = "";
+  let ungreedy = false;
+  let index = 0;
+
+  for (;;) {
+    const leading = LEADING_FLAGS.exec(pattern.slice(index));
+    if (!leading) break;
+    for (const flag of leading[1] ?? "") {
+      if (flag === "U") ungreedy = true;
+      else if (!flags.includes(flag)) flags += flag;
+    }
+    index += leading[0].length;
+  }
+
+  let source = "";
+  /** Open groups, so an unbalanced paren is named rather than left
+   *  for `new RegExp` — which cannot say which dialect refused. */
+  let depth = 0;
+  /** Group names already emitted. RE2 allows a name twice and
+   *  JavaScript does not, so the later one is renamed. */
+  const groupNames = new Set<string>();
+
+  /**
+   * Go's `repeatIsValid`, carried through a scanner that has no
+   * tree (issue 401).
+   *
+   * `parse.go` does not bound one repetition; after building a
+   * repeat node it walks the node dividing a budget of 1000 down
+   * through every nested repetition, so `(a{100}){100}` — ten
+   * thousand copies — is refused where each `{100}` alone is fine.
+   * The equivalent bottom-up quantity is, for a subtree, the
+   * smallest budget under which it is valid: 0 for anything
+   * carrying no repetition, `max(m, m × need(child))` for a
+   * repetition of `m`, and the maximum over the parts of a
+   * concatenation or an alternation (those recurse on the *same*
+   * budget). A repetition is refused when its own need passes
+   * 1000, which is exactly Go's test since `n / m >= k` and
+   * `n >= k × m` are the same statement in integers.
+   *
+   * `atomNeed` is the need of the item a quantifier would apply
+   * to; `groupNeed` the maximum over the items already completed
+   * in the group being scanned; `openNeeds` the enclosing ones.
+   */
+  let atomNeed = 0;
+  let groupNeed = 0;
+  const openNeeds: number[] = [];
+
+  /** Close off the item just scanned and begin another. */
+  const startAtom = () => {
+    if (atomNeed > groupNeed) groupNeed = atomNeed;
+    atomNeed = 0;
+  };
+
+  /** Flip the quantifier just emitted, for `(?U)`. */
+  const flipGreediness = () => {
+    if (!ungreedy) return;
+    if (pattern[index] === "?") index += 1;
+    else source += "?";
+  };
+
+  /** Annotated rather than inferred: control-flow narrowing only
+   *  reads `never` off a function expression's declared type. */
+  const refuseEscape: () => never = () =>
+    refusePattern(pattern, "invalid escape sequence", "invalid");
+
+  /** `\p{…}`, `\pL`, and their negations, in or out of a class. */
+  const takeUnicodeClass = (inClass: boolean): ClassItem => {
+    let negated = pattern[index + 1] === "P";
+    const after = pattern[index + 2];
+    let name: string;
+    if (after === "{") {
+      const close = pattern.indexOf("}", index + 3);
+      if (close === -1) refuseEscape();
+      name = pattern.slice(index + 3, close);
+      index = close + 1;
+    } else if (after !== undefined) {
+      // `\pL` is RE2's one-letter spelling of `\p{L}`.
+      name = after;
+      index += 3;
+    } else {
+      return refuseEscape();
+    }
+    if (name.startsWith("^")) {
+      // RE2 negates inside the braces; JavaScript negates the `p`.
+      negated = !negated;
+      name = name.slice(1);
+    }
+    if (name.length === 0) refuseEscape();
+    if (name === "Any") {
+      // RE2's every-rune class, which JavaScript has no name for.
+      if (negated) return { code: null, source: inClass ? "" : "[^\\s\\S]" };
+      return { code: null, source: inClass ? "\\s\\S" : "[\\s\\S]" };
+    }
+    const spelled = UNICODE_CATEGORIES.has(name) ? name : `Script=${name}`;
+    return { code: null, source: `\\${negated ? "P" : "p"}{${spelled}}` };
+  };
+
+  /** A `\x` escape, in or out of a bracket expression. */
+  const takeEscape = (inClass: boolean): ClassItem => {
+    const next = pattern[index + 1];
+    if (next === undefined) {
+      refusePattern(pattern, "trailing backslash", "invalid");
+    }
+
+    if (next === "A" || next === "z") {
+      // RE2's text anchors. `^` and `$` are the same two assertions
+      // only while `m` is absent, and JavaScript has no other
+      // spelling of them that RE2 would also accept.
+      if (inClass) refuseEscape();
+      if (flags.includes("m")) {
+        refusePattern(
+          pattern,
+          "unsupported anchor under (?m)",
+          "untranslatable",
+        );
+      }
+      index += 2;
+      return { code: null, source: next === "A" ? "^" : "$" };
+    }
+    if (next === "b" || next === "B") {
+      // A word boundary outside a class; inside one, RE2 has no
+      // `\b` at all and JavaScript reads it as a backspace.
+      if (inClass) refuseEscape();
+      index += 2;
+      return { code: null, source: `\\${next}` };
+    }
+    if (next === "C") {
+      // RE2's any-byte escape, which `regexp` itself refuses.
+      refuseEscape();
+    }
+    if (next === "d" || next === "D" || next === "w" || next === "W") {
+      // Identical in both dialects, ASCII in both.
+      index += 2;
+      return { code: null, source: `\\${next}` };
+    }
+    if (next === "s" || next === "S") {
+      index += 2;
+      if (next === "s") {
+        return { code: null, source: inClass ? RE2_SPACE : `[${RE2_SPACE}]` };
+      }
+      if (inClass) {
+        // A negated class cannot be a member of another class
+        // without set subtraction, which no supported runtime has.
+        refusePattern(
+          pattern,
+          "unsupported negated class in a bracket expression",
+          "untranslatable",
+        );
+      }
+      return { code: null, source: `[^${RE2_SPACE}]` };
+    }
+    if (next === "p" || next === "P") return takeUnicodeClass(inClass);
+    if (next === "Q") {
+      // `\Q…\E` quotes its contents. An unterminated `\Q` runs to
+      // the end of the pattern, which is what RE2 does. RE2 has no
+      // `\Q` inside a bracket expression.
+      if (inClass) refuseEscape();
+      const end = pattern.indexOf("\\E", index + 2);
+      const body =
+        end === -1 ? pattern.slice(index + 2) : pattern.slice(index + 2, end);
+      index = end === -1 ? pattern.length : end + 2;
+      return { code: null, source: quoteLiteral(body) };
+    }
+    const control = CONTROL_ESCAPES[next];
+    if (control !== undefined) {
+      index += 2;
+      return { code: control, source: escapeCodePoint(control) };
+    }
+    if (next === "x") {
+      if (pattern[index + 2] === "{") {
+        const close = pattern.indexOf("}", index + 3);
+        if (close === -1) refuseEscape();
+        const digits = pattern.slice(index + 3, close);
+        if (!/^[0-9a-fA-F]+$/.test(digits)) refuseEscape();
+        const code = Number.parseInt(digits, 16);
+        if (code > MAX_CODE_POINT) refuseEscape();
+        index = close + 1;
+        return { code, source: escapeCodePoint(code) };
+      }
+      const digits = pattern.slice(index + 2, index + 4);
+      if (!/^[0-9a-fA-F]{2}$/.test(digits)) refuseEscape();
+      const code = Number.parseInt(digits, 16);
+      index += 4;
+      return { code, source: escapeCodePoint(code) };
+    }
+    if (next >= "0" && next <= "7") {
+      // RE2 reads `\0` and a `\1`-`\7` followed by another octal
+      // digit as an octal escape of up to three digits. A lone
+      // `\1`-`\9` is a backreference, which RE2 does not have.
+      const second = pattern[index + 2];
+      const octal =
+        next === "0" ||
+        (second !== undefined && second >= "0" && second <= "7");
+      if (!octal) refuseEscape();
+      let code = next.charCodeAt(0) - 0x30;
+      let taken = 1;
+      while (taken < 3) {
+        const digit = pattern[index + 1 + taken];
+        if (digit === undefined || digit < "0" || digit > "7") break;
+        code = code * 8 + (digit.charCodeAt(0) - 0x30);
+        taken += 1;
+      }
+      index += 1 + taken;
+      return { code, source: escapeCodePoint(code) };
+    }
+    const code = pattern.codePointAt(index + 1);
+    if (code === undefined || code >= 0x80 || isAlphanumeric(code)) {
+      // Go takes `\` before any ASCII punctuation as that literal
+      // character and refuses everything else — an unknown letter,
+      // a digit that is not octal, an escaped non-ASCII rune.
+      refuseEscape();
+    }
+    index += 2;
+    return { code, source: escapeCodePoint(code) };
+  };
+
+  /** One member of a bracket expression, range aside. */
+  const takeClassItem = (): ClassItem => {
+    if (pattern[index] === "\\") return takeEscape(true);
+    if (pattern[index] === "[") {
+      const posix = POSIX_CLASS.exec(pattern.slice(index));
+      if (posix) {
+        const expansion = POSIX_CLASSES[posix[2] ?? ""];
+        if (expansion === undefined) {
+          refusePattern(pattern, "invalid character class range", "invalid");
+        }
+        index += posix[0].length;
+        // RE2 negates against the whole code point space, not
+        // against ASCII, so a letter outside ASCII is a member of
+        // `[[:^alpha:]]`.
+        const ranges =
+          posix[1] === "^" ? complementRanges(expansion) : expansion;
+        return { code: null, source: formatRanges(ranges) };
+      }
+    }
+    const code = pattern.codePointAt(index);
+    if (code === undefined)
+      refusePattern(pattern, "missing closing ]", "invalid");
+    index += String.fromCodePoint(code).length;
+    return { code, source: escapeCodePoint(code) };
+  };
+
+  const takeClass = () => {
+    source += "[";
+    index += 1;
+    if (pattern[index] === "^") {
+      source += "^";
+      index += 1;
+    }
+    // `]` and `-` are ordinary characters in the first position,
+    // which is what Go's `first` flag says.
+    let first = true;
+    while (index < pattern.length) {
+      if (pattern[index] === "]" && !first) break;
+      first = false;
+      const low = takeClassItem();
+      const dash = pattern[index] === "-" && pattern[index + 1] !== undefined;
+      if (!dash || pattern[index + 1] === "]") {
+        source += low.source;
+        continue;
+      }
+      if (low.code === null) {
+        // `[\w-a]` is `\w`, a literal dash and `a` in RE2; under
+        // the `u` flag JavaScript reads it as a range and refuses.
+        source += low.source + escapeCodePoint(0x2d);
+        index += 1;
+        continue;
+      }
+      index += 1;
+      const high = takeClassItem();
+      if (high.code === null || high.code < low.code) {
+        refusePattern(pattern, "invalid character class range", "invalid");
+      }
+      source += `${low.source}-${high.source}`;
+    }
+    if (index >= pattern.length) {
+      refusePattern(pattern, "missing closing ]", "invalid");
+    }
+    source += "]";
+    index += 1;
+    flipGreediness();
+  };
+
+  const takeGroup = () => {
+    depth += 1;
+    if (!pattern.startsWith("(?", index)) {
+      source += "(";
+      index += 1;
+      return;
+    }
+    if (pattern.startsWith("(?:", index)) {
+      source += "(?:";
+      index += 3;
+      return;
+    }
+    if (
+      pattern.startsWith("(?=", index) ||
+      pattern.startsWith("(?!", index) ||
+      pattern.startsWith("(?<=", index) ||
+      pattern.startsWith("(?<!", index) ||
+      pattern.startsWith("(?P=", index)
+    ) {
+      // Valid JavaScript, invalid RE2. Refusing is what upstream
+      // answers, and is the whole point of the granting direction.
+      refusePattern(pattern, "invalid or unsupported Perl syntax", "invalid");
+    }
+    const named = pattern.startsWith("(?P<", index)
+      ? index + 4
+      : pattern.startsWith("(?<", index)
+        ? index + 3
+        : null;
+    if (named !== null) {
+      const close = pattern.indexOf(">", named);
+      if (close === -1) {
+        refusePattern(pattern, "invalid named capture", "invalid");
+      }
+      // RE2 allows one name twice; JavaScript refuses. Nothing
+      // here ever reads a capture back, so the later one is
+      // renamed rather than refused (issue 384).
+      let name = pattern.slice(named, close);
+      while (groupNames.has(name)) name += "_";
+      groupNames.add(name);
+      source += `(?<${name}>`;
+      index = close + 1;
+      return;
+    }
+    if (FLAG_GROUP.test(pattern.slice(index))) {
+      // RE2 accepts `(?i:…)`, a bare `(?i)` applying to the rest of
+      // its enclosing group, and `(?-i)` removing a flag.
+      // JavaScript has none of them portably: modifier groups
+      // reached V8 only in 12.5, so translating one would answer on
+      // Node 24 and refuse on Node 22, and a bare group scopes to
+      // the whole pattern. Refusing is loud and runtime-independent
+      // — and, because RE2 accepts it, it must not refuse the
+      // *write*.
+      refusePattern(pattern, "unsupported inline group", "untranslatable");
+    }
+    // Anything else spelled `(?…` is Perl syntax RE2 refuses too.
+    refusePattern(pattern, "invalid or unsupported Perl syntax", "invalid");
+  };
+
+  const takeRepetition = (): boolean => {
+    const repetition = REPETITION.exec(pattern.slice(index));
+    if (!repetition) return false;
+    const low = Number.parseInt(repetition[1] ?? "", 10);
+    const highText = repetition[2];
+    const high =
+      highText === undefined || highText === ""
+        ? null
+        : Number.parseInt(highText, 10);
+    if (
+      low > MAX_REPEAT ||
+      (high !== null && (high > MAX_REPEAT || high < low))
+    ) {
+      refusePattern(pattern, "invalid repeat count", "invalid");
+    }
+    // Go reads `{m,}` as max = -1 and falls back on min; a max of
+    // zero makes the whole subtree unreachable, and `repeatIsValid`
+    // returns before it looks at one.
+    const repeats = high === null ? low : high;
+    const need = repeats === 0 ? 0 : Math.max(repeats, repeats * atomNeed);
+    if ((low >= 2 || (high !== null && high >= 2)) && need > MAX_REPEAT) {
+      refusePattern(pattern, "invalid repeat count", "invalid");
+    }
+    atomNeed = need;
+    source += repetition[0];
+    index += repetition[0].length;
+    flipGreediness();
+    return true;
+  };
+
+  while (index < pattern.length) {
+    const char = pattern[index];
+    if (char === "\\") {
+      startAtom();
+      source += takeEscape(false).source;
+      flipGreediness();
+      continue;
+    }
+    if (char === "[") {
+      startAtom();
+      takeClass();
+      continue;
+    }
+    if (char === "(") {
+      startAtom();
+      openNeeds.push(groupNeed);
+      groupNeed = 0;
+      takeGroup();
+      continue;
+    }
+    if (char === "*" || char === "+" || char === "?") {
+      // `x*`, `x+` and `x?` are not `OpRepeat`, so `repeatIsValid`
+      // divides nothing for them: the item's need passes through.
+      source += char;
+      index += 1;
+      flipGreediness();
+      continue;
+    }
+    if (char === "{") {
+      if (takeRepetition()) continue;
+      // `{` that opens no repetition is a literal in RE2 and a
+      // syntax error under the `u` flag.
+      startAtom();
+      source += "\\{";
+      index += 1;
+      continue;
+    }
+    if (char === "}" || char === "]") {
+      startAtom();
+      source += `\\${char}`;
+      index += 1;
+      continue;
+    }
+    if (char === ")") {
+      source += char;
+      index += 1;
+      depth -= 1;
+      if (depth < 0) refusePattern(pattern, "unexpected )", "invalid");
+      // The group becomes the item a quantifier applies to, and it
+      // needs whatever the largest thing inside it needed.
+      if (atomNeed > groupNeed) groupNeed = atomNeed;
+      atomNeed = groupNeed;
+      groupNeed = openNeeds.pop() ?? 0;
+      flipGreediness();
+      continue;
+    }
+    // An ordinary character, a `.`, an anchor or an alternation
+    // bar: the same thing in both dialects.
+    startAtom();
+    source += char;
+    index += 1;
+  }
+  if (depth > 0) refusePattern(pattern, "missing closing )", "invalid");
+
+  return { source, flags };
+}
+
+/**
+ * Compiled patterns, keyed by the RE2 source the author wrote.
+ *
+ * Bounded for the same reason `exprCache` is: the pattern usually
+ * arrives in the request context, so nothing about a caller's
+ * lifetime releases it.
+ */
+const regexCache = new Map<string, RegExp>();
+const REGEX_CACHE_MAX_ENTRIES = 1000;
+
+function compileRe2(pattern: string): RegExp {
+  const cached = regexCache.get(pattern);
+  if (cached) {
+    regexCache.delete(pattern);
+    regexCache.set(pattern, cached);
+    return cached;
+  }
+
+  const translated = translateRe2Pattern(pattern);
+  let compiled: RegExp;
+  try {
+    compiled = new RegExp(translated.source, `${translated.flags}u`);
+  } catch (error) {
+    // **There is no retry without the `u` flag.** There used to be
+    // one, for the patterns where `u` is stricter than RE2, and it
+    // was the mechanism behind three separate silent divergences:
+    // a construct the translator did not recognise reached
+    // `new RegExp`, failed under `u`, and recompiled without it —
+    // where Annex B web compatibility reads an unknown escape as
+    // its bare letter and a class range endpoint as a literal.
+    // `translateRe2Pattern` now emits only constructs that compile
+    // under `u`, so arriving here means the translation itself was
+    // not expressible.
+    //
+    // A `RegExp` that will not compile is classed `untranslatable`
+    // and not `invalid`: the two dialects reject overlapping but
+    // different sets and this path cannot tell which side refused,
+    // so guessing `invalid` would refuse writes upstream accepts.
+    throw new Re2PatternError(
+      `error parsing regexp: \`${pattern}\``,
+      "untranslatable",
+      { cause: error },
+    );
+  }
+
+  if (regexCache.size >= REGEX_CACHE_MAX_ENTRIES) {
+    const oldest = regexCache.keys().next();
+    if (!oldest.done) regexCache.delete(oldest.value);
+  }
+  regexCache.set(pattern, compiled);
+  return compiled;
+}

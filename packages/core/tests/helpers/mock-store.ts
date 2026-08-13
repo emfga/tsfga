@@ -1,4 +1,8 @@
-import type { TupleStore } from "../../src/store-interface.ts";
+import {
+  type IdDomain,
+  OPAQUE_IDS,
+  type TupleStore,
+} from "../../src/store-interface.ts";
 import { directSubjectRef, refsAdmit } from "../../src/tuple-validation.ts";
 import type {
   AddTupleRequest,
@@ -16,6 +20,13 @@ import type {
  * Stores tuples, relation configs, and condition definitions in arrays.
  */
 export class MockTupleStore implements TupleStore {
+  /**
+   * Opaque, and overridable per test. The mock keeps its tuples in
+   * an array, so it can hold any string an OpenFGA id can be — a
+   * test about a *narrow* domain assigns its own.
+   */
+  idDomain: IdDomain = OPAQUE_IDS;
+
   tuples: Tuple[] = [];
   relationConfigs: RelationConfig[] = [];
   conditionDefinitions: ConditionDefinition[] = [];
@@ -126,9 +137,14 @@ export class MockTupleStore implements TupleStore {
       return tuple !== null && admits(refs, tuple) ? tuple : null;
     };
 
+    // The wildcard slot is a list. This store keeps one row per
+    // natural key, so it holds 0 or 1 — the list is there because
+    // the contextual overlay concatenates onto it.
+    const wildcardRow = probe(query.wildcardRefs, "*");
+
     return {
       direct: probe(query.directRefs, query.subjectId),
-      wildcard: probe(query.wildcardRefs, "*"),
+      wildcard: wildcardRow === null ? [] : [wildcardRow],
       usersets: onRelation.filter(
         (t) =>
           t.subjectRelation !== null &&
@@ -171,7 +187,24 @@ export class MockTupleStore implements TupleStore {
     return this.conditionDefinitions.find((c) => c.name === name) ?? null;
   }
 
-  async insertTuple(tuple: AddTupleRequest): Promise<void> {
+  /**
+   * A type is defined when a config names it as its object type or
+   * when any config's `directlyAssignable` admits it — the second
+   * half being what makes a relationless `user` a defined type.
+   * Tuples say nothing: a row can outlive the config that admitted
+   * it, and a store full of rows for a type the model dropped must
+   * not report that type as defined.
+   */
+  async hasTypeDefinition(type: string): Promise<boolean> {
+    this.tally("hasTypeDefinition", type);
+    return this.relationConfigs.some(
+      (c) =>
+        c.objectType === type ||
+        c.directlyAssignable.some((r) => r.type === type),
+    );
+  }
+
+  async insertTuple(tuple: AddTupleRequest): Promise<boolean> {
     this.tally("insertTuple");
     const idx = this.tuples.findIndex(
       (t) =>
@@ -192,11 +225,13 @@ export class MockTupleStore implements TupleStore {
       conditionName: tuple.conditionName ?? null,
       conditionContext: tuple.conditionContext ?? null,
     };
-    if (idx >= 0) {
-      this.tuples[idx] = newTuple;
-    } else {
-      this.tuples.push(newTuple);
-    }
+    // The natural key excludes the condition, so an existing row is
+    // reported rather than replaced — the store never edits a live
+    // grant, and `addTuple` turns the `false` into a
+    // `DuplicateTupleError`.
+    if (idx >= 0) return false;
+    this.tuples.push(newTuple);
+    return true;
   }
 
   async deleteTuple(tuple: RemoveTupleRequest): Promise<boolean> {

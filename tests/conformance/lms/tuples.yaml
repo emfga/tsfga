@@ -1,0 +1,92 @@
+# The teaching group, and the course it staffs
+- user: user_d4l:tina
+  relation: member
+  object: group_d4l:g_ta
+- user: user_d4l:prof
+  relation: instructor
+  object: course_d4l:c1
+- user: group_d4l:g_ta#member
+  relation: ta
+  object: course_d4l:c1
+- user: user_d4l:sam
+  relation: student
+  object: course_d4l:c1
+- user: user_d4l:sue
+  relation: student
+  object: course_d4l:c1
+- user: user_d4l:sue
+  relation: withdrawn
+  object: course_d4l:c1
+
+# Two sections. sec2 is closed to everybody.
+- user: course_d4l:c1
+  relation: course
+  object: section_d4l:sec1
+- user: user_d4l:zoe
+  relation: student
+  object: section_d4l:sec1
+  condition:
+    name: enrollment_code_d4l
+- user: course_d4l:c1
+  relation: course
+  object: section_d4l:sec2
+- user: user_d4l:*
+  relation: blocked
+  object: section_d4l:sec2
+
+# a1 is published at a release time; a2 never publishes, and tina
+# has a conflict of interest on it.
+- user: section_d4l:sec1
+  relation: section
+  object: assignment_d4l:a1
+- user: user_d4l:*
+  relation: published
+  object: assignment_d4l:a1
+  condition:
+    name: after_release_d4l
+    context:
+      release_at: "2026-03-01T00:00:00Z"
+- user: section_d4l:sec1
+  relation: section
+  object: assignment_d4l:a2
+- user: user_d4l:tina
+  relation: conflicted
+  object: assignment_d4l:a2
+
+# Two submissions that peer-review each other — a cycle by
+# construction — and a third that is muted for everybody.
+- user: assignment_d4l:a1
+  relation: assignment
+  object: submission_d4l:s1
+- user: user_d4l:sam
+  relation: author
+  object: submission_d4l:s1
+- user: user_d4l:sue
+  relation: peer_reviewer
+  object: submission_d4l:s1
+  condition:
+    name: review_window_d4l
+    context:
+      opens_at: "2026-03-05T00:00:00Z"
+      closes_at: "2026-03-10T00:00:00Z"
+- user: submission_d4l:s2
+  relation: peer_of
+  object: submission_d4l:s1
+- user: assignment_d4l:a1
+  relation: assignment
+  object: submission_d4l:s2
+- user: user_d4l:zoe
+  relation: author
+  object: submission_d4l:s2
+- user: submission_d4l:s1
+  relation: peer_of
+  object: submission_d4l:s2
+- user: assignment_d4l:a2
+  relation: assignment
+  object: submission_d4l:s3
+- user: user_d4l:sam
+  relation: author
+  object: submission_d4l:s3
+- user: user_d4l:*
+  relation: muted
+  object: submission_d4l:s3

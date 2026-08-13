@@ -289,7 +289,7 @@ function instrument(store: MockTupleStore): MockTupleStore {
   store.findCheckTuples = async (query) => {
     const reply = await read(query);
     coverage.admittedUserset += reply.usersets.length;
-    for (const row of [reply.direct, reply.wildcard, ...reply.usersets]) {
+    for (const row of [reply.direct, ...reply.wildcard, ...reply.usersets]) {
       if (row !== null && row.conditionName !== null) {
         coverage.admittedConditioned++;
       }

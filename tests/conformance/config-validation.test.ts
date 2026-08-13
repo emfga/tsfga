@@ -163,6 +163,28 @@ function conditionModel(
   };
 }
 
+/** One type carrying one directly assignable relation, named. */
+function nameModel(
+  objectType: string,
+  relation: string,
+): WriteAuthorizationModelRequest {
+  return {
+    schema_version: "1.1",
+    type_definitions: [
+      { type: "user", relations: {}, metadata: { relations: {} } },
+      {
+        type: objectType,
+        relations: { [relation]: { this: {} } },
+        metadata: {
+          relations: {
+            [relation]: { directly_related_user_types: [{ type: "user" }] },
+          },
+        },
+      },
+    ],
+  };
+}
+
 function config(overrides: Partial<RelationConfig>): RelationConfig {
   return {
     objectType: "doc",
@@ -230,7 +252,11 @@ describe("Relation Config Validation Conformance", () => {
       await expectConfigConformance(
         intersectionModel(1),
         [
-          config({ objectType: "one", relation: "a" }),
+          config({
+            objectType: "one",
+            relation: "a",
+            directlyAssignable: [{ type: "user" }],
+          }),
           config({
             objectType: "one",
             intersection: [{ type: "computedUserset", relation: "a" }],
@@ -244,7 +270,11 @@ describe("Relation Config Validation Conformance", () => {
       await expectConfigConformance(
         intersectionModel(2),
         [
-          config({ objectType: "two", relation: "a" }),
+          config({
+            objectType: "two",
+            relation: "a",
+            directlyAssignable: [{ type: "user" }],
+          }),
           config({
             objectType: "two",
             intersection: [
@@ -508,6 +538,81 @@ describe("Relation Config Validation Conformance", () => {
         },
         { openfga: true, tsfga: false },
       );
+    });
+  });
+
+  /**
+   * The exact boundaries of the name rule.
+   *
+   * `relation-names.test.ts` covers the defects themselves, comfortably
+   * past either bound (60 and 301). What it cannot show is where
+   * the bound *is*, or what the bound counts, and both are easy to
+   * get wrong in a way no failing test would catch:
+   *
+   * - the patterns are `^[^:#@\s]{1,254}$` on a type name and
+   *   `^[^:#@\s]{1,50}$` on a relation name, bisected against the
+   *   container rather than read off `encoded_errors_test.go`;
+   * - a Go quantifier counts **runes**, so neither the byte length
+   *   nor JavaScript's `String.length` is the measure;
+   * - `\s` is Go's five characters, so a vertical tab is a name
+   *   character, and so is every control character outside that
+   *   set. The tuple write path's control-character rule must
+   *   therefore *not* be reused here — it would refuse names
+   *   upstream stores.
+   */
+  describe("where the name bounds are, and what they count", () => {
+    async function expectName(
+      objectType: string,
+      relation: string,
+      expected: "accepted" | "refused",
+    ): Promise<void> {
+      await expectConfigConformance(
+        nameModel(objectType, relation),
+        [
+          config({
+            objectType,
+            relation,
+            directlyAssignable: [{ type: "user" }],
+          }),
+        ],
+        expected,
+      );
+    }
+
+    test("a type name of 254 characters is accepted by both", async () => {
+      await expectName("o".repeat(254), "viewer", "accepted");
+    });
+
+    test("a type name of 255 characters is refused by both", async () => {
+      await expectName("o".repeat(255), "viewer", "refused");
+    });
+
+    test("a relation name of 50 characters is accepted", async () => {
+      await expectName("doc_len50", "v".repeat(50), "accepted");
+    });
+
+    test("a relation name of 51 characters is refused by both", async () => {
+      await expectName("doc_len51", "v".repeat(51), "refused");
+    });
+
+    test("the bound counts code points, not UTF-16 units", async () => {
+      // 254 astral code points are 508 units and 1016 bytes.
+      await expectName("\u{1f600}".repeat(254), "viewer", "accepted");
+      await expectName("doc_astral", "\u{1f600}".repeat(51), "refused");
+    });
+
+    test("a vertical tab is a name character in both", async () => {
+      await expectName("doc\u000Bvt", "vie\u000Bwer", "accepted");
+    });
+
+    test("a control character outside Go's \\s is accepted", async () => {
+      await expectName("doc\u0001c", "vie\u0001wer", "accepted");
+    });
+
+    test("the rest of Go's \\s is refused by both", async () => {
+      await expectName("doc\ttab", "viewer", "refused");
+      await expectName("doc\rcr", "viewer", "refused");
+      await expectName("doc_ff", "vie\fwer", "refused");
     });
   });
 });

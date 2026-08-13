@@ -21,6 +21,7 @@ import {
   fgaWriteModel,
   fgaWriteTuples,
 } from "./helpers/openfga.ts";
+import { ungatedTuple } from "./helpers/ungated.ts";
 
 /**
  * A relation's type restrictions name the userset *relation*, so
@@ -212,7 +213,7 @@ describe("Userset Type Restriction Conformance", () => {
         subjectId: "*",
       },
     ]) {
-      await store.insertTuple(tuple);
+      await store.insertTuple(ungatedTuple(tuple));
     }
 
     storeId = await fgaCreateStore("userset-restrictions-conformance");
