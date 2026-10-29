@@ -1,7 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    ":dependencyDashboardApproval",
     ":disableRateLimiting",
     ":enableVulnerabilityAlerts",
     ":pinAllExceptPeerDependencies",
@@ -9,7 +8,7 @@
     ":renovatePrefix",
     ":timezone(America/Sao_Paulo)",
     "config:best-practices",
-    "schedule:daily",
+    "schedule:earlyMondays",
     "security:openssf-scorecard"
   ],
   "commitMessageAction": "Bump",
@@ -29,17 +28,17 @@
     "commitMessageAction": "Refresh lockfile"
   },
   "vulnerabilityAlerts": {
-    "dependencyDashboardApproval": false,
     "addLabels": ["security"]
   },
   "customManagers": [
     {
-      "description": "Track the packageManager field (bun is not detected natively)",
+      "description": "Track the Bun versions in the CI test matrix, one per supported line, marked `# renovate: bun`",
       "customType": "regex",
-      "managerFilePatterns": ["/(^|/)package\\.json$/"],
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.ya?ml$/"],
       "matchStrings": [
-        "\"packageManager\":\\s*\"(?<depName>[^\"@]+)@(?<currentValue>[^\"+]+)"
+        "bun-version: \"(?<currentValue>\\d+\\.\\d+\\.\\d+)\" # renovate: bun"
       ],
+      "depNameTemplate": "bun",
       "datasourceTemplate": "npm",
       "versioningTemplate": "npm"
     },
@@ -55,6 +54,14 @@
     }
   ],
   "packageRules": [
+    {
+      "description": "Each CI matrix entry stands for one supported Bun line, so it takes patches only. Moving an entry to a newer line would silently drop the older line from CI; a new line is added by hand.",
+      "matchManagers": ["custom.regex"],
+      "matchFileNames": [".github/workflows/ci.yml"],
+      "matchPackageNames": ["bun"],
+      "matchUpdateTypes": ["minor", "major"],
+      "enabled": false
+    },
     {
       "description": "One PR for all GitHub Actions bumps, not one per action per digest",
       "matchManagers": ["github-actions"],
@@ -72,6 +79,13 @@
       "description": "Hold TypeScript 7: tsup's d.ts build is broken on it (rollup-plugin-dts crash in tsup#1405, TS5101 baseUrl in tsup#1388/#1390), and both packages set dts: true. Revisit when TS 7.1 is stable and those are released.",
       "matchPackageNames": ["typescript"],
       "allowedVersions": "<7.0.0"
+    },
+    {
+      "description": "OpenFGA is the conformance oracle, not just a service: write-gate-causes.json, the README and source comments are measured against one tag, and check:write-gate-causes fails while compose.yaml runs another. A bump means re-measuring, not merging.",
+      "matchPackageNames": ["openfga/openfga"],
+      "prBodyNotes": [
+        "Bumping OpenFGA moves the conformance oracle: re-run the suite against it, update the tag and SHA in `packages/core/write-gate-causes.json` and the `measured on vX` claims, and point `.openfga_repo` at the new tag before merging."
+      ]
     }
   ]
 }
