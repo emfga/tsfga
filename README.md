@@ -37,7 +37,7 @@ It communicates with storage through the `TupleStore` interface, which the
   [Node.js release schedule](https://github.com/nodejs/release#release-schedule):
   active and maintenance LTS lines only. Node.js 20 reached end of life
   in April 2026 and is not supported.
-- **Bun** `>= 1.2`
+- **Bun** `>= 1.3`
 - **Deno** `>= 2.6`
 
 Both published packages are **ESM-only** — there is no CommonJS build.
@@ -130,7 +130,7 @@ following methods:
 
 ### Prerequisites
 
-- [Bun](https://bun.sh/) >= 1.3
+- [Bun](https://bun.sh/) >= 1.4
 - [Docker](https://www.docker.com/) (for integration and conformance tests)
 
 ### Commands

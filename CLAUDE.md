@@ -1536,10 +1536,11 @@ once. Adding one is a two-line change; reaching for one without adding
 it is a green local run that is not green.
 
 **`beforeAll` takes no timeout argument.** Bun accepts
-`beforeAll(fn, ms)` from 1.3 and the CI matrix still runs 1.2.23,
-where it is a hard error before any test executes. Set a slow
-package's budget in its `bunfig.toml` `[test] timeout` instead —
-`tests/conformance` already does.
+`beforeAll(fn, ms)` from 1.3, which is now the CI floor, but the
+Node shim maps it to `node:test`'s `before`, whose second argument
+is an options object, not a number. Set a slow package's budget in
+its `bunfig.toml` `[test] timeout` instead — `tests/conformance`
+already does.
 
 ### Workflow Commands
 
