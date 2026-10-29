@@ -179,9 +179,9 @@ like a missing token rather than a missing permission. The
 catch that case with a useful message.
 
 Trusted Publishing needs npm >= 11.5.1. No Node 22 release
-ships one — 22.23.2 still bundles npm 10.9.8, which has no
-OIDC support at all — so the job pins Node 24.19.0 and uses
-its bundled npm 11.17.0 directly. There is no separate npm
+ships one — 22.23.4 still bundles npm 10.9.9, which has no
+OIDC support at all — so the job pins Node 26.13.0 and uses
+its bundled npm 11.20.0 directly. There is no separate npm
 install: `actions/setup-node` ships no npm of its own, so
 pinning Node exactly also pins npm, and the toolchain cannot
 change between a validate run and a publish run. The
