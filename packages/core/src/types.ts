@@ -29,7 +29,7 @@ export interface Tuple {
  * relation admitting only `[user with weekday_only]` refuses a
  * tuple carrying no condition — even when the check context would
  * have satisfied it — and a relation admitting only `[user]`
- * refuses one that carries a condition. Probed against v1.18.2.
+ * refuses one that carries a condition. Probed against v1.22.1.
  *
  * Structured rather than a `"user with weekday_only"` string
  * because the restriction is two-dimensional and every consumer
@@ -226,7 +226,7 @@ export type ConditionParameterType =
  * `viewer` reaches one. It does **not** expand — a check for
  * `team:eng#member` is not a check for each member of the team.
  *
- * Three consequences, all measured against v1.18.2:
+ * Three consequences, all measured against v1.22.1:
  *
  * - `team#member` and `team` are distinct subjects. A relation
  *   admitting `[team#member]` denies the bare `team:eng`, and one

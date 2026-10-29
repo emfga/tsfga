@@ -55,7 +55,7 @@ function objectId(): string {
 
 /**
  * Upstream's framing overhead for `{"s": "<n bytes>"}`: measured
- * against v1.18.2, the protobuf `Struct` is `n + 15` bytes while
+ * against v1.22.1, the protobuf `Struct` is `n + 15` bytes while
  * the JSON is `n + 8`, so ids in `[32754, 32760]` land between the
  * two measures.
  */

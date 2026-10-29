@@ -240,7 +240,7 @@ export const DEFAULT_WRITE_CONTEXT_BYTE_LIMIT = 32 * 1024;
  * It is an API-layer constraint (`openfga.pb.validate.go`,
  * `len(m.GetUser()) > 512`) rather than a `pkg/tuple` rule, so it
  * sits beside the context limit rather than inside the
- * well-formedness predicate. Bisected against the v1.18.2
+ * well-formedness predicate. Bisected against the v1.22.1
  * container: `user_q2:` plus 504 bytes is accepted and plus 505 is
  * refused, and 252 two-byte runes are accepted where 253 are not —
  * so the unit is bytes, not code points.
@@ -387,7 +387,7 @@ const RE2_SPACE: ReadonlySet<string> = new Set([" ", "\t", "\n", "\f", "\r"]);
  * glance. JavaScript's `\s` is the Unicode space property: it also
  * matches a vertical tab, a no-break space, U+2028 and every other
  * space separator, none of which Go matches. Probed against
- * v1.18.2: a vertical tab (U+000B), a no-break space (U+00A0),
+ * v1.22.1: a vertical tab (U+000B), a no-break space (U+00A0),
  * U+2028 and an ideographic space are all **accepted** wherever
  * these patterns run, and so is every control character outside
  * the five. Borrowing JavaScript's class refuses what upstream
@@ -962,7 +962,7 @@ export async function validateTupleWrite(
 
   // Upstream's order, and it is observable: a name that is not
   // defined reports *that*, even when the restriction would not
-  // have admitted it either. Probed against v1.18.2 — a defined
+  // have admitted it either. Probed against v1.22.1 — a defined
   // condition the restriction omits reports "invalid condition for
   // type restriction"; an undefined one reports "undefined
   // condition" whatever the restriction says.
@@ -1126,7 +1126,7 @@ const DELETE_RELATION_MAX_LENGTH = 50;
  * no model validation on a delete at all. An undefined relation,
  * an undefined type, a subject type the relation does not admit —
  * every one of them falls through to "the tuple does not exist",
- * measured on nine probes against v1.18.2 including one across a
+ * measured on nine probes against v1.22.1 including one across a
  * model change that dropped both the relation and the type. That
  * is what makes a bad model change recoverable: the rows written
  * under the old model can still be deleted under the new one.

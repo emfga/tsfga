@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: openfga/openfga
-          ref: 560d5d3dd46b5adda9ecfb29efeb4f4f70c96327
+          ref: 44054f542f64e9b9589dd26a595081b3d2cfd942
           path: .openfga
 
       - run: bun run check:write-gate-causes

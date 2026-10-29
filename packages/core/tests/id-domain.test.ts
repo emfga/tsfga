@@ -48,7 +48,7 @@ describe("CANONICAL_UUID_IDS", () => {
   describe("refuses every spelling a uuid column would fold onto one row", () => {
     // Measured on PG 18: each of these five is accepted by
     // `uuid_in` and compares equal to the canonical spelling.
-    // Measured on OpenFGA v1.18.2: each is a distinct id.
+    // Measured on OpenFGA v1.22.1: each is a distinct id.
     const folded: ReadonlyArray<[string, string]> = [
       ["uppercase", CANONICAL.toUpperCase()],
       ["hyphenless", CANONICAL.replaceAll("-", "")],

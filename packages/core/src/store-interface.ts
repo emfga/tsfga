@@ -48,7 +48,7 @@ export const OPAQUE_IDS: IdDomain = {
  * grammar**, which is many-to-one. Measured on PG 18: the
  * uppercase, hyphenless, braced, braced-hyphenless and odd-hyphen
  * spellings of one value all store as the same row. Measured on
- * OpenFGA v1.18.2: those spellings are *distinct* ids — a grant
+ * OpenFGA v1.22.1: those spellings are *distinct* ids — a grant
  * written with the uppercase spelling answers `true` for uppercase
  * and `false` for lowercase.
  *

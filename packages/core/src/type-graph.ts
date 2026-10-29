@@ -284,7 +284,7 @@ export function createReachability(
     //
     // Recorded before the config is read, and never conditioned on
     // `directlyAssignable`: the identity holds even where the
-    // relation admits no userset at all, measured on v1.18.2 and
+    // relation admits no userset at all, measured on v1.22.1 and
     // recorded beside `checkNode`'s identity block. Without it,
     // every rewrite standing between a userset subject and the
     // relation it names — a computed userset, a union arm, an

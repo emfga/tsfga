@@ -48,7 +48,7 @@ import {
  * The model is upstream's `tests/listobjects/matrix.go` (v1.18.2),
  * `_c1`-suffixed. The tuples and expectations are not upstream's —
  * upstream never asks these — so every expectation was derived
- * from the model and then settled by the running v1.18.2
+ * from the model and then settled by the running v1.22.1
  * container, which `expectConformance` asserts against on every
  * line.
  */

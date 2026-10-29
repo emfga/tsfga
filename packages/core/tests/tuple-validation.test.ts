@@ -274,7 +274,7 @@ describe("addTuple refuses an oversized condition context", () => {
 });
 
 /**
- * The measure itself, calibrated against v1.18.2.
+ * The measure itself, calibrated against v1.22.1.
  *
  * The limit is enforced on the serialised size of the
  * `google.protobuf.Struct` the context becomes on the wire, not on

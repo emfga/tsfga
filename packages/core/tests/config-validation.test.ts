@@ -89,6 +89,38 @@ describe("writeRelationConfig refuses what the model would", () => {
     ).resolves.toBeUndefined();
   });
 
+  describe("a restriction with an empty relation", () => {
+    async function refusal(
+      directlyAssignable: RelationConfig["directlyAssignable"],
+    ): Promise<string> {
+      try {
+        await fga.writeRelationConfig(config({ directlyAssignable }));
+        return "accepted";
+      } catch (error) {
+        if (!(error instanceof InvalidRelationConfigError)) throw error;
+        return `${error.ruleId}: ${error.cause}`;
+      }
+    }
+
+    test("is refused as an empty relation reference", async () => {
+      expect(await refusal([{ type: "user", relation: "" }])).toBe(
+        "CONFIG-RESTRICTION-RELATION-EMPTY: empty relation reference",
+      );
+    });
+
+    test("is judged before the condition it names", async () => {
+      // Upstream's validateTypeRestrictions checks the relation
+      // reference first; `nope` is undefined as well.
+      expect(
+        await refusal([{ type: "user", relation: "", condition: "nope" }]),
+      ).toBe("CONFIG-RESTRICTION-RELATION-EMPTY: empty relation reference");
+    });
+
+    test("the control: an absent relation is a direct restriction", async () => {
+      expect(await refusal([{ type: "user" }])).toBe("accepted");
+    });
+  });
+
   describe("a tupleset relation that admits too much", () => {
     /** The tupleset relation is written first, or there is nothing
      * to read — see the stated gap below. */
@@ -222,7 +254,7 @@ describe("the model's own names are reserved", () => {
 
   test("a condition named 'self' is still stored", async () => {
     // `validateNames` walks type definitions and relation keys and
-    // looks at nothing else. v1.18.2 stores this, measured — so a
+    // looks at nothing else. v1.22.1 stores this, measured — so a
     // pass that "unifies" the two name gates is a regression.
     for (const name of ["self", "this"]) {
       await fga.writeConditionDefinition({
@@ -386,7 +418,7 @@ describe("addTuple refuses a tuple that is implicit", () => {
   /**
    * The asymmetry, and the reason the gate is not in
    * `validateTupleWrite`. Upstream refuses the write and accepts
-   * the same tuple contextually — measured on v1.18.2 with a
+   * the same tuple contextually — measured on v1.22.1 with a
    * control proving the contextual field was honoured — so sharing
    * the gate would refuse a tuple OpenFGA takes.
    */

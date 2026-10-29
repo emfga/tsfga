@@ -643,7 +643,7 @@ interface SubjectRequest {
  *
  * The subject **type** and, when one is given, the subject
  * **relation** are both required to be defined. Probed against
- * v1.18.2: a check for `group:eng#nonexistent` is refused with
+ * v1.22.1: a check for `group:eng#nonexistent` is refused with
  * `relation 'group#nonexistent' not found`, and one naming a type
  * the model does not define is refused with `type 'x' not found`.
  * The type is asked about first, because upstream reports it first
@@ -853,7 +853,7 @@ async function checkNode(
   // `IsSelfDefining` between the cycle guard and `GetRelation`
   // (`internal/graph/check.go:433-437`), so the answer arrives
   // before the relation is looked up and before the type graph is
-  // consulted: measured on v1.18.2, the check is `true` even where
+  // consulted: measured on v1.22.1, the check is `true` even where
   // the relation admits no userset at all and `PathExists` would
   // have pruned it.
   //
@@ -1534,7 +1534,7 @@ async function checkBase(
   //
   // The userset rows are one read upstream, so they share one
   // swallow decision — see `raiseUnlessOneHeld`. The scope is the
-  // rows of this read and no wider: measured on v1.18.2, a broken
+  // rows of this read and no wider: measured on v1.22.1, a broken
   // *direct* row beside a userset row whose condition held is still
   // a refusal, because the direct row is read separately and
   // carries its own decision.
@@ -1783,7 +1783,7 @@ async function checkIntersection(
  * - **its condition.** `define parent: [folder with flag]` means
  *   the link exists only while `flag` holds, so dispatching on the
  *   row without evaluating its condition grants through a link the
- *   model has switched off. Probed against v1.18.2: upstream
+ *   model has switched off. Probed against v1.22.1: upstream
  *   answers `false` when the condition fails.
  * - **the tupleset relation's own type restriction.** The row is
  *   read by relation alone, so nothing else narrows it to the
@@ -1992,7 +1992,7 @@ export function onSubjectRow(error: unknown): boolean {
  * So the predicate is "some condition was satisfied", not "some row
  * was admitted". The looser reading answers `false` for a broken
  * row beside a condition-*false* row, where upstream refuses to
- * answer at all; measured on v1.18.2, both on a tupleset relation
+ * answer at all; measured on v1.22.1, both on a tupleset relation
  * and on a userset scan.
  *
  * Ref: https://github.com/openfga/openfga/blob/560d5d3dd46b5adda9ecfb29efeb4f4f70c96327/pkg/storage/tuple_iterators.go

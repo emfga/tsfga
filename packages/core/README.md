@@ -359,7 +359,7 @@ of `viewer` reaches one. It is not a check for each member of the
 team, and a member holding `viewer` by some other route does not
 make the userset hold it.
 
-Three consequences, each measured against v1.18.2:
+Three consequences, each measured against v1.22.1:
 
 | shape | answer |
 |---|---|
@@ -454,7 +454,7 @@ reserved**.
 **Every refusal is in the refusing direction and none is in the
 granting one.** A refused request is one no grant was computed
 for. The read paths raise rather than answering `false`, which is
-upstream's own shape: measured on v1.18.2, `Check` returns HTTP
+upstream's own shape: measured on v1.22.1, `Check` returns HTTP
 400 for every id it cannot represent and never answers `false`. A
 silent deny is indistinguishable from a real one, and the day an
 identity provider changes its id format a fleet would lose access
@@ -920,6 +920,7 @@ the reason on `.cause`:
 | `malformed condition parameter name` | the same, on every key of `parameters` — a separate loop, so the detail names the offending key |
 | `reserved keyword` | the type's or the relation's name is `self` or `this`; upstream's `validateNames`, which looks at those two names and nothing else — a *condition* named `self` is stored |
 | `intersection has fewer than two operands` | a set operation with one child or none; upstream: "as intersection has less than 2 children" |
+| `empty relation reference` | a type restriction carries `relation: ""`; leave `relation` out for a direct restriction. Upstream refuses this from v1.19.0 |
 | `undefined condition` | a type restriction names a condition the store has not got |
 | `tupleset relation admits a userset` | the relation a tuple-to-userset reads is assignable to `type#relation` |
 | `tupleset relation admits a wildcard` | that relation is assignable to `type:*` |
@@ -1021,14 +1022,14 @@ consumer actually has is the other half: *which refusals does
 OpenFGA make that tsfga does not?*
 
 `packages/core/write-gate-causes.json` answers it. It enumerates
-every refusal OpenFGA v1.18.2 constructs in the seven Go files
+every refusal OpenFGA v1.22.1 constructs in the seven Go files
 carrying its write- and model-write refusal vocabulary, and
 disposes of each one: implemented by a named rule, implemented
 partly with the gap written out, pinned as a divergence with the
 test that pins it, open with the reason it is open, or
 inapplicable with the reason. The enumeration is mechanical, and
 its recall over those files is enforced on every CI run — each of
-the 107 error-construction sites in them is attributed to a cause
+the 113 error-construction sites in them is attributed to a cause
 or listed as an exclusion with a reason, and an unattributed one
 fails the build.
 
@@ -1460,7 +1461,7 @@ is not a subtle disagreement: **a condition using `matches()` is
 refused outright.**
 
 *Measured against `@marcbachmann/cel-js` 8.0.0 and OpenFGA
-v1.18.2. If you have overridden or forked either, this table does
+v1.22.1. If you have overridden or forked either, this table does
 not describe your build.* Every cell is pinned two-sided in the
 conformance suite, so if either engine changes a test says so
 rather than this table quietly going stale. The table names the

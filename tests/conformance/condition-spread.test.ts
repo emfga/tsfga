@@ -55,7 +55,7 @@ import { cfg, ids } from "./matrix-corpus.ts";
  * Both engines see the same rows; only the reads differ, so the
  * three hops are pinned two-sided rather than fixed — see the
  * comment on the first of them for why tsfga keeps its reading.
- * Upstream's side was measured against the v1.18.2 container over
+ * Upstream's side was measured against the v1.22.1 container over
  * five isolated runs and inside the full suite: stable, not the
  * planner coin-flip that the sibling-error rule turns on.
  */

@@ -39,7 +39,7 @@ import {
  * conditioned tupleset row satisfying an intersection operand
  * inside the subtrahend of an exclusion grants rather than denies.
  *
- * Probed against v1.18.2; both relations answer `false` at
+ * Probed against v1.22.1; both relations answer `false` at
  * `on: false` and `true` at `on: true`, while the unconditioned
  * link answers `true` either way.
  */

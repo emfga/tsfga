@@ -244,7 +244,7 @@ describe("a condition error beside its siblings", () => {
     /**
      * The scope of the swallow, and the reason it is a flag over
      * the userset rows rather than over the node. Measured on
-     * v1.18.2: upstream still refuses here.
+     * v1.22.1: upstream still refuses here.
      */
     test("a userset row that held does not rescue a direct row", async () => {
       store.tuples.push(makeTuple({ ...BROKEN }), member("out2", HOLDS));

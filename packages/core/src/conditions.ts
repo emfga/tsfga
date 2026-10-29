@@ -599,7 +599,7 @@ const coerceUint = env.parse("uint(val)");
  *
  * A port of OpenFGA's `internal/condition/types/converters.go`,
  * because a `typeof` check diverges from it on six of the cases
- * probed against v1.18.2:
+ * probed against v1.22.1:
  *
  * | value | declared | verdict |
  * |---|---|---|
@@ -1250,7 +1250,7 @@ function coerceValue(
  *
  * Only the keys actually present are read. A context key the
  * condition does not declare is *not* an error here — probed
- * against v1.18.2, a check carrying a stray key is accepted. That
+ * against v1.22.1, a check carrying a stray key is accepted. That
  * refusal belongs to the write path.
  *
  * Shared with `validateTupleWrite` so a tuple cannot be writable
@@ -1281,8 +1281,9 @@ export function coerceContext(
 
 /**
  * cel-go's cost constants, transcribed from `common/cost.go` at the
- * version OpenFGA v1.18.2 builds against (cel-go v0.29.2; read at
- * v0.26.1, where the file is unchanged).
+ * version OpenFGA v1.22.1 builds against (cel-go v0.31.0; read at
+ * v0.26.1, and unchanged through v0.29.2, which v1.18.2 used, to
+ * v0.31.0).
  *
  * They are spelled out here rather than folded into the call sites
  * because the whole model is a transcription: a reader checking it

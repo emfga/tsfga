@@ -43,7 +43,7 @@ import {
  * expansion: `us_group_a5:eng#member` holds `viewer` iff a row
  * grants that exact userset or a rewrite of `viewer` reaches one.
  * The tests below fix the three edges of that, each measured
- * against the v1.18.2 container:
+ * against the v1.22.1 container:
  *
  * - `team#member` and `team` are different subjects, in both
  *   directions;

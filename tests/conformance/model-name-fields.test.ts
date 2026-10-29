@@ -41,7 +41,7 @@ import {
  * - `Condition.name`, and
  * - each key of `Condition.parameters`.
  *
- * Measured on v1.18.2, `WriteAuthorizationModel` answers
+ * Measured on v1.22.1, `WriteAuthorizationModel` answers
  * `invalid Condition.Name: value does not match regex pattern
  * "^[^:#@\s]{1,50}$"` for the first and
  * `invalid Condition.Parameters[…]` for the second, which is how

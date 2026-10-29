@@ -62,7 +62,7 @@ import {
  * the two comparisons at the bottom drive the SDK directly. Their
  * upstream counterparts are `ListUsers` and `BatchCheck`.
  *
- * Measured against v1.18.2. The character classes are the two
+ * Measured against v1.22.1. The character classes are the two
  * upstream gates and nothing wider: a non-breaking space is an
  * ordinary character to both engines, which the controls assert.
  */

@@ -38,7 +38,7 @@ import { ungatedTuple } from "./helpers/ungated.ts";
  * backwards grants where OpenFGA denies.
  *
  * Every row here mirrors a probe run against the container at
- * v1.18.2; `expectConformance` re-runs both sides on every
+ * v1.22.1; `expectConformance` re-runs both sides on every
  * execution, so the table is checked rather than quoted.
  *
  * **Rows are pushed straight to the store**, as in

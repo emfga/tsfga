@@ -37,7 +37,7 @@ import {
  * ignores it. The read gate makes that safe; it does not make it
  * discoverable.
  *
- * Each cause below was probed against v1.18.2, including the two
+ * Each cause below was probed against v1.22.1, including the two
  * ordering rules that are otherwise invisible:
  *
  * - an **undefined** condition reports that, even when the

@@ -78,7 +78,7 @@ const DOC_COMPREHENSION = "00000000-0000-4000-d540-000000000112";
  * One relation and one condition per comprehension macro, with the
  * N at which OpenFGA first refuses the check on cost.
  *
- * The boundaries are measured against `openfga/openfga:v1.18.2`,
+ * The boundaries are measured against `openfga/openfga:v1.22.1`,
  * not derived: `answer` is what both engines say at `N - 1`, and
  * `boundary` is the first N at which upstream cancels the
  * evaluation. tsfga's own boundary lands on the same N for all

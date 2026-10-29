@@ -327,7 +327,7 @@ export function createTsfga(
     async addTuple(request: AddTupleRequest): Promise<void> {
       // Refused here rather than in the shared validation, which
       // contextual tuples also run: upstream refuses this write and
-      // accepts the same tuple contextually. Measured on v1.18.2,
+      // accepts the same tuple contextually. Measured on v1.22.1,
       // with a control proving the contextual field was honoured.
       if (isSelfDefining(request)) {
         throw new ImplicitTupleError(
@@ -405,8 +405,8 @@ export function createTsfga(
       // `ListObjectsQuery.Execute` never does — it validates the
       // contextual tuples, the target relation and the user, and
       // passes `req.GetContext()` through untouched
-      // (`pkg/server/commands/list_objects.go:506-556`). At
-      // v1.18.2 `ValidateStruct` appears in that one file and
+      // (`pkg/server/commands/list_objects.go:509-559`). At
+      // v1.22.1 `ValidateStruct` appears in that one file and
       // nowhere else in `pkg/server/commands`.
       //
       // The check-path gate was once applied here too, which refused
@@ -450,7 +450,7 @@ export function createTsfga(
       // object is validated through the protobuf pattern only:
       // `^[^\s]{1,256}$` refuses an empty id and one carrying
       // whitespace, and nothing runs `unicode.IsControl` over it.
-      // Measured at v1.18.2: `doc:<id>` is a question
+      // Measured at v1.22.1: `doc:<id>` is a question
       // `ListUsers` answers, with no users, where the same id on a
       // check is a 400. So this must not borrow the check gate —
       // the wider rule would refuse a request upstream answers.

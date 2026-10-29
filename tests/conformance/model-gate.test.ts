@@ -285,6 +285,52 @@ describe("Model-shape write gate conformance", () => {
     ).toBe("refused");
   });
 
+  /**
+   * `relation: ""` reaches upstream as a `RelationReference` whose
+   * oneof is set to an empty relation. v1.19.0 started refusing it
+   * by name; v1.18.2 panicked in the graph builder and answered
+   * HTTP 500, which `fgaWriteModelOutcome` rethrows rather than
+   * reading as a refusal. The control beside it is the same model
+   * with the key left out.
+   */
+  test("a type restriction with an empty relation is refused", async () => {
+    const type = "doc_a7g7";
+    const model = (restriction: {
+      type: string;
+      relation?: string;
+    }): WriteAuthorizationModelRequest => ({
+      schema_version: "1.1",
+      type_definitions: [
+        USER,
+        {
+          type,
+          relations: { viewer: { this: {} } },
+          metadata: {
+            relations: {
+              viewer: { directly_related_user_types: [restriction] },
+            },
+          },
+        },
+      ],
+    });
+    expect(await openfga(model({ type: "user_a7g", relation: "" }))).toBe(
+      "refused",
+    );
+    expect(
+      await tsfga([
+        config(type, "viewer", {
+          directlyAssignable: [{ type: "user_a7g", relation: "" }],
+        }),
+      ]),
+    ).toBe("refused");
+    expect(await openfga(model({ type: "user_a7g" }))).toBe("accepted");
+    expect(
+      await tsfga([
+        config(type, "viewer", { directlyAssignable: [{ type: "user_a7g" }] }),
+      ]),
+    ).toBe("accepted");
+  });
+
   test("an assignable relation with no type restrictions is refused", async () => {
     const type = "doc_a7g3";
     expect(

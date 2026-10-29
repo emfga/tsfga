@@ -1,7 +1,7 @@
 {
   "openfga": {
-    "tag": "v1.18.2",
-    "sha": "560d5d3dd46b5adda9ecfb29efeb4f4f70c96327"
+    "tag": "v1.22.1",
+    "sha": "44054f542f64e9b9589dd26a595081b3d2cfd942"
   },
   "scope": [
     "Every refusal OpenFGA constructs in `sources` is disposed below.",
@@ -48,13 +48,13 @@
     }
   ],
   "measured": {
-    "sites": 107,
-    "causes": 98,
+    "sites": 113,
+    "causes": 101,
     "residue": 0,
     "dispositions": {
-      "n/a": 51,
+      "n/a": 52,
       "pinned": 4,
-      "claimed": 40,
+      "claimed": 42,
       "claimed-partial": 2,
       "open": 1
     }
@@ -284,10 +284,23 @@
     },
     {
       "package": "typesystem",
+      "key": "ErrEmptyRelationReference",
+      "rule": "R1",
+      "sites": [
+        "pkg/typesystem/error.go:57"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-RESTRICTION-RELATION-EMPTY"
+      ],
+      "test": "tests/conformance/model-gate.test.ts:a type restriction with an empty relation is refused"
+    },
+    {
+      "package": "typesystem",
       "key": "InvalidTypeError",
       "rule": "R4",
       "sites": [
-        "pkg/typesystem/error.go:63"
+        "pkg/typesystem/error.go:68"
       ],
       "disposition": "n/a",
       "reason": "an envelope: `the definition of type '%s' is invalid`, wrapped around whichever relation rule fired. Each of those is disposed on its own row."
@@ -297,7 +310,7 @@
       "key": "InvalidRelationError",
       "rule": "R4",
       "sites": [
-        "pkg/typesystem/error.go:80"
+        "pkg/typesystem/error.go:85"
       ],
       "disposition": "n/a",
       "reason": "an envelope, as `InvalidTypeError`."
@@ -307,7 +320,7 @@
       "key": "ObjectTypeUndefinedError",
       "rule": "R4",
       "sites": [
-        "pkg/typesystem/error.go:96"
+        "pkg/typesystem/error.go:101"
       ],
       "disposition": "n/a",
       "reason": "decided on the check path rather than the write gate; see `ErrObjectTypeUndefined`."
@@ -317,8 +330,8 @@
       "key": "RelationUndefinedError",
       "rule": "R4",
       "sites": [
-        "pkg/typesystem/error.go:114",
-        "pkg/typesystem/error.go:117"
+        "pkg/typesystem/error.go:119",
+        "pkg/typesystem/error.go:122"
       ],
       "disposition": "pinned",
       "test": "tests/conformance/model-gate.test.ts:the gap (155): a rewrite names an undefined relation"
@@ -328,7 +341,7 @@
       "key": "RelationConditionError",
       "rule": "R4",
       "sites": [
-        "pkg/typesystem/error.go:134"
+        "pkg/typesystem/error.go:139"
       ],
       "disposition": "claimed",
       "rules": [
@@ -341,7 +354,7 @@
       "key": "AssignableRelationError()",
       "rule": "R2",
       "sites": [
-        "pkg/typesystem/error.go:144"
+        "pkg/typesystem/error.go:149"
       ],
       "disposition": "claimed",
       "rules": [
@@ -354,7 +367,7 @@
       "key": "NonAssignableRelationError()",
       "rule": "R2",
       "sites": [
-        "pkg/typesystem/error.go:149"
+        "pkg/typesystem/error.go:154"
       ],
       "disposition": "claimed",
       "rules": [
@@ -367,7 +380,7 @@
       "key": "InvalidRelationTypeError()",
       "rule": "R2",
       "sites": [
-        "pkg/typesystem/error.go:159"
+        "pkg/typesystem/error.go:164"
       ],
       "disposition": "claimed",
       "rules": [
@@ -378,10 +391,23 @@
     },
     {
       "package": "typesystem",
+      "key": "EmptyRelationReferenceError()",
+      "rule": "R2",
+      "sites": [
+        "pkg/typesystem/error.go:171"
+      ],
+      "disposition": "claimed",
+      "rules": [
+        "CONFIG-RESTRICTION-RELATION-EMPTY"
+      ],
+      "test": "tests/conformance/model-gate.test.ts:a type restriction with an empty relation is refused"
+    },
+    {
+      "package": "typesystem",
       "key": "ResolveComputedRelation()",
       "rule": "R2",
       "sites": [
-        "pkg/typesystem/typesystem.go:311"
+        "pkg/typesystem/typesystem.go:354"
       ],
       "disposition": "n/a",
       "reason": "a typesystem traversal helper reached at resolution time, not a write refusal; its user-visible cause is `ErrRelationUndefined`, disposed on its own row."
@@ -391,7 +417,7 @@
       "key": "invalid type restriction '%s#%s' specified on tupleset relation '%s#%s': %w",
       "rule": "R3",
       "sites": [
-        "pkg/typesystem/typesystem.go:865"
+        "pkg/typesystem/typesystem.go:908"
       ],
       "disposition": "claimed",
       "rules": [
@@ -404,10 +430,10 @@
       "key": "undefined type definition for '%s#%s'",
       "rule": "R3",
       "sites": [
-        "pkg/typesystem/typesystem.go:958",
-        "pkg/typesystem/typesystem.go:975",
-        "pkg/typesystem/typesystem.go:998",
-        "pkg/typesystem/typesystem.go:1017"
+        "pkg/typesystem/typesystem.go:1001",
+        "pkg/typesystem/typesystem.go:1018",
+        "pkg/typesystem/typesystem.go:1041",
+        "pkg/typesystem/typesystem.go:1060"
       ],
       "disposition": "pinned",
       "test": "tests/conformance/model-gate.test.ts:the gap (154): no tupleset type defines it"
@@ -417,7 +443,7 @@
       "key": "%w: '%s#%s' as union has less than 2 children",
       "rule": "R3",
       "sites": [
-        "pkg/typesystem/typesystem.go:1049"
+        "pkg/typesystem/typesystem.go:1092"
       ],
       "disposition": "n/a",
       "reason": "not expressible. `RelationConfig` has no union node: `impliedBy` is a list of arms beside the relation's own direct assignment, so a union of fewer than two things is a plain rewrite rather than a malformed union."
@@ -427,7 +453,7 @@
       "key": "%w: '%s#%s' as intersection has less than 2 children",
       "rule": "R3",
       "sites": [
-        "pkg/typesystem/typesystem.go:1066"
+        "pkg/typesystem/typesystem.go:1109"
       ],
       "disposition": "claimed",
       "rules": [
@@ -440,7 +466,7 @@
       "key": "hasEntrypoints unknown rewrite %s for '%s#%s'",
       "rule": "R3",
       "sites": [
-        "pkg/typesystem/typesystem.go:1110"
+        "pkg/typesystem/typesystem.go:1153"
       ],
       "disposition": "n/a",
       "reason": "an exhaustiveness error over the protobuf rewrite kinds. No model the API accepts can reach it, and `RelationConfig` has no unknown arm to carry."
@@ -450,7 +476,7 @@
       "key": "the type name of a type definition cannot be an empty string",
       "rule": "R3",
       "sites": [
-        "pkg/typesystem/typesystem.go:1256"
+        "pkg/typesystem/typesystem.go:1305"
       ],
       "disposition": "claimed",
       "rules": [
@@ -463,7 +489,7 @@
       "key": "type '%s' defines a relation with an empty string for a name",
       "rule": "R3",
       "sites": [
-        "pkg/typesystem/typesystem.go:1265"
+        "pkg/typesystem/typesystem.go:1314"
       ],
       "disposition": "claimed",
       "rules": [
@@ -476,7 +502,7 @@
       "key": "the '%s#%s' relation is referenced in at least one tupleset and thus must be a direct relation",
       "rule": "R3",
       "sites": [
-        "pkg/typesystem/typesystem.go:1303"
+        "pkg/typesystem/typesystem.go:1352"
       ],
       "disposition": "claimed",
       "rules": [
@@ -489,7 +515,7 @@
       "key": "%w: %s does not appear as a relation in any of the directly related user types %s",
       "rule": "R3",
       "sites": [
-        "pkg/typesystem/typesystem.go:1316"
+        "pkg/typesystem/typesystem.go:1365"
       ],
       "disposition": "pinned",
       "test": "tests/conformance/model-gate.test.ts:the gap (154): no tupleset type defines it"
@@ -499,7 +525,7 @@
       "key": "condition key '%s' does not match condition name '%s'",
       "rule": "R3",
       "sites": [
-        "pkg/typesystem/typesystem.go:1417"
+        "pkg/typesystem/typesystem.go:1479"
       ],
       "disposition": "n/a",
       "reason": "not expressible. A `ConditionDefinition` carries its name in one field; there is no separate map key that could disagree with it."
@@ -509,8 +535,8 @@
       "key": "GetEdgesFromNode()",
       "rule": "R2",
       "sites": [
-        "pkg/typesystem/typesystem.go:1536",
-        "pkg/typesystem/typesystem.go:1549"
+        "pkg/typesystem/typesystem.go:1598",
+        "pkg/typesystem/typesystem.go:1611"
       ],
       "disposition": "n/a",
       "reason": "the weighted-graph API, read by the recursive-relation resolvers tsfga does not implement. Not a write refusal."
@@ -520,7 +546,7 @@
       "key": "GetConnectedEdges()",
       "rule": "R2",
       "sites": [
-        "pkg/typesystem/typesystem.go:1573"
+        "pkg/typesystem/typesystem.go:1635"
       ],
       "disposition": "n/a",
       "reason": "the weighted-graph API, as above."
@@ -530,7 +556,7 @@
       "key": "WalkUsersetRewrite()",
       "rule": "R2",
       "sites": [
-        "pkg/typesystem/typesystem.go:1654"
+        "pkg/typesystem/typesystem.go:1716"
       ],
       "disposition": "n/a",
       "reason": "a rewrite-tree walker; its error is an exhaustiveness case over protobuf rewrite kinds, not a user-visible refusal."
@@ -540,7 +566,7 @@
       "key": "unexpected rewrite encountered with tupleset relation '%s#%s'",
       "rule": "R3",
       "sites": [
-        "internal/validation/validation.go:106"
+        "internal/validation/validation.go:118"
       ],
       "disposition": "claimed",
       "rules": [
@@ -553,7 +579,7 @@
       "key": "unexpected wildcard relationship with tupleset relation '%s#%s'",
       "rule": "R3",
       "sites": [
-        "internal/validation/validation.go:115"
+        "internal/validation/validation.go:127"
       ],
       "disposition": "claimed",
       "rules": [
@@ -566,7 +592,7 @@
       "key": "unexpected user '%s' with tupleset relation '%s#%s'",
       "rule": "R3",
       "sites": [
-        "internal/validation/validation.go:120"
+        "internal/validation/validation.go:132"
       ],
       "disposition": "claimed",
       "rules": [
@@ -579,7 +605,7 @@
       "key": "type '%s' does not exist in the authorization model",
       "rule": "R3",
       "sites": [
-        "internal/validation/validation.go:137"
+        "internal/validation/validation.go:149"
       ],
       "disposition": "claimed",
       "rules": [
@@ -592,7 +618,7 @@
       "key": "'%s#%s' is not an allowed type restriction for '%s#%s'",
       "rule": "R3",
       "sites": [
-        "internal/validation/validation.go:154"
+        "internal/validation/validation.go:166"
       ],
       "disposition": "claimed",
       "rules": [
@@ -605,7 +631,7 @@
       "key": "the typed wildcard '%s' is not an allowed type restriction for '%s#%s'",
       "rule": "R3",
       "sites": [
-        "internal/validation/validation.go:165"
+        "internal/validation/validation.go:177"
       ],
       "disposition": "claimed",
       "rules": [
@@ -618,7 +644,7 @@
       "key": "type '%s' is not an allowed type restriction for '%s#%s'",
       "rule": "R3",
       "sites": [
-        "internal/validation/validation.go:175"
+        "internal/validation/validation.go:187"
       ],
       "disposition": "claimed",
       "rules": [
@@ -631,7 +657,8 @@
       "key": "condition is missing",
       "rule": "R3",
       "sites": [
-        "internal/validation/validation.go:229"
+        "internal/validation/validation.go:241",
+        "internal/validation/validation.go:322"
       ],
       "disposition": "claimed",
       "rules": [
@@ -644,7 +671,8 @@
       "key": "condition name contains forbidden characters",
       "rule": "R3",
       "sites": [
-        "internal/validation/validation.go:235"
+        "internal/validation/validation.go:247",
+        "internal/validation/validation.go:344"
       ],
       "disposition": "claimed",
       "rules": [
@@ -657,7 +685,7 @@
       "key": "undefined condition",
       "rule": "R3",
       "sites": [
-        "internal/validation/validation.go:242"
+        "internal/validation/validation.go:260"
       ],
       "disposition": "claimed",
       "rules": [
@@ -670,7 +698,8 @@
       "key": "invalid condition for type restriction",
       "rule": "R3",
       "sites": [
-        "internal/validation/validation.go:262"
+        "internal/validation/validation.go:280",
+        "internal/validation/validation.go:363"
       ],
       "disposition": "claimed",
       "rules": [
@@ -683,7 +712,7 @@
       "key": "found invalid context parameter: %s",
       "rule": "R3",
       "sites": [
-        "internal/validation/validation.go:287"
+        "internal/validation/validation.go:305"
       ],
       "disposition": "claimed",
       "rules": [
@@ -693,11 +722,21 @@
     },
     {
       "package": "validation",
+      "key": "expected $expression got: %s",
+      "rule": "R3",
+      "sites": [
+        "internal/validation/validation.go:328"
+      ],
+      "disposition": "n/a",
+      "reason": "a defensive guard inside `validateInlineExpressionCondition`, whose only caller dispatches on `IsInlineExpression` first, so it cannot fire. The whole inline-expression path it guards (`$expression`, \"Dynamic Conditions\") is behind the experimental `inline_expressions` flag, off by default, and tsfga does not implement it; with the flag off, upstream refuses `$expression` before validation is reached. The same function is also where three causes disposed above (`condition is missing`, `condition name contains forbidden characters`, `invalid condition for type restriction`) gained their second site, and those second sites are flag-gated in the same way."
+    },
+    {
+      "package": "validation",
       "key": "ValidateObject()",
       "rule": "R2",
       "sites": [
-        "internal/validation/validation.go:311",
-        "internal/validation/validation.go:316"
+        "internal/validation/validation.go:393",
+        "internal/validation/validation.go:398"
       ],
       "disposition": "claimed",
       "rules": [
@@ -712,7 +751,7 @@
       "key": "ValidateRelation()",
       "rule": "R2",
       "sites": [
-        "internal/validation/validation.go:336"
+        "internal/validation/validation.go:418"
       ],
       "disposition": "claimed",
       "rules": [
@@ -725,8 +764,8 @@
       "key": "ValidateUser()",
       "rule": "R2",
       "sites": [
-        "internal/validation/validation.go:364",
-        "internal/validation/validation.go:375"
+        "internal/validation/validation.go:446",
+        "internal/validation/validation.go:457"
       ],
       "disposition": "claimed",
       "rules": [
@@ -740,7 +779,7 @@
       "key": "ValidateStruct()",
       "rule": "R2",
       "sites": [
-        "internal/validation/validation.go:411"
+        "internal/validation/validation.go:493"
       ],
       "disposition": "claimed",
       "rules": [
@@ -754,7 +793,7 @@
       "key": "context value %q contains forbidden characters",
       "rule": "R3",
       "sites": [
-        "internal/validation/validation.go:427"
+        "internal/validation/validation.go:509"
       ],
       "disposition": "claimed",
       "rules": [

@@ -46,7 +46,7 @@ import { ungatedTuple } from "./helpers/ungated.ts";
  * does not (`produceTTUDispatches`). So an undefined relation
  * reached through a tupleset is a `false`, not a refusal, and a fix
  * that raised on every missing config would trade a fail-open for a
- * fail-closed. Probed on v1.18.2: `document:d1#viewer` answers
+ * fail-closed. Probed on v1.22.1: `document:d1#viewer` answers
  * `false` there, with the model accepted.
  */
 

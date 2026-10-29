@@ -240,7 +240,7 @@ describe("evaluateTupleCondition", () => {
 /**
  * The coercion table, ported from OpenFGA's
  * `internal/condition/types/converters.go` and probed against the
- * container at v1.18.2.
+ * container at v1.22.1.
  *
  * `4.5` declared `int` is the case that motivates it. tsfga read
  * it as an ordinary number, CEL compared it, and the condition
@@ -385,7 +385,7 @@ describe("integer parameters are read as bigint", () => {
   });
 
   test("uint saturates at the int64 ceiling, not the uint64 one", () => {
-    // Measured against v1.18.2, which is the only reason this is
+    // Measured against v1.22.1, which is the only reason this is
     // not the obvious bound: every numeric string goes through the
     // same `bigFloat.Int64()`, and the uint branch only rejects
     // the result afterwards for being negative. So a magnitude
@@ -497,7 +497,7 @@ describe("cel-js mixed-type behaviour under bigint", () => {
  * with no finite binary form is an error rather than the nearest
  * double, which is why `"0.1"` is refused and `1.5` is not.
  *
- * Every one of these was measured on v1.18.2. `double` used to
+ * Every one of these was measured on v1.22.1. `double` used to
  * inherit the whole `Number()` grammar, so the first four answered
  * where upstream refuses to read the value at all.
  */
@@ -1378,7 +1378,7 @@ describe("an expression is checked against its declarations", () => {
  * The numbers below are the contract. Two of them are upstream's
  * own unit table (`internal/condition/condition_test.go`) and three
  * are the boundary the conformance suite measured against the
- * v1.18.2 container; if the transcription drifts, these move before
+ * v1.22.1 container; if the transcription drifts, these move before
  * any answer does.
  */
 describe("the evaluation cost budget", () => {

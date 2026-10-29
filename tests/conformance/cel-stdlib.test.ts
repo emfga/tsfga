@@ -196,7 +196,7 @@ describe("CEL standard library conformance", () => {
    * into first, because the carrier that makes `type(n) == uint`
    * true is what leaves the `int` overload unmatched.
    *
-   * Measured against v1.18.2: upstream answers `true` for all
+   * Measured against v1.22.1: upstream answers `true` for all
    * three and tsfga raises `ConditionEvaluationError`.
    */
   describe("int() of a timestamp, a duration or a uint", () => {

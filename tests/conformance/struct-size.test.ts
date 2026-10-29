@@ -44,7 +44,7 @@ import {
  * padding upstream accepts, and then asserts that tsfga accepts
  * the same padding and refuses one more. So the boundary is never
  * hard-coded and never derived from tsfga's own arithmetic:
- * `proto.Size` in v1.18.2 is the only authority
+ * `proto.Size` in v1.22.1 is the only authority
  * (`pkg/server/commands/write.go:159`).
  */
 

@@ -349,7 +349,7 @@ export class InvalidConditionalTupleError extends TsfgaError {
  * store it: `Reason: cannot write a tuple that is implicit`.
  *
  * Refused on the **write** path only. A contextual tuple of the
- * same shape is accepted upstream — measured on v1.18.2, with a
+ * same shape is accepted upstream — measured on v1.22.1, with a
  * control proving the field was honoured — so the asymmetry is
  * deliberate, not an oversight about where the check belongs.
  */
@@ -494,7 +494,7 @@ export type RelationConfigDefect =
    * feed, carriage return and space — and **nothing wider**. There
    * is no general control-character rule here: U+000B, U+0001,
    * U+007F, U+0085, U+00A0, U+2028 and U+3000 are all stored,
-   * measured against the v1.18.2 container. The bound counts code
+   * measured against the v1.22.1 container. The bound counts code
    * points, not bytes and not UTF-16 units.
    */
   | "malformed type name"
@@ -541,7 +541,7 @@ export type RelationConfigDefect =
    * Upstream refuses it in `validateNames`
    * (`pkg/typesystem/typesystem.go`), which looks at type and
    * relation names and at **nothing else**. It is deliberately not
-   * a condition-name rule: v1.18.2 stores a condition named `self`
+   * a condition-name rule: v1.22.1 stores a condition named `self`
    * without complaint, measured against the container.
    *
    * Separate from `"malformed type name"` and
@@ -572,6 +572,12 @@ export type RelationConfigDefect =
   | "tupleset relation admits a userset"
   /** A tupleset relation may not be assignable to a wildcard. */
   | "tupleset relation admits a wildcard"
+  /**
+   * A type restriction's `relation` is present but empty
+   * (`pkg/typesystem/error.go:167-173` at v1.22.1). Absent is a
+   * direct restriction; `""` names no relation at all.
+   */
+  | "empty relation reference"
   /** A type restriction names a condition the store has not got. */
   | "undefined condition"
   /**

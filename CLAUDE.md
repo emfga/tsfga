@@ -1047,6 +1047,14 @@ Useful entry points inside the checkout:
   `git -C "$OPENFGA_REPO" describe --tags` and confirm it matches the
   OpenFGA version in `compose.yaml`. A stale checkout will confidently
   describe behavior the running container no longer has.
+- **Bare `file.go:NNN` references in comments were read at
+  v1.18.2** unless a tag is written beside them. The container moved
+  to v1.22.1 and those files shifted, so treat such a line number
+  as a pointer into v1.18.2 (`560d5d3`), not into the pinned
+  checkout. Behaviour claims that say "measured on v1.22.1" are the
+  ones the conformance suite re-measures against the container.
+  Provenance notes ("ported from … v1.18.2") name where a fixture
+  was copied from, and still hold.
 - **The running container beats the checkout.** When source reading and
   a conformance test disagree, the container is right — write a
   conformance test to settle it rather than arguing from the Go code.

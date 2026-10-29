@@ -93,7 +93,7 @@ const SUBJECT = "user_b6";
  *
  * The five UUID spellings are measured: PostgreSQL's `uuid_in`
  * accepts each one and stores it as the same row as the canonical
- * spelling, while OpenFGA v1.18.2 treats each as a distinct id.
+ * spelling, while OpenFGA v1.22.1 treats each as a distinct id.
  */
 const CANONICAL = uuid("alice");
 const OUT_OF_DOMAIN: ReadonlyArray<[string, string]> = [

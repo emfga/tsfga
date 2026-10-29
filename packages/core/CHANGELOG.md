@@ -5,6 +5,38 @@ Notable changes to `@tsfga/core`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
+## Unreleased
+
+### Added
+
+- **`writeRelationConfig` refuses a type restriction whose
+  `relation` is the empty string**, with
+  `InvalidRelationConfigError`, cause `"empty relation reference"`
+  and rule `CONFIG-RESTRICTION-RELATION-EMPTY`. OpenFGA refuses
+  the same shape from v1.19.0 (`the relation type 'user' on
+  'viewer' in object type 'doc' has an empty relation reference`);
+  v1.18.2 crashed on it with HTTP 500. Here `{ type: "user",
+  relation: "" }` was stored as a userset restriction on a
+  relation no config can be named, so it admitted nothing it
+  could ever reach. This tightens what you can write and does not
+  change any check answer. Leave `relation` out for a direct
+  restriction, as before.
+
+### Changed
+
+- **Parity is measured against OpenFGA v1.22.1**, up from v1.18.2.
+  The full conformance suite passes against the new container
+  unchanged, so no answer moved. The write-gate cause inventory
+  (`write-gate-causes.json`) is re-derived from the v1.22.1 source:
+  101 causes over 113 construction sites, up from 98 over 107.
+  The two new model-write causes are claimed by the rule above,
+  and the third, a guard on OpenFGA's experimental inline
+  `$expression` conditions, is `n/a`. That feature sits behind an
+  experimental flag that is off by default, and tsfga does not
+  implement it. Upstream's new corpus case
+  `exclusion_and_exclusion_in_base_with_wildcard` is ported into
+  the conformance suite.
+
 ## 0.7.0 — 2026-08
 
 ### Added

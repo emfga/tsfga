@@ -206,7 +206,7 @@ describe("CEL arithmetic and conversion conformance", () => {
    * negative ends were missing from an earlier ledger and are the
    * reason this block lists four cells rather than two.
    *
-   * Measured against v1.18.2: upstream stores the model and then
+   * Measured against v1.22.1: upstream stores the model and then
    * refuses the check with `integer overflow` / `type conversion
    * error`, and tsfga answers `true`.
    */

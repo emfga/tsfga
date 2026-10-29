@@ -35,7 +35,8 @@ import {
  * `exclusion_and_exclusion_in_base`,
  * `exclusion_and_exclusion_in_subtract`,
  * `exclusion_under_wildcard_in_intersection` and its two
- * variants.
+ * variants. `exclusion_and_exclusion_in_base_with_wildcard` joined
+ * the corpus after v1.18.2 and is ported from v1.22.1.
  *
  * Every expectation is transcribed from upstream's own
  * `expectation:` field rather than derived here, so a shape both
@@ -79,6 +80,7 @@ const NAMES = [
   "wc1",
   "wc2",
   "wc3",
+  "eebw1",
 ] as const;
 
 const uuidMap = new Map<string, string>(
@@ -183,6 +185,12 @@ const TUPLES: AddTupleRequest[] = [
   t("eve", "active", "wc3"),
   t("alice", "verified", "wc3"),
   t("eve", "verified", "wc3"),
+  // exclusion_and_exclusion_in_base_with_wildcard: upstream's bob
+  // is eve here (banned and active), alice is alice (active)
+  t("*", "org_member", "eebw1"),
+  t("eve", "banned", "eebw1"),
+  t("eve", "active", "eebw1"),
+  t("alice", "active", "eebw1"),
 ];
 
 const DIRECT: RelationConfig[] = [
@@ -192,6 +200,7 @@ const DIRECT: RelationConfig[] = [
   cfg("banned", { directlyAssignable: [{ type: USER }] }),
   cfg("active", { directlyAssignable: [{ type: USER }] }),
   cfg("verified", { directlyAssignable: [{ type: USER }] }),
+  cfg("suspended", { directlyAssignable: [{ type: USER }] }),
   cfg("active_wc", {
     directlyAssignable: [{ type: USER, wildcard: true }, { type: USER }],
   }),
@@ -219,6 +228,10 @@ const HELPERS: RelationConfig[] = [
   cfg("h_org_member_not_banned", {
     computedUserset: "org_member",
     excludedBy: "banned",
+  }),
+  cfg("h_org_member_not_banned_not_suspended", {
+    computedUserset: "h_org_member_not_banned",
+    excludedBy: "suspended",
   }),
 ];
 
@@ -267,6 +280,21 @@ const COMPOSED: RelationConfig[] = [
       { type: "computedUserset", relation: "h_org_member_not_banned" },
       { type: "computedUserset", relation: "active" },
       { type: "computedUserset", relation: "verified" },
+    ],
+  }),
+  // (org_member but not banned) but not suspended
+  cfg("ex_and_ex_base_wc", {
+    computedUserset: "h_org_member_not_banned",
+    excludedBy: "suspended",
+  }),
+  // ((org_member but not banned) but not suspended) and active
+  cfg("ex_and_ex_base_wc_int", {
+    intersection: [
+      {
+        type: "computedUserset",
+        relation: "h_org_member_not_banned_not_suspended",
+      },
+      { type: "computedUserset", relation: "active" },
     ],
   }),
 ];
@@ -394,6 +422,17 @@ describe("A5 set-operator composition (upstream corpus)", () => {
     checks("wc_ex_in_int3", [
       ["alice", "wc3", true],
       ["eve", "wc3", false],
+    ]);
+  });
+
+  describe("exclusion_and_exclusion_in_base_with_wildcard", () => {
+    checks("ex_and_ex_base_wc", [
+      ["eve", "eebw1", false],
+      ["alice", "eebw1", true],
+    ]);
+    checks("ex_and_ex_base_wc_int", [
+      ["eve", "eebw1", false],
+      ["alice", "eebw1", true],
     ]);
   });
 

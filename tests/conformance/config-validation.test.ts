@@ -408,7 +408,7 @@ describe("Relation Config Validation Conformance", () => {
    * Upstream refuses `doc:1#blocked@doc:1#blocked` on the Write API
    * — "cannot write a tuple that is implicit" — and **accepts** the
    * same tuple supplied contextually, answering over it. Probed on
-   * v1.18.2 with two controls: a different contextual tuple changes
+   * v1.22.1 with two controls: a different contextual tuple changes
    * the answer, and a contextual tuple the model does not admit is
    * refused, so the field is demonstrably honoured.
    *

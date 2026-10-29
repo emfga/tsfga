@@ -8,7 +8,7 @@ import type { WriteRuleId } from "./write-rules.ts";
  * Validate a relation config against the rules OpenFGA's
  * typesystem applies when it validates a model.
  *
- * Nine shapes are refused, each measured against v1.18.2 as an
+ * Ten shapes are refused, each measured against v1.22.1 as an
  * `invalid_authorization_model` upstream and, before this,
  * accepted here — several of them changing an answer rather than
  * merely widening the write surface:
@@ -25,6 +25,13 @@ import type { WriteRuleId } from "./write-rules.ts";
  * - **a tupleset relation admitting a wildcard.** Refused the same
  *   way upstream; here it resolved to `false` rather than
  *   granting, so it is a write-surface gap only.
+ * - **a type restriction whose `relation` is the empty string.**
+ *   Upstream: `the relation type 'user' on 'viewer' in object type
+ *   'doc' has an empty relation reference`. Refused since v1.19.0;
+ *   v1.18.2 panicked building its graph and answered HTTP 500.
+ *   Here `""` read as a userset restriction on a relation no
+ *   config can be named, so it admitted nothing it could ever
+ *   reach. A restriction without `relation` is unaffected.
  * - **a type restriction naming a condition the store does not
  *   define.** Upstream: `condition nope is undefined for relation
  *   viewer`.
@@ -215,7 +222,17 @@ export async function validateRelationConfigWrite(
     );
   }
 
+  // One pass, relation before condition, in upstream's order:
+  // `validateTypeRestrictions` checks a restriction's relation
+  // reference before the condition it names.
   for (const restriction of config.directlyAssignable) {
+    if (restriction.relation === "") {
+      refuse(
+        "CONFIG-RESTRICTION-RELATION-EMPTY",
+        "empty relation reference",
+        restriction.type,
+      );
+    }
     if (restriction.condition === undefined) continue;
     const definition = await store.findConditionDefinition(
       restriction.condition,
@@ -270,7 +287,7 @@ export async function validateRelationConfigWrite(
  * Two fields, one predicate. `Condition.name` and every key of
  * `Condition.parameters` carry the proto pattern
  * `^[^:#@\s]{1,50}$` — the same character class and the same bound
- * as a relation name, on a different field. Measured on v1.18.2,
+ * as a relation name, on a different field. Measured on v1.22.1,
  * which reports the pattern verbatim: `invalid Condition.Name` for
  * the first and `invalid Condition.Parameters[…]` for the second.
  *
@@ -332,7 +349,7 @@ export function validateConditionWrite(condition: ConditionDefinition): void {
 /**
  * The characters no name in a model may hold — a type's, a
  * relation's, a condition's, or a condition parameter's — measured
- * against v1.18.2 rather than read off a Go file.
+ * against v1.22.1 rather than read off a Go file.
  *
  * The model write path is guarded by protobuf field patterns, not
  * by the typesystem and not by `pkg/tuple`'s `IsValidRelation`:
@@ -368,7 +385,7 @@ function isNameReserved(char: string): boolean {
  *
  * **This is deliberately not applied to `validateConditionWrite`.**
  * `validateNames` walks type definitions and their relation keys
- * and looks at nothing else; v1.18.2 stores a condition named
+ * and looks at nothing else; v1.22.1 stores a condition named
  * `self` without complaint, measured against the container. A
  * tidying pass that "unifies" the two name gates would refuse a
  * definition upstream takes.

@@ -108,7 +108,7 @@ export async function fgaWriteModel(
  * the model, and a helper that re-raised it would report an
  * assertable refusal as a transport failure.
  *
- * Measured against the v1.18.2 container rather than taken from
+ * Measured against the v1.22.1 container rather than taken from
  * the finder's list, which named `relation_invalid_pattern` and
  * `relation_invalid_length`: neither exists in the SDK's
  * `ErrorCode` enum, and neither is what comes back. A relation

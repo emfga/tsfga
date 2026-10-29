@@ -1450,7 +1450,7 @@ describe("check algorithm", () => {
       // Pinned deliberately: it is the only position where the
       // two engines disagree about cycles, it fails closed, and
       // it is documented in the package README. Verified against
-      // OpenFGA v1.18.2 — see tests/conformance/cycles.test.ts,
+      // OpenFGA v1.22.1 — see tests/conformance/cycles.test.ts,
       // which covers every position where they do agree.
       store.relationConfigs.push(
         makeConfig({

@@ -12,6 +12,7 @@ type document_a5
     define active: [user_a5]
     define active_wc: [user_a5:*, user_a5]
     define verified: [user_a5]
+    define suspended: [user_a5]
     define org_member: [user_a5:*, user_a5]
     define u_or_ex: writer or (editor but not owner)
     define i_and_ex: writer and (editor but not owner)
@@ -21,3 +22,5 @@ type document_a5
     define wc_ex_in_int: (org_member but not banned) and active
     define wc_ex_in_int_wc: (org_member but not banned) and active_wc
     define wc_ex_in_int3: (org_member but not banned) and active and verified
+    define ex_and_ex_base_wc: (org_member but not banned) but not suspended
+    define ex_and_ex_base_wc_int: ((org_member but not banned) but not suspended) and active
