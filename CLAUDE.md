@@ -1519,14 +1519,20 @@ and the `register.mjs` file registers the bun:test loader.
 `"bun:test"` to a local shim that re-exports `@std/testing/bdd` and
 `@std/expect`. The import map also maps `@marcbachmann/cel-js` to its
 `npm:` equivalent, and `nodeModulesDir: "auto"` lets Deno *manage*
-`node_modules/` itself, resolving `npm:` specifiers through the nearest
-`package.json` rather than reusing whatever Bun installed. That is why
-the bare `npm:kysely`-style specifiers in the import map are already
-pinned — the versions come from the workspace manifests, which are
-exact. Adding an explicit version that disagrees with the consuming
-`package.json` makes Deno install a second copy under
-`node_modules/.deno`, so leave them bare. No transpiler needed (Deno
-has native TypeScript support). Tests run via:
+its own `tests/deno/node_modules/` rather than reusing whatever Bun
+installed. **The bare `npm:kysely`-style specifiers are pinned by
+`tests/deno/deno.lock`, not by the workspace manifests**: no
+`package.json` beside `deno.json` names them, so each resolves as
+`npm:kysely@*` and the lockfile records the version. Bumping a
+dependency in a `package.json` does not move the Deno legs — the lock
+has to move with it. Renovate does that: `rangeStrategy:
+update-lockfile` on the deno manager puts the lock update in the same
+branch as the npm bump, and lock-file maintenance refreshes the rest
+(the `jsr:@std/*` shim dependencies). To regenerate it by hand, delete
+both `tests/deno/deno.lock` and `tests/deno/node_modules/` — Deno
+re-resolves from that directory before the registry — then run
+`deno cache --config tests/deno/deno.json` over the test files. No
+transpiler needed (Deno has native TypeScript support). Tests run via:
 `deno test --allow-all --config ../../tests/deno/deno.json tests/`.
 
 The shims cover: `describe`, `test`, `beforeEach`, `afterEach`,

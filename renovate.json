@@ -55,6 +55,11 @@
   ],
   "packageRules": [
     {
+      "description": "tests/deno/deno.json imports npm packages unversioned, so tests/deno/deno.lock is their only pin. Update the lock in place, so a dependency's Deno lock entry lands in the same branch as its package.json bump instead of waiting for lock-file maintenance.",
+      "matchManagers": ["deno"],
+      "rangeStrategy": "update-lockfile"
+    },
+    {
       "description": "Each CI matrix entry stands for one supported Bun line, so it takes patches only. Moving an entry to a newer line would silently drop the older line from CI; a new line is added by hand.",
       "matchManagers": ["custom.regex"],
       "matchFileNames": [".github/workflows/ci.yml"],
