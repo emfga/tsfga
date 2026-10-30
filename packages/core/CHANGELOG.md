@@ -5,7 +5,7 @@ Notable changes to `@tsfga/core`. The format is based on
 follow [Semantic Versioning](https://semver.org/) (pre-1.0: minor
 releases may contain breaking changes).
 
-## Unreleased
+## 0.7.1 — 2026-10-29
 
 ### Added
 
@@ -36,6 +36,18 @@ releases may contain breaking changes).
   implement it. Upstream's new corpus case
   `exclusion_and_exclusion_in_base_with_wildcard` is ported into
   the conformance suite.
+
+- **Bun 1.3 is the oldest supported Bun**, up from 1.2. CI now
+  tests the newest patch of each supported line, 1.3 and 1.4, and
+  no longer runs 1.2.23, so 1.2 is no longer claimed. Node.js
+  (`>= 22.12.0`) and Deno (`>= 2.6`) support is unchanged.
+
+- Built with tsup 9, which upgrades esbuild. The emitted code is
+  equivalent: class fields declared through constructor
+  parameters now also appear as field declarations, and the
+  type declarations list type-only exports in a separate
+  `export type {}`. The development toolchain moves to Bun 1.4,
+  and releases are published from Node 26.
 
 ## 0.7.0 — 2026-08
 

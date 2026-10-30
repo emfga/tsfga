@@ -18,7 +18,7 @@
     },
     "packages/core": {
       "name": "@tsfga/core",
-      "version": "0.7.0",
+      "version": "0.7.1",
       "dependencies": {
         "@marcbachmann/cel-js": "8.0.0",
       },
