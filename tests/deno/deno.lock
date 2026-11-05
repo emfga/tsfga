@@ -10,7 +10,7 @@
     "npm:@marcbachmann/cel-js@8.0.0": "8.0.0",
     "npm:@openfga/sdk@*": "0.9.7",
     "npm:@openfga/syntax-transformer@*": "0.2.2",
-    "npm:kysely@*": "0.29.7",
+    "npm:kysely@*": "0.29.8",
     "npm:pg@*": "8.23.1",
     "npm:yaml@*": "2.9.1"
   },
@@ -227,8 +227,8 @@
     "json-schema-traverse@1.0.0": {
       "integrity": "sha512-NM8/P9n3XjXhIZn1lLhkFaACTOURQXjWhV4BA/RnOv8xvgqtqpAX9IO4mRQxSx1Rlo4tqzeqb0sOlruaOy3dug=="
     },
-    "kysely@0.29.7": {
-      "integrity": "sha512-fmIq+7kv4WbFm2tcfznRzikqB4cuNpgZ40PSU2fAJ2/OO5XhojqnTPrmgrCjYSRJVwBln03XcRXJGnw9H099IQ=="
+    "kysely@0.29.8": {
+      "integrity": "sha512-ixHU1H4R+LeC5Y0nAhYgiGRFpFRHm2DXKEmJSs/vbes9sKXyssyzxzE/NYiOJX5fY0BL28biCre3GqlCqUwyXQ=="
     },
     "math-intrinsics@1.1.0": {
       "integrity": "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="
