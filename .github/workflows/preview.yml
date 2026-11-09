@@ -50,7 +50,7 @@ jobs:
 
       - name: Publish preview packages
         run: >-
-          bunx pkg-pr-new@0.0.92 publish
+          bunx pkg-pr-new@0.0.93 publish
           --comment=update
           './packages/core'
           './packages/kysely'
