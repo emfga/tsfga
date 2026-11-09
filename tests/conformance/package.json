@@ -16,7 +16,7 @@
     "@openfga/syntax-transformer": "0.2.2",
     "@types/bun": "1.4.4",
     "@types/pg": "8.23.1",
-    "kysely": "0.29.7",
+    "kysely": "0.29.8",
     "pg": "8.23.1",
     "typescript": "6.0.3",
     "yaml": "2.9.1"
