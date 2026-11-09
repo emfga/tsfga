@@ -63,7 +63,7 @@
     "@tsfga/core": "workspace:*",
     "@types/bun": "1.4.4",
     "@types/pg": "8.23.1",
-    "kysely": "0.29.7",
+    "kysely": "0.29.8",
     "kysely-codegen": "0.20.0",
     "kysely-ctl": "0.22.0",
     "pg": "8.23.1",
