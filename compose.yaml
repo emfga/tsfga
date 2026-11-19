@@ -21,7 +21,7 @@ services:
       start_period: 30s
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       timeout: 10s
-    image: postgres:18-alpine@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5
+    image: postgres:18-alpine@sha256:ff64c9e3bdf8e2120107d3559de8db314e8305f7e38c5105903c6295876738ff
     ports:
       - ${POSTGRES_PORT:-5432}:5432
     restart: unless-stopped
