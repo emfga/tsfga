@@ -13,7 +13,7 @@
     "@tsfga/core": "workspace:*",
     "@tsfga/kysely": "workspace:*",
     "@openfga/sdk": "0.9.7",
-    "@openfga/syntax-transformer": "0.2.2",
+    "@openfga/syntax-transformer": "0.2.3",
     "@types/bun": "1.4.4",
     "@types/pg": "8.23.1",
     "kysely": "0.29.7",
