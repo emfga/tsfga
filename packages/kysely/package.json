@@ -61,7 +61,7 @@
   },
   "devDependencies": {
     "@tsfga/core": "workspace:*",
-    "@types/bun": "1.4.4",
+    "@types/bun": "1.4.5",
     "@types/pg": "8.23.1",
     "kysely": "0.29.7",
     "kysely-codegen": "0.20.0",
