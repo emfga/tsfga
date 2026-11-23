@@ -52,7 +52,7 @@
     "@marcbachmann/cel-js": "8.0.0"
   },
   "devDependencies": {
-    "@types/bun": "1.4.4",
+    "@types/bun": "1.4.5",
     "tsup": "9.0.0",
     "typescript": "6.0.3"
   }
